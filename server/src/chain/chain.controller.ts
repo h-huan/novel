@@ -194,7 +194,7 @@ import { causalEvidenceAnchors, applyCausalAuditRepair, causalAuditRepairPrompt,
 import { chapterReviewRetryContent, chapterReviewRetrySource, chapterReviewRetryTimePlan } from './chapter-review-retry';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { prohibitedFictionNames, normalizeGeneratedFictionNames } from '../../shared/src/fiction-naming';
-import { chapterDetailStructureIssues } from './chapter-detail-contract';
+import { chapterDetailStructureIssues, chapterDetailJsonExample } from './chapter-detail-contract';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
 const projectMetricsContext = new AsyncLocalStorage<string | null>();
@@ -8701,7 +8701,7 @@ ${(() => {
 10. 情绪基调 (emotionalTone) — 简短描述本章情绪走向。
 
 只输出一个合法JSON对象，不要数组、解释或Markdown。`;
-          const chapterJsonExample = `\n【JSON结构示例，仅示范字段，不得复制示例内容】{"title":"本章标题","targetWords":3500,"wordCountReason":"依据本章场景、冲突强度与剩余总字数确定","content":"按本章职责顺序概括必要事件链与结果","scenes":[{"location":"具体地点","goal":"本场目标","conflict":"本场阻碍","outcome":"本场结果"}],"characterActions":[{"character":"人物名","action":"本章实际行动","result":"行动结果"}],"conflicts":[{"name":"冲突名","parties":["A","B"],"trigger":"触发条件","escalation":"升级路径","resolution":"本章解决程度"}],"highlights":[],"foreshadowing":[],"foreshadowingRecover":[],"characterStates":[],"hook":"${isFinalChapter ? '可留空或填写终章余韵' : '只引出下一步动机或障碍'}","emotionalTone":"情绪基调"}`;
+          const chapterJsonExample = chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter);
 
           // help: coerce string to single-element array
           const toArray = (v: any): any[] => Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? [v] : []);
