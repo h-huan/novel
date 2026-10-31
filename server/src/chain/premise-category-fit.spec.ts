@@ -140,6 +140,14 @@ it('retains every selected category standard and all surrounding instructions wh
   expect(subset).toContain(rules[0].standard);
   expect(subset).toContain(rules[2].standard);
   expect(subset).not.toContain(rules[1].standard);
+  // Source-scoped reselection must include category rules for an unused but
+  // legally selectable fixed-pool replacement, not only the retained cards.
+  const combined=scopePremiseReviewCategoryStandards(standard,[
+    {storyCategory:'年代'},{storyCategory:'都市日常'},
+  ]);
+  expect(combined).toContain(rules[0].standard);
+  expect(combined).toContain(rules[1].standard);
+  expect(combined).not.toContain(rules[2].standard);
   expect(subset).toContain('【服务器分类编号目录】保留原来全部类别的身份核查');
   expect(subset).toContain('【流派定义】所有原始流派标准保留');
   expect(scopePremiseReviewCategoryStandards(standard,[{storyCategory:'未知分类'}])).toBe(standard);
