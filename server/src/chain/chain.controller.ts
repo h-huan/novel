@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import { missingRequestedIdeaSlots, affordableFullCardRefillCount, preselectionRecoveryTarget } from './discovery-fulfillment';
+import { missingRequestedIdeaSlots, affordableFullCardRefillCount, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -6785,16 +6785,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectScope=async(slots:typeof repairPlan.repairSlots):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
-      // No paid reselection can be accepted without an independent source/payoff
-      // verdict for its changed facts. Do not spend the remaining selection call
-      // when the shared review allowance is already zero: the prior failed
-      // review remains authoritative and the affected identities stay isolated.
-      if(shared && shared.reviews.remaining<=0){
-        reselectionStopReason='锁定前独立复核共享调用额度已耗尽，未发起无法验收的原池重选';
-        return false;
-      }
       const scopedSlots=slots.map(slot=>String(slot.replacesPremiseId)===poolHedgeId
         ?{...slot,mode:'replace_from_pool' as const}:slot);
+      // A replacement changes both its own source/payoff evidence and every
+      // pair involving it. Do not spend the reselection call unless the
+      // existing shared budget can at least start both independent Gates.
+      // A causal-plan-only correction needs its one payoff recheck instead.
+      const requiredReviewCalls=minimumReselectionReviewCalls(
+        selected.selected.length,scopedSlots.some(slot=>slot.mode==='replace_from_pool'));
+      if(shared && shared.reviews.remaining<requiredReviewCalls){
+        reselectionStopReason='锁定前独立复核额度不足以覆盖重选后的来源及同构审核，未发起无法验收的原池重选';
+        return false;
+      }
       const ids=new Set<string>(scopedSlots.map(slot=>String(slot.replacesPremiseId)));
       const scopedReview:PremiseSelectionReview={passed:false,issues:scopedSlots.flatMap(slot=>
         slot.issues.map(issue=>String(issue.premiseId)===poolHedgeId
