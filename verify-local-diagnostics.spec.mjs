@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+
+test('discovery performance acceptance uses real request wall-clock time regardless of 5/5 quality success',()=>{
+ const base={available:true,startedAt:'2026-10-31T05:15:33.587Z'};
+ assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:22:33.587Z'}),
+   {measured:true,wallMs:420000,passed:true});
+ assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:23:33.587Z'}),
+   {measured:true,wallMs:480000,passed:false});
+ assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:29:20.031Z'}),
+   {measured:true,wallMs:826444,passed:false});
+ assert.equal(discoveryEightMinuteCheck({available:true,startedAt:null,finishedAt:null}).measured,false);
+});
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
   const audit = normalizeIdeaDiscoveryAudit({
