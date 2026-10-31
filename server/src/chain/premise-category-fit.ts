@@ -63,6 +63,16 @@ export function premiseCategoryReviewDirective(selection: PremiseSelectionResult
  * independent source-review batch. The full verified standards remain in the
  * controller and in the model-independent quality Gate; unrelated categories
  * cannot change whether this batch's specific stories fit their own genre. */
+/** The causal/payoff and overlap reviews consume already-reviewed category/genre
+ * verdicts. Keep the full platform and author contract but omit the redundant
+ * category catalogue and following genre glossary from these two specialist
+ * prompts. Source/category/genre review still receives the complete standard. */
+export function corePremiseReviewStandard(standard:string):string {
+ const marker='\\n【与完整卡一致的分类标准】';
+ const index=standard.lastIndexOf(marker);
+ return index>=0?standard.slice(0,index):standard;
+}
+
 export function scopePremiseReviewCategoryStandards(
   standard: string, selected: readonly Record<string, unknown>[],
 ): string {
