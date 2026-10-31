@@ -49,6 +49,18 @@ export function normalizeProjectIntegrityAudit(value) {
   return isRecord(root.audit) ? { ...root, ...root.audit } : root;
 }
 
+/** Check the REAL discovery request window, not the sum of parallel LLM
+ * durations or a single phase. A 5/5 result taking 13 minutes is not a
+ * successful under-8-minute acceptance. No production budget is changed. */
+export function discoveryEightMinuteCheck(audit) {
+ const started=Date.parse(String(audit?.startedAt||''));
+ const finished=Date.parse(String(audit?.finishedAt||''));
+ if(!audit?.available||!Number.isFinite(started)||!Number.isFinite(finished)||finished<started)
+   return {measured:false,wallMs:null,passed:false};
+ const wallMs=finished-started;
+ return {measured:true,wallMs,passed:wallMs<480000};
+}
+
 export function normalizeIdeaDiscoveryAudit(value) {
   const root = isRecord(value?.data) ? value.data : (isRecord(value) ? value : {});
   const envelope = isRecord(root.audit) ? root.audit : root;
