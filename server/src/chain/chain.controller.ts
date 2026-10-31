@@ -8717,6 +8717,32 @@ ${(() => {
               projectId, chapterIndex: order + 1, stepKey: 'creation_chapter_detail',
               validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
               describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
+              // The same model's existing second attempt must receive the
+              // CURRENT chapter interval, a complete JSON shape and actionable
+              // field errors. Echoing a malformed raw object verbatim (up to
+              // 60K chars) can dominate the retry and reproduce its wrong
+              // structure. The authoritative story, world, chapter plan and
+              // unchanged quality policies all remain in chapterPrompt.
+              validationRetryPrompt: previousRaw => {
+                const parsed=this.safeExtractJson<any>(previousRaw,null);
+                const prior=unwrapChapter(parsed,order+1,true);
+                const issues=assessChapter(prior);
+                const hasUsefulDraft=prior && typeof prior.content==='string'
+                  && prior.content.trim().length>0
+                  && (Array.isArray(prior.scenes)||Array.isArray(prior.characterActions));
+                const draft=hasUsefulDraft?JSON.stringify(prior):'';
+                return chapterPrompt+chapterJsonExample
+                  +'\n【第'+(order+1)+'章结构退回，仍是原有第二次尝试】'
+                  +'\n必须一次性修正全部字段问题：'+issues.join('；')
+                  +'\n真实目标字数区间='+allowedMin+'-'+allowedMax
+                  +'；JSON字段必须位于顶层，title、wordCountReason、content、非空scenes、非空characterActions'
+                  +(isFinalChapter?'':'、非空hook')+'均需返回。'
+                  +'\n本次必须输出完整、独立可解析的单个JSON对象，不能只返回错误、分析、修复片段、差异补丁或包裹说明。'
+                  +(draft&&draft.length<=24000
+                    ?'\n【上一版已写的事件事实：仅保留与已确认故事一致的内容，不能照抄错误格式】'+draft
+                    :'\n上一版缺少可安全复用的完整事件事实，直接从本章原始确认资料重新填写全部字段。')
+                  +'\n不得改变确认题材、已确认前章、世界规则或本章唯一职责；全部原有完整性、因果和终审校验继续执行。';
+              },
             },
           );
           warnings.push(...chapterResult.warnings);
