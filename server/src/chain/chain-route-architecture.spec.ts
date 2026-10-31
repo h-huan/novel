@@ -43,7 +43,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("if(Number(longActivation.changes)!==1)throw");
     expect(source).toContain("if(Number(shortActivation.changes)!==1)throw");
     // Existing failed-project and active-project resumes remain authorized.
-    expect(source.match(/status IN \\('creating','generation_failed','active'\\)/g)).toHaveLength(2);
+    expect(source.split("status IN ('creating','generation_failed','active')").length - 1).toBe(2);
   });
 
   it('keeps broad premise search as a non-blocking target before full idea cards', () => {
