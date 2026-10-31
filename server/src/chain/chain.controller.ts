@@ -8638,11 +8638,13 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           if (Array.isArray(value?.chapters)) {
             const objects = value.chapters.filter((item: any) => item && typeof item === 'object');
             if (objects.length >= 1) {
-              if (objects.length > 1) warnings.push(`${label}LLM 在 chapters 字段内返回了 ${objects.length} 个对象，已自动取第一个作为本章纲`);
-              return objects[0          const normalized=unwrapSingleChapterEnvelope(value);
+              if (objects.length > 1 && !silent) warnings.push(`${label}LLM 在 chapters 字段内返回了 ${objects.length} 个对象，已自动取第一个作为本章纲`);
+              return objects[0];
+            }
+          }
+          const normalized=unwrapSingleChapterEnvelope(value);
           return normalized && typeof normalized==='object'&&!Array.isArray(normalized)
             ?normalized as Record<string,any>:null;
-=== 'object' ? value : null;
         };
 
         for (const [chapterIndex, expectedChapter] of chapterTitles.entries()) {
