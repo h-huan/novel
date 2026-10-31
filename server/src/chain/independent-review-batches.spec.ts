@@ -1,7 +1,33 @@
 import { describe, it, expect, vi } from 'vitest';
 import { independentReviewBatches } from './independent-review-batches';
+import { reserveFinalRefillReviewCapacity } from './discovery-fulfillment';
 
 describe('independent review scheduling', () => {
+  it('runs nested initial reviews concurrently while preserving exactly two original credits for final-card refill',async()=>{
+    const parent={remaining:12};
+    const scoped=reserveFinalRefillReviewCapacity(parent,4,2);
+    const initial=await independentReviewBatches(['source','overlap'],scoped,2,
+      async(mode,_index,budget)=>{
+        if(mode==='source'){
+          await independentReviewBatches([0,1,2],budget,3,async(_item,_inner,credit)=>{
+            credit.remaining--;return true;
+          });
+        }else budget.remaining--;
+        return mode;
+      });
+    expect(initial).toEqual(['source','overlap']);
+    expect(parent.remaining).toBe(8);expect(scoped.remaining).toBe(6);
+    // Paid correction can spend all of its remaining escrowed credits, not
+    // the two already protected for the independent post-card refill.
+    await independentReviewBatches([0,1,2,3,4,5],scoped,3,async(_item,_i,credit)=>{
+      credit.remaining--;return true;
+    });
+    expect(scoped.remaining).toBe(0);expect(parent.remaining).toBe(2);
+    await independentReviewBatches(['refill-source','refill-overlap'],parent,2,
+      async(_item,_i,credit)=>{credit.remaining--;});
+    expect(parent.remaining).toBe(0);
+  });
+
   it('replays recorded batch durations to verify reduced scheduling wait, without model calls', async () => {
     vi.useFakeTimers();
     try {
