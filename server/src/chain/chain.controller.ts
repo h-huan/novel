@@ -1,5 +1,5 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import { missingRequestedIdeaSlots, affordableFullCardRefillCount, affordableReviewedPremiseCount, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
+import { missingRequestedIdeaSlots, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -5590,12 +5590,24 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const preselectionReviewStartedAt = Date.now();
         let normalizedSelection: any;
         try {
+          // Reserve only from the SAME physical-call allowance, and only
+          // when enough credits remain for the initial full source+pair audit.
+          // The complete-card Gate may still reject preselected stories; if
+          // original-pool corrections consume all reviews, a genuine refill
+          // becomes impossible even when fresh light seeds exist.
+          const sourceGrouping=readGenerationBudgets();
+          const preselectionReviewFloor=premiseReviewCallFloor(
+            initialSelection.selected.length,sourceGrouping.sourceBatchSize,
+            sourceGrouping.reviewGroupingMode);
+          const refillReviewFloor=requestedCount>1?2:1;
+          const initialReviewAllowance=reserveFinalRefillReviewCapacity(
+            sourceCompletionBudget,preselectionReviewFloor,refillReviewFloor);
           normalizedSelection = await this.reconcilePremiseSelection(
             initialSelection, preselectionTarget, premisePoolSize,
             variedCategories ? discoveryCategories : [dto.storyCategory],
             preselectionAuditStandard,
             dto.webNovelGenre,
-            { reviews: sourceCompletionBudget, reselection: reselectionCompletionBudget }, requestedCount,
+            { reviews: initialReviewAllowance, reselection: reselectionCompletionBudget }, requestedCount,
           );
         } catch (error) {
           const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
