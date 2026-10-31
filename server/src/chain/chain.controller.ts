@@ -8642,6 +8642,21 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               return objects[0];
             }
           }
+          // Some JSON-capable providers wrap an otherwise complete single
+          // chapter as {data:{...}}, {result:{...}} or {outline:{...}}.
+          // Passing the empty outer envelope to the strict GEN-005 validator
+          // produced "all required fields missing" even when an inner chapter
+          // exists. Only unwrap an OBJECT with recognizable chapter fields;
+          // never manufacture absent story text or bypass the same validator.
+          if(value && typeof value==='object'&&!Array.isArray(value)){
+            for(const key of ['data','result','outline'] as const){
+              const nested=value[key];
+              if(nested && typeof nested==='object'&&!Array.isArray(nested)
+                && ['title','content','scenes','characterActions','targetWords']
+                  .some(field=>Object.prototype.hasOwnProperty.call(nested,field)))
+                return nested;
+            }
+          }
           return value && typeof value === 'object' ? value : null;
         };
 
