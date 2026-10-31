@@ -194,7 +194,7 @@ import { causalEvidenceAnchors, applyCausalAuditRepair, causalAuditRepairPrompt,
 import { chapterReviewRetryContent, chapterReviewRetrySource, chapterReviewRetryTimePlan } from './chapter-review-retry';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { prohibitedFictionNames, normalizeGeneratedFictionNames } from '../../shared/src/fiction-naming';
-import { chapterDetailStructureIssues, chapterDetailJsonExample } from './chapter-detail-contract';
+import { chapterDetailStructureIssues, chapterDetailJsonExample, unwrapSingleChapterEnvelope } from './chapter-detail-contract';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
 const projectMetricsContext = new AsyncLocalStorage<string | null>();
@@ -8639,30 +8639,10 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
             const objects = value.chapters.filter((item: any) => item && typeof item === 'object');
             if (objects.length >= 1) {
               if (objects.length > 1) warnings.push(`${label}LLM 在 chapters 字段内返回了 ${objects.length} 个对象，已自动取第一个作为本章纲`);
-              return objects[0];
-            }
-          }
-          // Some JSON-capable providers wrap an otherwise complete single
-          // chapter as {data:{...}}, {result:{...}} or {outline:{...}}.
-          // Passing the empty outer envelope to the strict GEN-005 validator
-          // produced "all required fields missing" even when an inner chapter
-          // exists. Only unwrap an OBJECT with recognizable chapter fields;
-          // never manufacture absent story text or bypass the same validator.
-          if(value && typeof value==='object'&&!Array.isArray(value)){
-            // Never prefer incidental nested metadata over an actual top-level
-            // chapter. A wrapper is eligible only when the outer level has
-            // none of the chapter fields checked by the unchanged validator.
-            if(['title','content','scenes','characterActions','targetWords']
-              .some(field=>Object.prototype.hasOwnProperty.call(value,field)))return value;
-            for(const key of ['data','result','outline'] as const){
-              const nested=value[key];
-              if(nested && typeof nested==='object'&&!Array.isArray(nested)
-                && ['title','content','scenes','characterActions','targetWords']
-                  .some(field=>Object.prototype.hasOwnProperty.call(nested,field)))
-                return nested;
-            }
-          }
-          return value && typeof value === 'object' ? value : null;
+              return objects[0          const normalized=unwrapSingleChapterEnvelope(value);
+          return normalized && typeof normalized==='object'&&!Array.isArray(normalized)
+            ?normalized as Record<string,any>:null;
+=== 'object' ? value : null;
         };
 
         for (const [chapterIndex, expectedChapter] of chapterTitles.entries()) {
