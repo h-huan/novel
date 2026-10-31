@@ -1,5 +1,16 @@
 import {it,expect} from 'vitest';
-import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections} from './outline-fact-patch';
+import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, extractOutlineFactPatch} from './outline-fact-patch';
+it('unpacks an independently audited factual patch without inventing story changes',()=>{
+ const patch={'characterActions.0.result':'客户收到函件，但未签署续约协议'};
+ expect(extractOutlineFactPatch({patch})).toEqual(patch);
+ expect(extractOutlineFactPatch({data:{patch}})).toEqual(patch);
+ expect(extractOutlineFactPatch({result:{patch}})).toEqual(patch);
+ for(const invalid of [null,{patch:{}},{patch:[]},{content:'直接重写整章'}, {data:{status:'ok'}},{patch:'text'}])
+   expect(()=>extractOutlineFactPatch(invalid)).toThrow('非空patch对象');
+ expect(()=>applyOutlineFactPatch({characterActions:[{result:'客户已签署续约协议'}]},
+   extractOutlineFactPatch({patch}))).not.toThrow();
+});
+
 const original={content:'保留原场景。',targetWords:5000,chapterFunction:'既有职责',characterActions:[{action:'对手不知道秘密。',result:'秘密保留。'}],foreshadowing:[{content:'旧伏笔',plannedRecoveryChapter:4}]};
 it('applies dot and bracket addresses atomically while preserving all other fields and the original',()=>{
  const before=JSON.stringify(original);
