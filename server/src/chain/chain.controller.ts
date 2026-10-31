@@ -14,7 +14,7 @@ import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { independentReviewBatches } from './independent-review-batches';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
-import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards } from './premise-category-fit';
+import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
@@ -6453,7 +6453,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   ): Promise<PremiseSelectionReview> {
     const validate=(value:unknown)=>premisePayoffReviewIssues(value,selection);
     const response=await this.llmCallWithRetry<any>('已核对题材的因果引用定向复核',
-      standard
+      corePremiseReviewStandard(standard)
       +'\n本批仅有causalPlan原文引用与因果索引发生变化；原池storyCore和全部展开叙事字段均未改变。'
       +'来源继承、分类机制、指定流派原审查仍有效，不重写或猜测那些结论。'
       +'但原payoff缺口仍是阻断，不得沿用旧通过结论或仅因为引用修正就宣告因果成立。'
@@ -6518,13 +6518,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // The caller appends this server-owned marker after any custom platform
     // note. Use the LAST occurrence so author text cannot accidentally cut
     // off the locked settings or platform contract.
-    const optionalStandardBoundary='\n【与完整卡一致的分类标准】';
-    const standardBoundary=standard.lastIndexOf(optionalStandardBoundary);
-    const reviewStandard=mode==='overlap'&&standardBoundary>=0
-      ? standard.slice(0,standardBoundary)
-      : mode==='source_drift'
-        ? scopePremiseReviewCategoryStandards(standard,selection.selected)
-        : standard;
+    const reviewStandard=mode==='overlap'
+      ? corePremiseReviewStandard(standard)
+      : scopePremiseReviewCategoryStandards(standard,selection.selected);
     const result = await runReview(()=>this.llmCallWithRetry<any>('锁定前题材独立复核：' + mode,
       reviewStandard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + (mode === 'source_drift'
