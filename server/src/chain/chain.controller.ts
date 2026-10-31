@@ -5133,7 +5133,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           : { selectedPremises: premiseSchema.selectedPremises };
         const phaseContext = promptPhase === 'pool'
           ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。只输出pool；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
-          : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。';
+          : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。原池【必要条件】每项具体能力、既有关系、证据取得与转交、在场动机和决定权限必须体现在对应已选叙事字段（处境、选择、升级或兑现）中，不得只在causalPlan索引、原池引用或最后结果中出现；若原池自身缺乏关键条件，不要选中该项。保留原有执行主体、事实时间和结局方向，不靠新增事实填空。';
         const priorDefectContext = promptPhase === 'pool' && options.failureReasons?.length
           ? '\n【已拒绝的因果缺陷样例：仅用于避免再次生成同类错误，不得复写旧故事、也不得篡改审核结论】'
             + JSON.stringify(options.failureReasons.slice(-8).map(reason => String(reason).slice(0,380)))
@@ -6785,6 +6785,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const reselectScope=async(slots:typeof repairPlan.repairSlots):Promise<boolean>=>{
       if(!slots.length)return true;
       if(reselectionBudget.remaining<=0){reselectionStopReason='原池重选共享物理调用额度已耗尽，未处理位置隔离';return false;}
+      // No paid reselection can be accepted without an independent source/payoff
+      // verdict for its changed facts. Do not spend the remaining selection call
+      // when the shared review allowance is already zero: the prior failed
+      // review remains authoritative and the affected identities stay isolated.
+      if(shared && shared.reviews.remaining<=0){
+        reselectionStopReason='锁定前独立复核共享调用额度已耗尽，未发起无法验收的原池重选';
+        return false;
+      }
       const scopedSlots=slots.map(slot=>String(slot.replacesPremiseId)===poolHedgeId
         ?{...slot,mode:'replace_from_pool' as const}:slot);
       const ids=new Set<string>(scopedSlots.map(slot=>String(slot.replacesPremiseId)));
