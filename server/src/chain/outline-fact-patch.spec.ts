@@ -12,7 +12,7 @@ it('locates only real authorized current-chapter action and result fields for a 
  ]};
  const before=JSON.stringify(chapter);
  expect(outlineFactRepairTargetPaths(chapter,evidence)).toEqual([
-   'characterActions[0].result','scenes.0.outcome','characterActions.0.result','content',
+   'characterActions.0.result','scenes.0.outcome','content',
  ]);
  expect(outlineFactRepairTargetPaths(chapter,{gaps:[{actionPath:'characterActions.99.result'}]})).toEqual([]);
  expect(JSON.stringify(chapter)).toBe(before);
