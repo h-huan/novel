@@ -6162,7 +6162,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const desiredSupplement=Math.min(
           affordableFullCardRefillCount(
             missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
-            presentationBudget.remaining,discoveryBudget.presentationBatchSize),
+             presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode),
           affordableReviewedPremiseCount(
             missingAfterFirstGate+Math.ceil(missingAfterFirstGate/2),
             sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,
@@ -6242,9 +6242,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           }
           const refillTarget=Math.min(unusedSeeds.length,desiredSupplement,
             affordableFullCardRefillCount(unusedSeeds.length,
-              presentationBudget.remaining,discoveryBudget.presentationBatchSize));
+               presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode));
           if(refillTarget>=missingAfterFirstGate
-            &&presentationBudget.remaining>=refillTarget+Math.ceil(refillTarget/discoveryBudget.presentationBatchSize)
+            &&presentationBudget.remaining>=refillTarget+minimumCardReviewCalls(refillTarget,refillTarget)
             &&reselectionCompletionBudget.remaining>=1){
             try{
               const selectionAnswer=await this.realLLM.generate({
