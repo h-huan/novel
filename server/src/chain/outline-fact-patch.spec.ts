@@ -260,3 +260,28 @@ it('never guesses counts without an explicit total, a correct in-source variant 
  const corrected={content:chapter.content.replace('死了五条','死了四条')};
  expect(alignOutlineFactCountProjections(chapter,corrected,[JSON.stringify({...conflict,calculation:'没有足够算式'})])).toEqual(corrected);
 });
+
+it('rejects root field type changes before retry validation accepts a corrupt chapter',()=>{
+ const before=JSON.stringify(original);
+ for(const patch of [{content:42},{content:null},{characterActions:{}},{characterActions:'rewritten'}, {foreshadowing:null}]){
+  expect(()=>applyOutlineFactPatch(original,patch)).toThrow('不能改变字段类型');
+  expect(()=>outlineFactPatchSynchronizationIssues(original,patch,[])).toThrow('不能改变字段类型');
+  expect(JSON.stringify(original)).toBe(before);
+ }
+ expect(applyOutlineFactPatch(original,{characterActions:[{action:'保留有证据的行动',result:'只声称已发生的结果'}]}).characterActions).toHaveLength(1);
+});
+
+it('admits a missing event inserted into the cited narrative without rewriting a true earlier warning, then retains independent rejection',async()=>{
+ const {reviewChapterDependencies}=await import('./chapter-dependency-review');
+ const chapter={content:'经理指着我说：“今天别走，这事没完。”我站在推车旁。家属坐在椅子上。',characterActions:[{action:'经理警告我',result:'我意识到这份工作保不住'}]};
+ const evidence={gaps:[{actionPath:'content',resultPath:'characterActions.0.result',actionEvidence:'经理指着我说：“今天别走，这事没完。”',resultEvidence:'我意识到这份工作保不住',reason:'警告不等于主角已意识到工作保不住'}]};
+ const repaired=chapter.content.replace('家属坐在椅子上。','这份外包工作保不住了。我想到下个月的床位费，仍把表抱紧。家属坐在椅子上。');
+ expect(outlineFactPatchSynchronizationIssues(chapter,{content:repaired},[],evidence)).toEqual([]);
+ expect(outlineFactPatchSynchronizationIssues(chapter,{content:chapter.content+' '},[],evidence).length).toBeGreaterThan(0);
+ const wrong={...evidence,gaps:[{...evidence.gaps[0],actionPath:'scenes.0.action',resultPath:'scenes.0.result'}]};
+ expect(outlineFactPatchSynchronizationIssues(chapter,{content:repaired},[],wrong).length).toBeGreaterThan(0);
+ const error=Object.assign(new Error('独立审查仍有真实缺口'),{gateRejection:true as const,report:{status:422,topic:'outline_alignment',sections:['新增段落不能证明既定结果']}});
+ const checked=await reviewChapterDependencies(applyOutlineFactPatch(chapter,{content:repaired}),async()=>({consistent:true,contradictions:[]}),async()=>{throw error});
+ expect(checked.actionFailure).toBe(error);expect(checked.defects).toContain('新增段落不能证明既定结果');
+ expect(chapter.content).not.toContain('床位费');
+});

@@ -1,8 +1,10 @@
+import {SOURCE_BINDING_EXAMPLE} from './premise-source-bindings';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
+import * as discoveryConcurrency from './discovery-concurrency';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
 import { getPlatform, targetForLength, measureAgainstTarget } from './platform-benchmarks';
 import { SOURCE_QUALITY_AXES } from '../modules/writing-quality/source-quality-review';
-import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY } from '../../shared/src/system-workflow-rules.registry';
+import { TEMPORAL_FACT_CONTINUITY_POLICY, PLATFORM_MEASUREMENT_REVIEW_POLICY, IDEA_CARD_GENERATION_CONCURRENCY, IDEA_PREMISE_POOL_BASE_BATCHES } from '../../shared/src/system-workflow-rules.registry';
 import { currentDiscoveryRequestId, discoveryRequestAsyncStorage } from '../common/creation-context';
 import { currentGenerationSignal, assertGenerationActive } from '../common/generation-cancellation';
 import { describe, expect, it, vi } from 'vitest';
@@ -1775,8 +1777,9 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
     // Parallel batches cannot see one another: preserve complementary actual
     // strategy search directions without adding calls or reducing any Gate.
-    expect(poolCalls[0][0].prompt).toContain('现场行动、关系博弈、资源选择');
-    expect(poolCalls[1][0].prompt).toContain('规则权限、信息误导、交易选择');
+    const lockedSlots=poolCalls.slice(0,2).flatMap(([request]:any[])=>JSON.parse(request.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]));
+    expect(new Set(lockedSlots.map((slot:any)=>slot.premiseId)).size).toBe(expectedPoolBatchSizes[0]+expectedPoolBatchSizes[1]);
+    expect(lockedSlots.every((slot:any)=>slot.requiredGenres.includes('悬疑推理')&&slot.causalDirection&&slot.costDirection)).toBe(true);
     expect(poolCalls.every(([request]:any[]) =>
       request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
       && request.prompt.includes('"webNovelGenre":["悬疑推理"]')
@@ -1786,7 +1789,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
      expect(poolCalls[0][0].prompt).toContain('对决定性结果先做反事实核对');
     expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
     expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
-    expect(poolCalls.every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
+    expect(poolCalls.slice(0,2).every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
     const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
     expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(3);
     expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
@@ -2433,7 +2436,7 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
   });
 
   it('keeps two pool batches independent from the bounded adaptive remote-work ceiling', () => {
-    expect(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY).toBe(2);
+    expect(IDEA_PREMISE_POOL_BASE_BATCHES).toBe(2);
     expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(8);
   });
 });
@@ -2451,4 +2454,54 @@ describe('discovery request identity isolation', () => {
     await expect(Promise.all([read('discovery-a'), read('discovery-b')]))
       .resolves.toEqual(['discovery-a', 'discovery-b']);
   });
+});
+
+
+it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],[5,8,false,true]])('globally selects compact source references for %s requests without batch nomination quotas',async(requestedCount,screenedCount,duplicateSelection,identityOnly)=>{
+ const cap=vi.spyOn(discoveryConcurrency,'adaptiveDiscoveryConcurrency').mockImplementation(n=>Math.max(1,Math.min(7,n)));
+ try{
+  let chosen:any[]=[];
+  const generate=vi.fn(async(request:any)=>{
+   if(identityOnly&&request.metrics?.stepKey==='idea_premise_causal_plan_contract'){
+    request.physicalCallBudget.remaining--;
+    return {content:JSON.stringify({plans:chosen.map(item=>({premiseId:item.premiseId,causalPlan:item.causalPlan}))})};
+   }
+   if(request.metrics?.stepKey==='idea_premise_pool_generation'){
+    const batch=Number(request.metrics.attempt||0),size=Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1]);
+    const schema=JSON.parse(request.prompt.split('JSON 结构：')[1]);expect(Object.keys(schema)).toEqual(['pool']);
+    const plan=JSON.parse(request.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]);
+    const definitions=JSON.parse(request.prompt.split('【每项分类核心机制：生成与选优使用与审核相同的标准】')[1].split('\n')[0]);
+    const directory=['悬疑惊悚','宫斗宅斗','男频脑洞','玄幻仙侠'];
+    expect(new Set(definitions.map((row:any)=>row.category))).toEqual(new Set(plan.map((slot:any)=>directory[Number(slot.storyCategoryId.slice(1))-1])));
+    const offset=batch===0?0:Math.ceil(Math.max(requestedCount*3,requestedCount+5)/2);
+    return {content:JSON.stringify({pool:plan.map((slot:any,index:number)=>({premiseId:slot.premiseId,storyCategoryId:slot.storyCategoryId,workingTitle:'原池题材'+batch+'-'+index,storyCore:diversePoolStories[offset+index]}))})};
+   }
+   if(request.metrics?.stepKey!=='idea_premise_selection')throw Error('unexpected extra paid call');
+   const pool=JSON.parse(request.prompt.split('【服务器已固定的候选池；不得新增、改写或重新编号】')[1].split('\n')[0]);
+   const selected=pool.slice(0,screenedCount).map((seed:any)=>{
+    const rows=[...seed.storyCore.matchAll(/【([^】]+)】([^【]+)/g)];
+    const section=(name:string)=>rows.find(row=>row[1]===name)![2].trim();
+    return {premiseId:seed.premiseId,storyCategoryId:seed.storyCategoryId,sourceBindings:structuredClone(SOURCE_BINDING_EXAMPLE),readerQuestion:'主角如何承担自己选择造成的真实代价？',causalPlan:[{
+     action:{field:'activeChoice',quote:section('主动选择')},conditions:[{field:'escalation',quote:section('必要条件')}],result:{field:'payoff',quote:section('反转兑现')},
+    }]};
+   });
+   chosen=selected;
+   if(identityOnly){const shape=JSON.parse(request.prompt.split('JSON 结构：')[1]);expect(Object.keys(shape.selectedPremises[0])).toEqual(['premiseId','storyCategoryId','readerQuestion']);}
+   if(duplicateSelection)selected[1]=selected[0];
+   return {content:JSON.stringify({selectedPremises:identityOnly?selected.map(({premiseId,storyCategoryId,readerQuestion})=>({premiseId,storyCategoryId,readerQuestion})):selected})};
+  });
+  const c=Object.create(ChainController.prototype) as any;
+  c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};c.reconcilePremiseSelection=vi.fn(async()=>{throw Error('independent-review-sentinel')});
+  const result=await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',customPlatformNote:'',storyCategory:'悬疑惊悚',discoveryCategoryOptions:['悬疑惊悚','悬疑惊悚','宫斗宅斗','男频脑洞','玄幻仙侠'],storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},requestedCount);
+  expect(generate.mock.calls.filter(([call]:any[])=>call.metrics.stepKey==='idea_premise_pool_generation')).toHaveLength(2);
+  expect(generate.mock.calls.filter(([call]:any[])=>call.metrics.stepKey==='idea_premise_selection')).toHaveLength(1);
+  expect(generate).toHaveBeenCalledTimes(identityOnly?4:3);
+  expect(result.success).toBe(false);
+  if(duplicateSelection){expect(c.reconcilePremiseSelection).not.toHaveBeenCalled();return;}
+  expect(c.reconcilePremiseSelection).toHaveBeenCalledTimes(1);
+  const input=c.reconcilePremiseSelection.mock.calls[0][0];expect(input.selected).toHaveLength(screenedCount);
+  for(const row of input.selected){expect(row).not.toHaveProperty('sourceBindings');expect(row.storyCore).toBe(input.pool.find((seed:any)=>seed.premiseId===row.premiseId).storyCore);}
+  expect(result.error).toContain('independent-review-sentinel');
+ }finally{cap.mockRestore();}
 });

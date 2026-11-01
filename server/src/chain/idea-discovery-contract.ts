@@ -1,4 +1,5 @@
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
+import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
@@ -115,7 +116,7 @@ export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
 
 /** The source pool must contain the real causal and category facts needed to
  * shortlist a story. This is a structural gate; semantic review is unchanged. */
-export const PREMISE_SEED_FACT_LABELS = ['处境触发','主动选择','必要条件','反转兑现','分类流派机制'] as const;
+export const PREMISE_SEED_FACT_LABELS = PREMISE_SOURCE_SECTIONS;
 export function premiseSeedFactIssues(storyCore: unknown): string[] {
   const raw = typeof storyCore === 'string' ? storyCore.trim() : '';
   const labels = PREMISE_SEED_FACT_LABELS.map(label => '【' + label + '】');
@@ -190,7 +191,11 @@ export function normalizePremiseSelectionPayload(
     if (!raw || typeof raw !== 'object') {
       throw new Error(`创建前题材筛选的第 ${index + 1} 个已选题材缺少结构化证据。`);
     }
-    const item = bindPremiseCategory(raw as Record<string, unknown>, categoryOptions);
+    const projected=materializePremiseSourceBindings(raw,byId.get(String((raw as any).premiseId||'').trim()));
+    const item = bindPremiseCategory(projected as Record<string, unknown>, categoryOptions);
+    const allowedFields=new Set<string>([...SELECTED_PREMISE_FIELDS,'premiseId','storyCategoryId','storyCategory','workingTitle','storyCore','causalPlan','storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags']);
+    const unknownFields=Object.keys(item).filter(field=>!allowedFields.has(field));
+    if(unknownFields.length)throw new Error('已选题材包含未纳入独立来源审核的额外字段：'+unknownFields.join('、')+'；必要条件须写入既有故事字段，不能另造conditions等字段绕过审核。');
     const premiseId = String(item.premiseId || '').trim();
     if (!premiseId || selectedIds.has(premiseId)) {
       throw new Error('创建前题材筛选返回了空或重复的已选 premiseId。');
@@ -261,26 +266,36 @@ export function ideaPremiseSelectionDirective(
   // patch over the default generation prompt. An old string replacement could
   // silently stop matching when the canonical directive changed, leaving a
   // contradictory instruction to generate a second pool.
-  const fixedPoolRule = '服务器已提供固定候选池，共' + poolSize + '个轻量胚子；先对每个拟入选题材做具体反例检验：人物是否有途径得知其随后说出的秘密或单号，关键物证/账本/录像如何在实际地点与保管人之间移动，取得证据者和最终使用者是否真的能接触它，承诺的岗位/房屋/资金/处罚等结果由谁在什么条件下作出有效决定；任何一步只靠人物主动自曝、另一人无条件同意、物品凭空转移或宣布结果而没有事先行动与条件，都必须淘汰该原池身份，不得留待完整卡再圆。此项只在现有选优时检查、不新增模型调用和输出字段。先按每项已有的分类检查主线：核心冲突、主动选择、反转和兑现必须落实该分类的关键关系或行动机制，不能以职业背景、末尾情绪或类型标签代替；不适配分类的候选不得选中，也不得偷偷改分类。再比较关键证据的产生、取得与实际交付路径、真实决定者、兑现必要条件及既定行动引发的代价；把对手按已写性格可能采取的拒绝、拖延、不开门等合理反应也纳入因果检验，主角必须有已经写明的条件使关键行动仍然成立。逐项核对关键前提在结果兑现之前是否持续有效：临时拦截、未签字、封存或暂缓若随后被对手撤销，必须已有另一项实际生效的保全、停止执行或接收决定，不能把暂时挡住误写成最终成功。区分社保稽核与工伤认定等不同事项的申请、受理、认定和生效，不得把一个机构的调查结果自动当成另一个机构的最终决定。取证须限定证明范围：排除自己、持有同款、进入走廊或同地出现，不等于证明实际替换、指使、转移资金或特定人实施；必要的经手、接触、比对或独立归责依据须在原池实际成立。区分暂停、调查、受理与最终撤销、退还、追责等状态；旧录音只证明其实际记录过的旧事件，不能自动证明后来另一场雇佣、授权或同意。尤其核查三类终审已证实的失真：退出投标不自动触发违约金或使其它供应商失去资格，必须已有合同和具体有效投标条件；报警或举报不自动授予进入特定私人场所的权限，必须已有指向该地点的证据与可执行程序；辨出被破坏物品的异常不等于证明具体人员实施，既有遮挡条件也不得与后续身份辨认互相矛盾。对手离场、接受安排或配合处理均需事前建立真实动机及可见行动。原池缺少必要条件的，不得在展开字段里自造相反事实救活；优先选择原池中机制成熟且互不重合的题材。中段及后段的推进须由主角在新阻力下做出实质选择，或由已写的主动选择持续引发有区别的不可逆后果；仅靠配角依次揭露旧资料、向读者解释或重复一个证据，不算持续推进。原池没有这种真实选择或后果，不能在展开阶段临时补造救活。不得新增候选或改写原池。';
+  const fixedPoolRule = '服务器已提供固定候选池，共'+poolSize+'个轻量胚子；逐项按已注入GEN-002的必要条件和真实兑现标准尝试推翻关键结果。检查实施者与对象、资源和能力、知情与配合动机、物证取得及传递、证明范围与责任归属、权限及实际决定、时序和条件持续有效、结果对象与数量范围；普通直接因果不额外强加机构或手续。对手按已写性格可能采取的拒绝、拖延或反制均须有已建立条件应对；准备、提议、暂缓、调查等状态不等于最终生效，临时条件被撤销后须仍有真实生效的替代条件。不同主体的申请、受理、认定和执行分别核查；旧事件证据不能自动证明新事件，排除自身或同地出现不能自动归责他人。任何需要补造原池没有的桥梁才能成立的身份必须淘汰，不能把宣布结果当成其前提，不能留待完整卡再圆。核心冲突、人物关系、主动选择、反转及兑现须持续落实原分类与全部作者流派，不能以职业背景、类型标签或结尾点题代替。主角在新阻力下要有实际选择，或已有选择引出有区别且不可逆的后果；配角轮流解释旧资料不算推进。按目标读者比较具体利益冲突、关系变化、追读悬念和记忆点，自述卖点不能作为证据。逐对比较人物关系、主动策略、对手反制、升级、胜负转换及代价，分类、职业和道具不同不等于机制不同，共同流派承诺也不自动算同构。优先选因果成熟、阅读机制具体且真正有差异的候选；不得新增候选、改分类、改原文或输出自评报告。';
   const storyTypeRule = storyType === 'short_story'
     ? '短篇必须能在有限篇幅内形成单线闭环和明确兑现；反转少而重，不能靠不断加设定续命。'
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
+  if(fixedPoolSelection)return `【原池事实引用式提名】从服务器已经固定的原池选择${selectedCountText}个真实ID。
+${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同与选优淘汰标准执行。'}
+${fixedPoolRule}
+${selectionQuantityRule}
+${storyTypeRule}
+必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
+本次只负责全池比较和选择已有身份，不装配引用索引，不重写故事。每项只输出premiseId、storyCategoryId和readerQuestion；readerQuestion只能追问已有事实，不引入新事件。不要返回sourceBindings、causalPlan或另一份叙事字段。
+服务器按固定原池五节原样投影事实，现有因果引用合同节点随后装配并校验索引；未完成索引和独立来源、因果、分类、全部流派、差异审核的题材仍不得生成完整卡。原池有真实缺口必须在本次比较中淘汰，不能因后续有索引节点而留待修造。全池比较和必要条件检验仍由本次选优完整执行。
+逐对比较真实主动策略、升级、反转与代价，不因为绑定来源就跳过选优。
+只输出selectedPremises；不返回或重写pool，不输出评分、比较自评或解释。`;
   return `【题材卡创建前筛选】
 这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
 ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同规划。'}
 已选项在展开完整卡之前先提供causalPlan：只列影响成败的状态转移，不列普通动作清单，不设固定条数。\n${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}每项action、conditions、result均用{field,quote}逐字锚定本题材筛选字段；quote必须从所指field最终文本直接复制连续原文，原文以“；”连接分句时不得擅自改成“。”，也不得另加或省改标点，修改字段后须同步复制实际引用；覆盖关键阶段结果及payoff。conditions可为空的只有普通直接因果，能力边界、资料取得/转交、知情、权限、到场与他人决定需要的条件须写入对应筛选字段后再引用，不能由结局倒推。因果计划只保留实际决定状态转移的环节：每个quote从对应最终故事字段复制足以独立识别行动、对象或必要条件的最短连续原文，不整段复制、不复述解释、不丢掉决定性桥接；不输出思考过程、自评或长篇论证，原池和模型调用数量不变。
-${fixedPoolSelection ? '固定候选池由服务器持有，未选故事的来源事实不可编辑；按已有storyCore的实际人物、选择、升级、反转与代价核对差异，不能改写原池、额外创造题材或仅凭职业/道具区分故事。' : '原池的storyCore须用现有五个有序、简短的事实小节写清“处境与触发—主动选择—选择导致的升级—改变胜负条件—兑现及代价”的因果方向，不能只列职业和开端，再把所有展开补成同一条翻案路径。严格保留用户指定的类型、关系与情节条件；共同条件之外的选择、升级机制和兑现路径仍应分别构思，不能把职业列表当成不同故事。先在内部按实际因果路径归组，再跨不同路径比较选取成熟项，不默认取pool前几项；未选候选也须提供可辨认的路径，才能真正作为原池备用。以上只在现有storyCore中表达，不新增字段、输出长篇分析或增加模型调用。'}
+${'原池的storyCore须用现有五个有序、简短的事实小节写清“处境与触发—主动选择—选择导致的升级—改变胜负条件—兑现及代价”的因果方向，不能只列职业和开端，再把所有展开补成同一条翻案路径。严格保留用户指定的类型、关系与情节条件；共同条件之外的选择、升级机制和兑现路径仍应分别构思，不能把职业列表当成不同故事。先在内部按实际因果路径归组，再跨不同路径比较选取成熟项，不默认取pool前几项；未选候选也须提供可辨认的路径，才能真正作为原池备用。以上只在现有storyCore中表达，不新增字段、输出长篇分析或增加模型调用。'}
 选优时须特别防止两类已实测高成本错误：causalPlan要把实际导致结果的行动作为action，收存证据、准备材料不能冒充导致对手行动或机构决定的原因；检查所选分类是否从核心人物关系、主动选择到结局连续驱动主线，恋爱类不能只有查案、补课、事后作证却声称恋爱关系已建立。财物取得、产权转移或官方处置要有该权利主体的实际决定和必要条件，不能把揭露真相自动当作权利转移。原池未写这些条件就选择别的成熟题材，不靠选后反复补造因果和分类。\n候选选优必须分别核对两件事：①行动到结果的必要条件确实成立；②面对同一平台、分类与用户已选创作标签的目标读者，当前故事中实际可见的独特人物选择、对手反应、关系/利益变化和阶段回报能否形成具体点击和追读理由。前者通过不能替代后者；暂名、职业、专业取证流程和自述卖点不能作吸引力证据。相同基调、文风或流派标签组合不是必须淘汰的同构，同一流派共性不能强制另编题材；应比较共有类型机制之外真实发生的不同事件。没有要求的热血、幽默、虐心、打脸不得因标签臆测强加，更不得为争点击补造原池没有的决定性动作、权限或结局。选题必须先证明读者为什么愿意点开：暂名也应有具体利益冲突、反常关系或迫切悬念，不能全是意象与道具名。先比较不同关系与欲望、主动对手、选择和推进路径，不要把所有题材收敛为“职业发现账册/印记→追查权贵→公开证据”。遵守用户分类，在分类内部广搜不同冲突；现实两难、关系背叛、绝境求生、欲望争夺、反常身份均可按故事取舍，不是逐项配额。 已选择“扮猪吃虎”等流派时，隐藏能力、被低估、亮出本事属于应当兑现的共同类型承诺，本身不算重复；要比较这种承诺怎样引出各自不可互换的关键操作、意外升级、胜负转向和实际代价。每条入选骨架应有至少一个真实事件构成可简短转述的记忆点：行动本身、对手的反制、关系翻转或带后果的选择均可，不要求硬塞热血、搞笑、热梗，也不能仅靠标签宣称有记忆点；题材胚子没有建立的事件不得留待下游凭空制造。
 对已选项逐对比较“人物关系—主动选择—对手制约—因果升级—反转改变—结局代价”；换时代、职业、身份包装或分类标签不算实质差异。若两项共享同一营救、潜入、被利用和反设局路径，须在锁定题材前从原轻量池选择真正不同的成熟项。筛选证据必须证明故事成立，不能靠自称独特或完整字段过关；能力触发、边界与代价应前后一致，不要求解释超自然科学来源或提前揭示全部谜底。选中前须比较openingEvent、coreConflict、escalation、reversalEffect与payoff中的同一事实；临时代价不能无条件变成永久代价，物资预支不能无条件变成复活或赎回活人，同一个人不能既已死亡又等待营救。无法沿原规则成立的胚子应在锁定前淘汰，从原池选择成熟项。反转不得取消已建立的核心前提，程序或权利的兑现必须有因果条件，不能让新能力或一次公开证据无条件解决全部冲突。
 选中前先在内部逐项对照原池 storyCore 与所选 openingEvent、coreConflict、activeChoice、escalation、reversalEffect、payoff：已明确的触发动作、人物身份、到场事件、时间阶段和结局方向须保留；未明确的真实动机可经反转揭示，但人物当时提出请求这一事件不能凭动机反转被取消。原池骨架涉及代写、转交、救助等多方动作时，要写清谁实施、为谁实施、交给谁或影响谁；没有明确的对象关系不得在展开时自行定成相反事实。只在内部检查，不增加输出字段。
 合理展开可补充原池未限定且与原约束兼容的细节；不得把原有职业或专业经历升级成更高等级、冠军资历、新权限或新能力来取得胜负，也不能让新增关键证据、对手目的或新角色取代原骨架的反转和兑现依赖。展开需要的关键身份与因果条件应在本次原池骨架中先明确，不能等到筛选字段再偷偷升级。
 先固定原池中每条规则的触发动作、作用对象及适用条件，再展开选择、升级、反转与兑现。尤其核对“有/无、已经/尚未、只作用于/不作用于”等条件；后文不能把作用对象改成其排除对象，也不能用一个此前没有的例外或新能力兑现原机制做不到的结果。若原机制无法支撑拟定结局，选择符合原规则的行动与代价，或在锁定前改选原池成熟候选，不把矛盾留给完整卡修复。selectedPremises 不返回或重写storyCore、workingTitle；这两项由服务器从原池继承。
-${fixedPoolSelection ? '1. ' + fixedPoolRule : '1. 以 ' + poolSize + ' 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。' + poolSize + ' 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ' + requestedCount + ' 个成熟题材，可以少于 ' + poolSize + '，禁止为了凑数填弱项。'}
+${'1. 以 ' + poolSize + ' 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。' + poolSize + ' 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ' + requestedCount + ' 个成熟题材，可以少于 ' + poolSize + '，禁止为了凑数填弱项。'}
 2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${selectedCountText} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。每个字段尽量用一至两句精确事实表达，严格避免重复叙述原池全文和其它字段；必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留，信息量不因缩短而减少，不准为缩短输出压缩掉重要因果。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
 4. ${selectionQuantityRule}payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。尤其是证据导致追责、翻案、查封或撤职的结局，须在原池骨架和已选字段中建立能指向责任人的具体比对依据、材料到达有权处理者的路径以及实际决定，不能只凭可疑线索直接认定责任人；已问话不等于已取得回答，证据公开不等于程序自动完成。若代价依赖对手知道主角举报或取证，须写明对手获知的途径；causalPlan同步覆盖决定性中间条件，不准只在payoff中声称已发生。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
 5. ${storyTypeRule}
-${fixedPoolSelection ? '6. 只输出selectedPremises；每项必须引用固定候选池中的真实premiseId，不返回或重写pool。' : '6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ' + selectedCountText + ' 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ' + minimumCount + ' 项时按前提/质量失败处理，不补造或弱化条件。'}不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+${'6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ' + selectedCountText + ' 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ' + minimumCount + ' 项时按前提/质量失败处理，不补造或弱化条件。'}不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
 
 /**

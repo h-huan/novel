@@ -16,15 +16,16 @@ export function shouldBatchLargePremiseSourceReview(
   return groupingMode===0&&count>=4&&batchSize>=1&&partitions>=2
     &&availableCalls>=partitions;
 }
-export function premiseSourceBatches(selection: PremiseSelectionResult): PremiseSelectionResult[] {
+export function premiseSourceBatches(selection: PremiseSelectionResult,groupCount?:number): PremiseSelectionResult[] {
   const size=readGenerationBudgets().sourceBatchSize;
   const items=selection.selected, count=items.length;
   if(!count)return [];
   // A slow large partition dictates wall time even when smaller peers finish
   // in parallel. Balance actual transmitted story material while preserving
   // consecutive premise order, each existing batch-size cap and EXACTLY the
-  // old number of independent review calls. No field or Gate is omitted.
-  const groups=Math.ceil(count/size);
+  // chosen number of funded review calls. No field or Gate is omitted.
+  const groups=groupCount??Math.ceil(count/size);
+  if(!Number.isInteger(groups)||groups<Math.ceil(count/size)||groups>count)throw Error('来源审核分组不能越过批次大小或实际数量');
   const weights=items.map(item=>JSON.stringify({
     selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
   }).length);

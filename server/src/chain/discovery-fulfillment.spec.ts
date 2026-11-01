@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
 
 it('keeps final-card refill review credits without cloning or overspending the original allowance',()=>{
  const budget={remaining:12};
@@ -37,7 +37,7 @@ it('does not pay for a replacement when its independent source and overlap revie
  // two source partitions and one independent changed-pair review, not two.
  expect(minimumReselectionReviewCalls(8,true,5,3,1)).toBe(3);
  expect(minimumReselectionReviewCalls(8,true,8,3,1)).toBe(4);
- expect(minimumReselectionReviewCalls(8,true,8,3,0)).toBe(2);
+ expect(minimumReselectionReviewCalls(8,true,8,3,0)).toBe(4);
  expect(minimumReselectionReviewCalls(5,false,4,3,1)).toBe(2);
  expect(()=>minimumReselectionReviewCalls(5,true,6,3,1)).toThrow();
  expect(()=>minimumReselectionReviewCalls(5,true,1,0,1)).toThrow();
@@ -49,13 +49,13 @@ it('preflights every source partition and the independent overlap before spendin
  expect(premiseReviewCallFloor(0,3)).toBe(0);
  expect(premiseReviewCallFloor(1,3)).toBe(1);
  expect(premiseReviewCallFloor(3,3)).toBe(2);
- expect(premiseReviewCallFloor(3,2)).toBe(2); // default monolithic 3-card source review
+ expect(premiseReviewCallFloor(3,2)).toBe(3); // all modes fund the same batch-size cap
  expect(premiseReviewCallFloor(3,2,1)).toBe(3); // configured split review
- expect(affordableReviewedPremiseCount(5,2,2,0)).toBe(3);
+ expect(affordableReviewedPremiseCount(5,2,2,0)).toBe(2);
  expect(affordableReviewedPremiseCount(5,2,2,1)).toBe(2);
- // Default mode has an existing monolithic source-review fallback for a
- // mandatory set; never silently discard required slots to save a credit.
- expect(affordableReviewedPremiseCount(5,2,2,0,4)).toBe(4);
+ // An unmet mandatory count is a real shortfall, not permission to ignore
+ // the partition cost or trigger a slow monolithic fallback.
+ expect(affordableReviewedPremiseCount(5,2,2,0,4)).toBe(2);
  expect(affordableReviewedPremiseCount(5,3,2,0,4)).toBe(4);
  expect(affordableReviewedPremiseCount(5,1,2,0,4)).toBe(1);
  expect(affordableReviewedPremiseCount(5,2,2,1,4)).toBe(2);
@@ -107,4 +107,30 @@ it('uses only authored, correctly sized title alternatives before unchanged qual
  expect(retainValidStructuredIdeaTitle({...original,title:'原本就合格'},'备用')).toMatchObject({title:'原本就合格'});
  expect(retainValidStructuredIdeaTitle({...original,alternateTitles:[]},'伺候人的手艺，不丢人').title).toBe('伺候人的手艺，不丢人');
  expect(retainValidStructuredIdeaTitle({...original,alternateTitles:[]},'无').title).toBe(original.title);
+});
+
+it('reserves the complete dynamic refill floor before admitting initial review',()=>{
+ for(const count of [1,2,5,8]){
+  const floor=premiseReviewCallFloor(count,2,0),budget={remaining:12};
+  const initial=reserveFinalRefillReviewCapacity(budget,5,floor);
+  if(5+floor<=12){initial.remaining=0;expect(budget.remaining).toBe(floor);}
+ }
+});
+
+it('plans optional screening surplus and funded per-premise reviews together with the original final reserve',()=>{
+ const count=plannedPreselectionCount(5,8,12,2,0,7);expect(count).toBe(8);
+ const refill=premiseReviewCallFloor(5,2,0),initial=12-refill;
+ const firstGroups=fundedSourceReviewGroups(count,2,initial-1,7,0);
+ expect(firstGroups).toBe(4);
+ // One source/overlap correction of up to four rejected identities still fits.
+ expect(firstGroups+1+premiseReviewCallFloor(4,2,0)+refill).toBe(12);
+ expect(fundedSourceReviewGroups(5,2,5,7,0)).toBe(3);
+ expect(fundedSourceReviewGroups(5,2,9,7,0)).toBe(5);
+ expect(plannedPreselectionCount(5,8,12,3,0,7)).toBe(8);
+ expect(plannedPreselectionCount(5,8,12,2,0,2)).toBe(8);
+ expect(fundedSourceReviewGroups(8,2,7,2,0)).toBe(4);
+ for(let demand=1;demand<=10;demand++)for(let credits=1;credits<=12;credits++){
+  const desired=demand+Math.min(3,Math.ceil(demand/2)),actual=plannedPreselectionCount(demand,desired,credits,2,0,7);
+  if(actual){expect(actual).toBeGreaterThanOrEqual(demand);expect(actual).toBeLessThanOrEqual(desired);expect(premiseReviewCallFloor(actual,2,0)).toBeLessThanOrEqual(credits);}
+ }
 });

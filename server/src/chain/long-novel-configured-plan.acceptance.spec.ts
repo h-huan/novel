@@ -49,6 +49,10 @@ describe('configured long novel planning acceptance', () => {
       if (step === '长篇角色架构') return { data: { characters: [{ name: '林川', identity: '调查员', arc: '从怀疑到承担' }] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [{ content: '旧信日期', type: 'identity', scope: 'global', setupChapter: 1, recoveryChapter: 501, recoveryWindowStart: 495, recoveryWindowEnd: 501, evidenceText: '信纸日期早于车站建成', riskLevel: 'high', recoveryCondition: '抵达终点', payoffDescription: '揭示循环' }] }, rawContent: '', warnings: [] };
       outlineCalls.push(step);
+      const prior = JSON.parse(prompt.split('本批之前已经生成的完整章节事实（含前卷，只读事实来源，不得只依据上一章推翻更早事件）：')[1].split('\n')[0]);
+      const next = Number(prompt.match(/全书第(\d+)-/)?.[1]);
+      expect(prior.map((chapter:any)=>chapter.chapterNumber)).toEqual(Array.from({length:next-1},(_,index)=>index+1));
+      if(next>2)expect(prior[0].content).toBe('第1章的具体事件链和结果');
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]);
       const start = Number(prompt.match(/全书第(\d+)-/)?.[1]);
       return { data: { chapters: Array.from({ length: count }, (_, index) => ({
@@ -108,6 +112,7 @@ describe('configured long novel planning acceptance', () => {
     const calls: Array<{ step: string; prompt: string }> = [];
     controller.llmCallWithRetry = vi.fn(async (step: string, prompt: string) => {
       calls.push({ step, prompt });
+      expect(prompt).toContain('旧楼'); // actual world facts must reach EVERY downstream stage
       if (step === '长篇角色架构') return { data: { characters: [{ name: '周砚', identity: '巡查员', arc: '从服从到反抗' }] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [] }, rawContent: '', warnings: [] };
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]) || 1;

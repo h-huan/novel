@@ -98,6 +98,18 @@ export function targetIdeaReviews(value: any, cards: readonly any[], references:
         return issue.field ? `${issue.field}（${criterion}）：${reason}` : `${criterion}：${reason}`;
       return issue;
     }) : row?.issues,
+    // This normalization can only preserve an already-rejected verdict. It
+    // cannot make an all-true report pass or hide a blocking defect as advice.
+    warnings:Array.isArray(row?.warnings)?row.warnings.map((warning:any)=>{
+      if(typeof warning==='string')return warning;
+      const criterion=warning?.criterion;
+      if(warning&&typeof warning==='object'&&!Array.isArray(warning)
+        &&['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'].includes(criterion)
+        &&row[criterion]===false&&typeof warning.suggestion==='string'&&warning.suggestion.trim()
+        &&Object.keys(warning).every(key=>['criterion','suggestion'].includes(key)))
+        return criterion+'：'+warning.suggestion;
+      return warning;
+    }):row?.warnings,
   })) };
 }
 

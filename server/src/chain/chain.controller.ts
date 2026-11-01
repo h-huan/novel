@@ -1,4 +1,6 @@
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
+import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
+import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
 import { missingRequestedIdeaSlots, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
@@ -12,6 +14,9 @@ import { discoveryPovChoices } from '../../shared/src/discovery-pov';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { independentReviewBatches } from './independent-review-batches';
+import { premiseSearchPlan } from './premise-search-plan';
+import { longOutlineBatchIssues } from './long-outline-batch-contract';
+import { IDEA_INITIAL_PLANNING_MAX_CALLS } from '../../shared/src/system-workflow-rules.registry';
 import {reserveReviewBatchBudget} from './premise-source-batches';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
 import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, scopePremiseSelectionCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
@@ -27,7 +32,7 @@ import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselect
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
-import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget, shouldBatchLargePremiseSourceReview } from './premise-source-batches';
+import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget } from './premise-source-batches';
 import { generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
@@ -186,7 +191,7 @@ import {
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
 import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -4936,7 +4941,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       };
       const discoveryCategories = dto.discoveryCategoryOptions?.length
         ? dto.discoveryCategoryOptions : [dto.storyCategory];
-      const variedCategories = discoveryCategories.length > 1 && requestedCount > 1;
+      const variedCategories = discoveryCategories.length > 1;
       const categoryStandards = discoveryCategories.map(category => {
         const placement = resolveSubmissionCategory(dto.platform, category, dto.storyType, audienceChannelHint(dto.targetAudience));
         const official = placement.status === 'resolved' ? platformCategoryWritingBrief(dto.platform, placement.value, dto.storyType) : '';
@@ -5068,12 +5073,15 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         // Avoid asking an expensive post-selection source/category audit to
         // discover defects that the candidate generator was never shown.
         // Same category contract, no new model call or weaker Gate.
+        const lockedPoolSearchPlan=phase==='pool'
+          ?premiseSearchPlan(options.batchIndex??0,options.batchCount??1,premisePoolSize,
+            options.batchSize??premisePoolSize,discoveryCategories,dto.webNovelGenre):[];
+        const applicableCategories=phase==='selection'?options.pool??[]
+          :lockedPoolSearchPlan.map(slot=>bindPremiseCategory({storyCategoryId:slot.storyCategoryId},discoveryCategories));
         const candidateCategoryRequirements = '\n【每项分类核心机制：生成与选优使用与审核相同的标准】'
-          + JSON.stringify(phase==='selection'
-            ?scopePremiseSelectionCategoryStandards(categoryStandards,options.pool??[])
-            :categoryStandards)
+          + JSON.stringify(scopePremiseSelectionCategoryStandards(categoryStandards,applicableCategories))
           + '\n每项的核心冲突、双方关系、主动行动、升级、兑现和代价必须由所选分类的核心机制驱动。感情分类尤其不能只用职业翻案或查案作为主线、最后安排一次恋爱点缀；重要关系的双向选择、推进与结果必须承担实质剧情。分类不能靠结尾点题或改标签补救。'
-          + '\n各题材的结果须有已建立的必要条件和实际执行链；不能让封店直接等于退赔、发现线索直接等于有权处置或人物无缘无故提前到场。尤其检查临时阻断是否在后续兑现前被对手解除、社保稽核是否被误当工伤认定，以及同款物品或排除主角的证据是否被误作他人实际经手的独立归责证据。核对物证实际附着位置（钥匙柄、锁芯等不得互换）、双方样本的实际取得与保管、当事人的真实法律或人物关系（未婚恋人不能无由使用婚内财产权利），以及已安排给主角的必要行动是否在结局真实执行并产生结果。';
+          + '\n各题材须按已注入GEN-002保留全部必要条件：结果范围、证据取得与证明范围、权限和实际决定、人物动机、数量及时间状态都须能由已写事实推出。普通直接因果不强加手续；原池不足时重新构思，不能由选优改标签或完整卡凭空补造。';
         const premiseSchema = {
           pool: [{
             premiseId: 'P1',
@@ -5081,21 +5089,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
             storyCore: '【处境触发】具体人物、风险和迫使行动的事件。【主动选择】主角实际采取的区别性行动。【必要条件】行动取得关键资料、到达能处理的人或触发对手反应的已建立条件。【反转兑现】改变胜负条件的事件、实际结果与代价。【分类流派机制】分类与所选流派如何通过主线人物关系和行动真正兑现。',
           }],
-          selectedPremises: [{
-            premiseId: 'P1',
-            storyCategoryId: '原样继承对应原池胚子的分类K编号',
-            protagonistSituation: '主角当前生活处境、想守住/得到/改变什么',
-            openingEvent: '真正改变主角命运的起始事件',
-            coreConflict: '目标与主动对手/现实阻力如何对撞',
-            activeChoice: '主角必须亲自做出的关键选择/行动',
-            escalation: '选择之后如何连续升级并产生不可逆后果',
-            reversalEffect: '反转如何改变目标、关系、胜负条件或代价',
-            payoff: '既定行动经过哪些已建立的必要条件、参与者决定或对手反应，实际换来什么结果与代价；不能只列想要的终局',
-            irreplaceableCarrier: '为什么这个职业/生活载体/关系不可替换',
-            secondOrderConsequence: '机制启动后谁额外受益/受损，关系或目标如何被迫改变',
-            readerQuestion: '读者看完起始事件后必须追问的具体问题',
-            causalPlan: premiseCausalPlanExample(),
-          }],
+
         };
         const promptPhase = phase;
         const batchIndex = options.batchIndex ?? 0;
@@ -5108,16 +5102,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         // "hidden expert -> retained records -> authority exposes opponent".
         // These are exploration preferences, never permission to violate the
         // author's category/genre or skip the independent difference Gate.
-        const batchFocus = [
-          '本批优先让隐藏本领通过现场行动、关系博弈、资源选择或对手即时反制改变局面；不要把多数故事写成“暗存岗位记录→第三方核查→官方处理”，也不按职业或物证换皮。',
-          '本批优先探索规则权限、信息误导、交易选择、对手反制与代价的不同因果路径；尤其避开“隐姓基层职业→秘密保留书面记录→遭反咬→记录比对翻盘→失去工作”的统一模板，不能只换机构与设备。',
-          '本批优先探索反常关系、现实两难、欲望争夺和不可逆后果；每项主角选择须改变对手下一步可行行动，不只由配角递上旧档案揭露已有真相。',
-        ][batchIndex % 3];
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
-          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本阶段不选题、不展开完整筛选字段，不输出selectedPremises。',
-          '每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用事实密集的简短叙述，优先控制在300—500汉字；这只是去掉重复描写和解释的写作目标，不得为字数删除人物动机、证据取得和交付、对手反制、决定权限、结果成立条件或不可逆代价，必要时允许超过。storyCore必须分为有序五小节【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】，小节内写具体人物、事件和条件，不要空泛自评。【必要条件】须交代证据如何传递、谁为何到场、谁有权决定、对手如何响应，不能留到选优和完整卡再补造；本阶段即产出可以选优的有因果结构的轻量候选，不要重复输出另一份完整卡。并且必须写明人物处境与触发、主动选择，以及决定性结果的必要条件和实际行动：例如证据如何抵达能处理的人、谁有权作出决定、结果为何能从已写条件推出。人物识破身份须有先前接触该身份信息的真实渠道，证据指向具体责任人须有区别于“只是排除自己”的指认依据，约人到场或设伏抓获须有各方实际到场与配合动机。不要只写“揭露后被拘留”“说完就取消交易”“线索出现便查明真相”等尚缺行动链的终局；对决定性结果先做反事实核对：在已写的行动、证据、时间和权限全部成立时，结果是否仍可能不发生？若可能，原池必须明确写出排除该可能的关键事实，否则换用其他成立的故事机制，不能留给完整卡凭空补证。昨日入库与今日报失未必互斥，发现故障不等于备件已经修复，流程瑕疵不等于有经营许可或撤销决定。证据的载体、实际取得和比对必须物理一致：留在钥匙柄上的标记不能作为锁芯痕迹；宣称与反派私库样本相同，必须先写明有权人怎样取得私库样本并完成比对。涉及法律关系要核对当事人是否具备相应身份（仅是男女朋友就不能凭空出现婚内财产）；主角承诺亲自递送材料或完成决定性行动，结局须实际执行或已写明改变计划的原因与替代行动。结局代价的情感取向须服从作者所选基调及该分类的阅读机制，不能只因为代价越惨就自动假定反转有吸引力；应由主角实质选择造成可感知的胜负变化。没有可信条件就换一条能成立的故事骨架，不交给下游昂贵复核补造。保留反转、兑现与代价方向。',
-          batchFocus,
+          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本批只输出pool，不选择、展开或提名，不输出selectedPremises。',
+          'pool数组每项只包含premiseId、workingTitle、storyCategoryId、storyCore。storyCore用事实密集的简短叙述，优先控制在300—500汉字；不是删减必要条件的硬限。按【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】依次写具体事实，不写评审或自评。先确定人物欲望与当前阻力，再确定主角用什么真实操作改变对手的选择或局面，最后写这项操作实际能产生的结果与代价。每项关键结果都须有原池已写出的执行者、行动及真实必要条件，不把计划、请求、承诺、发现线索或结果断言当成已经执行的桥梁。',
+          '对决定性结果先做反事实核对：已有行动、证据、时间和权限全部成立时，结果是否仍可能因对手合理拒绝或缺少另一次实际决定而不发生？若可能，先在原池写清排除这种可能的事实，否则换用成立的机制。按已注入GEN-002的同一因果标准检查：人物知情与配合动机、行动能力及资源来源、证据取得/保管/传递/归责范围、决定权限与实际生效动作、时间先后及条件持续有效、数量与作用对象一致。人物关系与权利主体须一致，承担结果的必要行动须实际执行。只检查本故事真正依赖的条件，普通直接行动不强加取证、审批或第三方裁决；不要为满足检查刻意选择机构翻案。若结果超出了既有行动能改变的范围，在本次生成内换用能够成立的胜负机制，不能把缺口留给后续模型补造。代价来自人物实际选择，情感取向服从作者基调和分类。',
+          '【结果范围先于扩写锁定】先为每个候选确定主角能直接改变什么、还需谁实际选择或行动、最终改变的具体对象及范围，再写原池。并列的每项决定性结果各自写出成立桥梁，不能把同一局部行动扩张为全局后果。原池明确的保管、归属、权限、未完成状态和结果范围，在selectedPremises及完整卡中保持不变；若本批展开发现条件尚未建立，应在本次原池生成内改用能成立的机制，再固定原池，不把未经铺垫的强结果交给下游修补。',
+          '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按对应因果方向确定具体人物选择、对手反应、已成立条件与结果，再写骨架；方向不是已成立事实或质量分，不能机械套用身份与道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成同一方向内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '同一批不能让多数题材靠相同的行动、反制、翻盘与代价结构支撑：比较每个storyCore里主角真正采取的策略、对手如何改变局面、靠哪项已经建立的条件让胜负转换、赢后损失的具体性质。若已有两项都靠私存岗位记录、遭反咬、第三方核账而翻盘，其余题材必须改用实质不同且能够成立的行动与兑现机制，不准只换职业、场所或物证名称。对不同机制同样核对授权和因果，不为凑差异编造条件。',
           '保留用户指定的类型、平台、分类、流派与其它条件。每个storyCategoryId必须与该项人物关系、核心冲突、主动选择和兑现机制实质相符；类型只在结尾点缀或职业背景出现的胚子应重新构思，不能留给后续模型通过改标签或补写救活。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
@@ -5129,10 +5120,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         );
         const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective;
         const promptSchema = promptPhase === 'pool'
-          ? { pool: [{ ...premiseSchema.pool[0], premiseId: 'B' + (batchIndex + 1) + '-P1' }] }
-          : { selectedPremises: premiseSchema.selectedPremises };
+          ? {pool:[{...premiseSchema.pool[0],premiseId:'B'+(batchIndex+1)+'-P1'}]}
+          : {selectedPremises:[{premiseId:'固定原池真实ID',storyCategoryId:'原池实际K编号',readerQuestion:'仅追问本题材已有事实'}]};
         const phaseContext = promptPhase === 'pool'
-          ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。只输出pool；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
+          ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。输出pool'+'；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
           : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。';
         const priorDefectContext = promptPhase === 'pool' && options.failureReasons?.length
           ? '\n【已拒绝的因果缺陷样例：仅用于避免再次生成同类错误，不得复写旧故事、也不得篡改审核结论】'
@@ -5168,7 +5159,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
       const discoverPremisePoolBeforeCards = async (): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
-        const poolBatchCount = Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY, premisePoolSize);
+        const initialPlanningCallLimit=IDEA_INITIAL_PLANNING_MAX_CALLS;
+        const desiredBatches=IDEA_PREMISE_POOL_BASE_BATCHES;
+        const poolBatchCount=Math.min(desiredBatches,adaptiveDiscoveryConcurrency(premisePoolSize),premisePoolSize);
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
         const poolBatchSizes = Array.from({ length: poolBatchCount }, (_, index) => baseBatchSize + (index < extraBatchCount ? 1 : 0));
@@ -5272,18 +5265,23 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               poolFilterTotals.invalidNaming += 1;
               continue;
             }
+            if(/^B\d+-P\d+$/.test(String(item.premiseId||''))){
+              const slot=premiseSearchPlan(batch.batchIndex,batch.batchIndex<poolBatchCount?poolBatchCount:poolBatchCount+1,premisePoolSize,batch.requested,discoveryCategories,dto.webNovelGenre)
+                .find(slot=>slot.premiseId===String(item.premiseId||''));
+              if(!slot||slot.storyCategoryId!==String(item.storyCategoryId||'')){
+                stats.invalidCategory++;poolFilterTotals.invalidCategory++;continue;
+              }
+            }
             let storyCategoryId = 'K1';
             let storyCategory = dto.storyCategory;
             if (variedCategories) {
-              const match = String(item.storyCategoryId || '').trim().match(/^K(\d+)$/);
-              const categoryIndex = match ? Number(match[1]) - 1 : -1;
-              if (categoryIndex < 0 || !discoveryCategories[categoryIndex]) {
-                stats.invalidCategory += 1;
-                poolFilterTotals.invalidCategory += 1;
-                continue;
+              try {
+                const choice=bindPremiseCategory({storyCategoryId:String(item.storyCategoryId||'').trim()},discoveryCategories);
+                storyCategoryId=String(choice.storyCategoryId);
+                storyCategory=String(choice.storyCategory);
+              }catch{
+                stats.invalidCategory++;poolFilterTotals.invalidCategory++;continue;
               }
-              storyCategoryId = 'K' + (categoryIndex + 1);
-              storyCategory = discoveryCategories[categoryIndex];
             }
             stats.validBeforeDedup += 1;
             poolFilterTotals.validBeforeDedup += 1;
@@ -5339,11 +5337,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let poolSupplementAttempted = false;
         let poolSupplementRequested = 0;
         let poolSupplementAdded = 0;
-        const minimumViablePool = ideaPreselectionCapacity(requestedCount, premisePoolSize);
+        const minimumViablePool = plannedPreselectionCount(requestedCount,ideaPreselectionCapacity(requestedCount,premisePoolSize),
+          sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,adaptiveDiscoveryConcurrency(premisePoolSize));
         // Replenish the *screening* capacity, not just the final delivery floor:
         // preliminary source/causal/genre reviews and full-card gates may reject
         // valid-looking seeds. A pool of five for five is already understocked.
-        const canSupplementPool = candidatePool.length < minimumViablePool
+        const canSupplementPool = poolBatchResults.length<initialPlanningCallLimit && reselectionCompletionBudget.remaining>0 && candidatePool.length < minimumViablePool
           && poolBatchResults.some(batch => batch.rawReturned !== null && !batch.blocked && !batch.error);
         if (canSupplementPool) {
           poolSupplementAttempted = true;
@@ -5358,6 +5357,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               prompt: buildPremiseSelectionPrompt('pool', {
                 batchIndex, batchCount: poolBatchCount + 1, batchSize: poolSupplementRequested, pool: candidatePool,
               }),
+              physicalCallBudget:reselectionCompletionBudget,
               scenario: 'idea_generate',
               timeout: discoveryBudget.complexTimeoutMs,
               maxEmptyRetries: 1,
@@ -5392,6 +5392,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           poolSupplementAdded = candidatePool.length - beforeSupplement;
         }
         const poolGenerationAudit = {
+          initialPlanningCallLimit,
+          lockedSearchPlan:poolBatchSizes.flatMap((size,index)=>premiseSearchPlan(index,poolBatchCount,premisePoolSize,size,discoveryCategories,dto.webNovelGenre)),
           strategy: poolSupplementAttempted ? 'parallel_pool_batches_then_bounded_unique_top_up_then_fixed_pool_selection' : 'parallel_pool_batches_then_fixed_pool_selection',
           startedAt: new Date(poolStartedAt).toISOString(),
           finishedAt: new Date().toISOString(),
@@ -5530,14 +5532,18 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         // Up to three additional paths from the SAME fixed pool are selected
         // and independently reviewed before card construction, avoiding serial
         // original-pool reselection for every downstream failure.
-        const preselectionTarget=ideaPreselectionCapacity(requestedCount,candidatePool.length);
+        const preselectionTarget=plannedPreselectionCount(requestedCount,ideaPreselectionCapacity(requestedCount,candidatePool.length),
+          sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,adaptiveDiscoveryConcurrency(candidatePool.length));
+        if(!preselectionTarget)throw failWithPoolAudit(new Error('共享来源审核额度无法覆盖请求数量，未支付无法审核的选优调用'),
+          'fixed_pool_selection','preselection_review_capacity_shortfall');
         const selectionStartedAt = Date.now();
         let selectionWallMs = 0;
         let parsedSelection: any = null;
+        let selectionFailureStopReason='fixed_pool_selection_failed';
         const initialSelection = await (async () => {
           try {
             const selectionResponse = await this.realLLM.generate({
-              prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool }),
+              prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool,targetCount:preselectionTarget }),
               scenario: 'idea_generate',
               timeout: discoveryBudget.complexTimeoutMs,
               maxEmptyRetries: 1,
@@ -5552,7 +5558,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             // Validate story shape and identity first. An incomplete citation
             // index gets one plan-only correction before the unchanged strict
             // normalizer and independent source/payoff gates run.
-            const rawSelected = parsedSelection?.selectedPremises;
+            const returnedSelected=parsedSelection?.selectedPremises;
+            const rawSelected=projectPremiseSourceChoices(returnedSelected,candidatePool);
+            const boundCount=Array.isArray(returnedSelected)?returnedSelected.filter(row=>row?.sourceBindings!==undefined).length:0;
+            const projectedCount=Array.isArray(rawSelected)?rawSelected.filter((row,index)=>row!==returnedSelected[index]).length:0;
+            Object.assign(poolGenerationAudit,{strategy:'parallel_lightweight_pool_then_fixed_identity_selection',
+              selectionTransport:{serverProjected:projectedCount,sourceBound:boundCount,legacyExpanded:Array.isArray(rawSelected)?rawSelected.length-boundCount-projectedCount:0}});
+            this.logger.log('idea-discover: global selection serverProjected='+projectedCount+' sourceBound='+boundCount+' target='+preselectionTarget);
             const shaped = normalizePremiseSelectionPayload({
               pool: candidatePool,
               selectedPremises: Array.isArray(rawSelected) ? rawSelected.map(item => {
@@ -5582,7 +5594,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               error,
               'fixed_pool_selection',
               parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')
-                ? 'selection_prerequisite_blocked' : 'fixed_pool_selection_failed',
+                ? 'selection_prerequisite_blocked' : selectionFailureStopReason,
               { selectionWallMs, preselectedPremises: selectedRows, premiseSelected: selectedRows.length },
             );
           }
@@ -5599,7 +5611,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           const preselectionReviewFloor=premiseReviewCallFloor(
             initialSelection.selected.length,sourceGrouping.sourceBatchSize,
             sourceGrouping.reviewGroupingMode);
-          const refillReviewFloor=requestedCount>1?2:1;
+          const refillReviewFloor=premiseReviewCallFloor(requestedCount,
+            sourceGrouping.sourceBatchSize,sourceGrouping.reviewGroupingMode);
           const initialReviewAllowance=reserveFinalRefillReviewCapacity(
             sourceCompletionBudget,preselectionReviewFloor,refillReviewFloor);
           normalizedSelection = await this.reconcilePremiseSelection(
@@ -6161,7 +6174,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           // cannot provide the desired gap plus a small dynamic hedge.
           const seedDeficit=Math.max(0,desiredSupplement-unusedSeeds.length);
           if(seedDeficit>0 && reselectionCompletionBudget.remaining>=2){
-            const batchCount=Math.min(IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,seedDeficit,
+            const batchCount=Math.min(IDEA_PREMISE_POOL_BASE_BATCHES,seedDeficit,
               reselectionCompletionBudget.remaining-1);
             if(batchCount>0){
               try{
@@ -6170,7 +6183,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               const existingKeys=new Set(premiseDiscovery.pool.flatMap(seed=>[
                 'title:'+normalizeTitle(seed.workingTitle),'core:'+normalizeTitle(seed.storyCore)]));
               const newSeedBatches=await independentReviewBatches(seedSizes,reselectionCompletionBudget,
-                IDEA_PREMISE_POOL_GENERATION_CONCURRENCY,async(size,index,budget)=>{
+                IDEA_PREMISE_POOL_BASE_BATCHES,async(size,index,budget)=>{
                   const answer=await this.realLLM.generate({
                     prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
                       batchIndex:index,batchCount,batchSize:size,
@@ -6244,7 +6257,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               });
               const raw=JSON.parse(jsonrepair(String(selectionAnswer.content||'{}')
                 .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
-              const source=Array.isArray(raw.selectedPremises)?raw.selectedPremises:[];
+              const source=projectPremiseSourceChoices(Array.isArray(raw.selectedPremises)?raw.selectedPremises:[],unusedSeeds);
               const prelim=normalizePremiseSelectionPayload({
                 pool:unusedSeeds,
                 selectedPremises:source.map((item:any)=>{
@@ -6348,7 +6361,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         premisePoolTarget: premisePoolSize,
         premisePoolTargetMet: premiseDiscovery.poolTargetMet,
         premiseSelected: allReviewedPremises.length,
-        preselectionCapacityTarget:ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length),
+        preselectionCapacityTarget:Number((premiseDiscovery.selectionAudit as Record<string,unknown>)?.preselectionCapacityTarget)||ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length),
         preselectionCapacityGap:Math.max(0,ideaPreselectionCapacity(requestedCount,premiseDiscovery.pool.length)-selectedPremises.length),
         preselectionSurplus: Math.max(0,allReviewedPremises.length-requestedCount),
         independentlyVettedPremises:allReviewedPremises.length,
@@ -6509,12 +6522,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const splitSources=()=>splitReviewMaterial(selection.selected,item=>({selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId)}))
         .map(selected=>({...selection,selected,pool:selection.pool.filter(seed=>selected.some(item=>item.premiseId===seed.premiseId))}));
       const grouping=readGenerationBudgets();
-      if (shouldBatchLargePremiseSourceReview(selection.selected.length,grouping.reviewGroupingMode,
-        grouping.sourceBatchSize,budget.remaining)) {
-        // Large independent source partitions should not block one another.
-        // Preserve per-premise source fields and genre/category/payoff evidence
-        // in every partition; derive partitions from the live request size. Protocol-capacity fallback within each partition is unchanged.
-        batches=premiseSourceBatches(selection);
+      const groups=fundedSourceReviewGroups(selection.selected.length,grouping.sourceBatchSize,budget.remaining,
+        adaptiveDiscoveryConcurrency(selection.selected.length+1),grouping.reviewGroupingMode);
+      if(!groups)throw Error('共享来源审核额度不足以覆盖全部分组，未发起无法完成的审核');
+      if(groups>1){
+        batches=premiseSourceBatches(selection,groups);
       } else if (grouping.reviewGroupingMode === 0) {
         try { return await this.reviewPremiseSelection(selection, standard, mode, budget, true, requiredGenres, reviewLimiter); }
         catch (error) {
@@ -6838,13 +6850,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // trailing full-story JSON example contradicted that rule and caused
       // redundant story regeneration during the slow reselection call.
       const fullReselectionShape = {
-        premiseId:'可用原池真实ID',protagonistSituation:'原池主人公处境',
-        openingEvent:'原池触发',coreConflict:'原池冲突',
-        activeChoice:'原池实际选择',escalation:'必要条件与升级',
-        reversalEffect:'反转',payoff:'有因果条件的兑现',
-        irreplaceableCarrier:'不可替代载体',
-        secondOrderConsequence:'二阶后果',readerQuestion:'读者追问',
-        causalPlan:premiseCausalPlanExample(),storyCategoryId:'原池实际K编号',
+        premiseId:'可用原池真实ID',storyCategoryId:'原池实际K编号',
+        sourceBindings:SOURCE_BINDING_EXAMPLE,readerQuestion:'仅追问已有故事事实',
+        causalPlan:premiseCausalPlanExample(),
       };
       const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
         replacesPremiseId:String(slot.replacesPremiseId),
@@ -6852,9 +6860,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           ?{premiseId:String(slot.replacesPremiseId),causalPlan:premiseCausalPlanExample()}
           :fullReselectionShape,
       }))};
+      // Screening surplus is not a reserve-wave flag. A source-supported
+      // correction may keep its OWN original identity in the initial wave too.
+      const correctableIds=new Set(scopedSlots.filter(slot=>slot.mode==='correct_or_replace_from_pool')
+        .map(slot=>String(slot.replacesPremiseId)));
       const availableIds=premiseReselectionPlan(selected,scopedReview).availableCandidates.map(item=>item.premiseId)
         .filter(id=>(deliveryCount>=requestedCount||!attemptedBeforeReserve.has(String(id))
-          ||citationOnlyIds.has(String(id)))
+          ||correctableIds.has(String(id)))
           &&!protectedIds.includes(id));
       // Keep the canonical pool unchanged for server-side validation. Only send
       // identities that can legally fill these slots; discarded and protected
@@ -6887,9 +6899,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           +'\n【必须处理的位置及模式】'+JSON.stringify(scopedSlots.map(slot=>({replacesPremiseId:slot.replacesPremiseId,mode:slot.mode})))
           +'\n【可用原池ID】'+JSON.stringify(availableIds)+'\n【固定保留身份】'+JSON.stringify(protectedIds)
           +'\n每项完整继承对应原池的实施者、对象、触发、选择、升级、反转与代价；同一事实的依赖字段一起修正。replace_from_pool必须换身份，correct_or_replace_from_pool优先保留原身份、只修复已被来源事实支持的因果引用或遗漏展开，不安排额外备用方案；若原池实缺条件仍须换题。不得复制其它位置、改变分类或用正常项填空。'
-          +'\n若本位置只有causalPlan把已存在的后续行动、核验、决定或代价错误绑定在前一步，且原池与当前全部筛选字段已具备完整成立条件，则只返回该位置的{"premiseId":"原身份ID","causalPlan":[实际逐字锚定的环节]}；服务器继承其余原故事字段，绝不为修索引重写全文。仅selection_fit且非强制换选的位置支持此精简形式；存在来源漂移、展开遗漏的实际条件时仍须按原协议返回完整相关字段，原池实缺条件或已证同构则必须换身份，不能靠索引补造事实。'
+          +'\n若本位置只有causalPlan把已存在的后续行动、核验、决定或代价错误绑定在前一步，且原池与当前全部筛选字段已具备完整成立条件，则只返回该位置的{"premiseId":"原身份ID","causalPlan":[实际逐字锚定的环节]}；服务器继承其余原故事字段，绝不为修索引重写全文。仅selection_fit且非强制换选的位置支持此精简形式；存在来源漂移、遗漏原池已有的实际条件时仍须返回完整sourceBindings与causalPlan，由服务器原样投影事实，原池实缺条件或已证同构则必须换身份，不能靠索引补造事实。'
           +'\n每个premise额外必返causalPlan，按下面JSON结构与已注入GEN-002规则逐项锚定原文；条数由实际事件决定，不按示例凑数。'+PREMISE_CAUSAL_SEQUENCE_DIRECTIVE
-      + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若改正触发、身份或到场事件，主动选择、升级、反转与兑现中依赖该事实的句子也要一起校正。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
+      + '\n修订须复查全部筛选字段的同一因果事实，不只补回点名引文；若绑定遗漏触发、身份或到场事件，须一起校正所有依赖字段的sourceBindings与causalPlan；不得改写这些字段的事实正文。原池只记人物提出请求时，不把后来揭露的真实动机当成原池已确认事实。原池动作的实施者、受益者或接收者未写清时，不得任选一种解释补成不可逆的相反关系；若无法沿原身份清楚继承，就优先从当前可用原池换选成熟题材。'
           +'\n先确定全部最终候选，并实质核对行动、升级、反转与代价差异；不要生成逐对自评文本，所有涉及新候选的比较仍由服务器独立同构复核。'
           +'\n按已注入GEN-002的最终差异比较合同执行。分类候选='+JSON.stringify(categories)
           +'\n【每个问题位置的实际输出形状】只输出JSON：'+JSON.stringify(reselectionOutputShape)+'。replacements恰好'+slots.length+'项，完整覆盖列出的位置，不重复或省略。只有原池与既有故事字段已满足全部兑现条件的纯引用错误可按短式原ID修正；若需要换题，必须改用原池真实新ID并补齐以下完整字段：'+JSON.stringify(fullReselectionShape),
@@ -11931,6 +11943,7 @@ ${summarizeOutlineConsistency(pending)}`,
         // 重发同一区间。这不是降级、不是换模型、不是减字段，而是把一次装不下的批量拆成装得下的批量，
         // 避免整条创建流程被判失败后重头再来（那才是真正的重复流程）。
         let batchResult: any = null;
+        const batchValidationIssues=(value:any)=>longOutlineBatchIssues(value,{count:batchCount,firstChapter:absoluteStart,minWords:input.chapterWordMin,maxWords:input.chapterWordMax,priorThreads:foreshadowings});
         for (;;) {
           batchEnd = localStart + batchCount - 1;
           absoluteStart = absoluteChapter + localStart - 1;
@@ -11941,16 +11954,21 @@ ${summarizeOutlineConsistency(pending)}`,
 目标总字数：${input.targetWords}字；全书规划总章数：${totalPlannedChapters}
 篇幅进度：全书规划${totalPlannedChapters}章，创建阶段仅详细展开前${LONG_DETAIL_OUTLINE_WINDOW}章、其余随写作滚动规划；本批为全书第${absoluteStart}-${absoluteStart + batchCount - 1}章。窗口内各章目标按剧情密度在区间内单独决定，不要求本窗口合计等于全书总字数。
 章节篇幅规则：每章必须在${input.chapterWordMin}-${input.chapterWordMax}字之间；每章的具体 targetWords 必须根据本章剧情任务、场景数量、冲突强度和节奏单独决定，不得平均分配。
-世界观（地基）：${JSON.stringify(foundation.coreSetting)}
+世界观与主线地基（只读事实来源，必须同时遵守）：${JSON.stringify({coreSetting:foundation.coreSetting,worldview:foundation.worldview})}
 当前卷：${JSON.stringify(volume)}
 主要人物：${JSON.stringify(characters.map((character: any) => ({ name: character.name, identity: character.identity, arc: character.arc })))}
 本批范围：卷内第${localStart}-${batchEnd}章，共${batchCount}章；全书第${absoluteStart}-${absoluteStart + batchCount - 1}章。
-上一批结尾：${chapters.length > 0 ? JSON.stringify(chapters[chapters.length - 1]) : '本卷起点'}
+本批之前已经生成的完整章节事实（含前卷，只读事实来源，不得只依据上一章推翻更早事件）：${JSON.stringify([...volumes.flatMap((priorVolume:any)=>priorVolume.chapters||[]),...chapters])}
+本批须承接上述实际发生的事件和状态；人物的猜测、请求、计划与已经执行的行动必须区分。content、scenes、characterActions和timelineEvent对同一事件的先后与完成程度须一致；结果字段不能把尚未执行的计划写成既成事实。前章已完成的结果不再次兑现。
+本批以前已埋设的伏笔身份目录：${JSON.stringify(foreshadowings.map((item:any)=>({id:item.id,content:item.content,setupChapter:item.setupChapter})))}
 
 每章必须包含 title,targetWords（${input.chapterWordMin}-${input.chapterWordMax}内的动态规划值）,wordCountReason（说明为何本章需要该篇幅）,content（具体事件链和结果）,chapterFunction,scenes（所有必要具体场景）,characterActions,conflict,highlight,hook,timelineEvent。${CHAPTER_FORESHADOWING_CONTRACT}
 不得为凑数量制造无关线索。章节功能随剧情交替，不得整批都是铺垫。只输出合法JSON：{"chapters":[...]}`;
           try {
             batchResult = await this.llmCallWithRetry<any>(`长篇第${volumeIndex + 1}卷章纲${localStart}-${batchEnd}`, chapterPrompt, {
+              validate:value=>batchValidationIssues(value).length===0,
+              describeValidation:batchValidationIssues,
+              retryInstruction:'只纠正本批实际字段和伏笔来源编号，保留其它已生成且成立的章节事实及前批资料。激活、提醒或回收必须reference到已埋设目录或本批先前真实埋设的同一伏笔，不把新事件描述当旧线索身份；首次新线索应明确埋设或仅作为当前事件，不得虚构前章已埋设。不得删掉真实必要事件或减少本批章数。',
               temperature: 0.7,
               projectId: input.projectId,
               scenario: 'outline',
@@ -11974,9 +11992,8 @@ ${summarizeOutlineConsistency(pending)}`,
         const batchChapters = Array.isArray(batchResult.data)
           ? batchResult.data
           : (Array.isArray(batchResult.data?.chapters) ? batchResult.data.chapters : []);
-        if (batchChapters.length !== batchCount) {
-          throw new Error(`第${volumeIndex + 1}卷第${localStart}-${batchEnd}章应返回${batchCount}章，实际返回${batchChapters.length}章。`);
-        }
+        const batchDefects=batchValidationIssues(batchResult?.data);
+        if(batchDefects.length)throw new Error('长篇章纲未通过批次合同：'+(batchResult?.validationIssues?.join('；')||batchDefects.join('；')));
         // 上游真实 completion_tokens 已包含 reasoning token，是「这一批真实花了多少输出预算」的完整计量；
         // 除以本批章数得到真实每章成本，再按同一份预算算出下一批能装多少章。
         // 不给每章成本另加 reasoning 预留：reasoning 已计入该计量，再预留一次等于把成本重复扣，
@@ -11988,22 +12005,9 @@ ${summarizeOutlineConsistency(pending)}`,
         }
         for (const [batchIndex, chapter] of batchChapters.entries()) {
           const chapterNumber = absoluteStart + batchIndex;
-          if (!chapter?.title || !chapter?.content || !chapter?.conflict || !chapter?.hook || !Array.isArray(chapter?.scenes)) {
-            throw new Error(`全书第${chapterNumber}章章纲字段不完整。`);
-          }
           const chapterTargetWords = Number(chapter.targetWords);
-          if (!Number.isInteger(chapterTargetWords) || chapterTargetWords < input.chapterWordMin || chapterTargetWords > input.chapterWordMax || !String(chapter.wordCountReason || '').trim()) {
-            throw new Error(`全书第${chapterNumber}章必须按剧情节奏给出${input.chapterWordMin}-${input.chapterWordMax}字的动态目标及篇幅理由。`);
-          }
           const nextPlannedWords = plannedChapterWords + chapterTargetWords;
           const chapterForeshadowings = readChapterForeshadowing(chapter);
-          for (const item of chapterForeshadowings) {
-            const defect = describeForeshadowingDefect(item);
-            if (defect) {
-              // 不补默认值、不降级：把模型实际返回的那一条原样带出来，直接暴露口径偏差。
-              throw new Error(`全书第${chapterNumber}章伏笔不符合契约（${defect}）：${JSON.stringify(item).slice(0, 400)}`);
-            }
-          }
           const normalizedChapter = {
             ...chapter,
             chapterNumber,
@@ -12049,7 +12053,7 @@ ${summarizeOutlineConsistency(pending)}`,
       recoveryChapter:row.recoveryChapter, evidenceText:row.evidenceText,
     }));
     const globalPrompt = `${platformDirective ? platformDirective + "\n\n" : ""}依据已确认的长篇地基、完整分卷目录和已生成的首个细纲窗口，识别真正贯穿全书或跨卷的伏笔。不同范围伏笔从开篇就可互相交织，而不是先结束本卷小伏笔再启动全书伏笔。不得重复登记首个窗口已埋设的同一条伏笔；可在它的既有线索之上补充不同来源、关联及后续兑现范围。数量由实际主线、人物弧和世界规则决定，不得固定数量；没有独立跨卷伏笔时返回空数组，不得为填充模块编造线索。${GLOBAL_FORESHADOWING_CONTRACT}只输出合法JSON：{"foreshadowings":[{"content":"","type":"","scope":"global|volume","setupChapter":1,"recoveryChapter":2,"recoveryWindowStart":2,"recoveryWindowEnd":3,"evidenceText":"","riskLevel":"medium","recoveryCondition":"","payoffDescription":""}]}。
-地基：${JSON.stringify({ coreSetting: foundation.coreSetting, skeletonVolumes: normalizedSkeletons })}
+地基：${JSON.stringify({ coreSetting: foundation.coreSetting, worldview: foundation.worldview, skeletonVolumes: normalizedSkeletons })}
 分卷目录：${JSON.stringify(volumes.map((volume: any) => ({ title: volume.title, theme: volume.theme, chapters: volume.chapters.map((chapter: any) => ({ chapterNumber: chapter.chapterNumber, title: chapter.title, chapterFunction: chapter.chapterFunction })) })))}
 已创建的首窗章级伏笔（只读来源，同一身份不得重建）：${JSON.stringify(initialClueSources)}`;
     const globalResult = await this.llmCallWithRetry<any>('长篇跨卷伏笔', globalPrompt, {

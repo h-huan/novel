@@ -58,10 +58,10 @@ describe('locked-card historical exclusion transport', () => {
 describe('original fixed-pool causation must anticipate evidenced final Gate failures',()=>{
  it('requires real contract, evidence attribution and authority before any selected payoff is promised',()=>{
   const prompt=ideaPremiseSelectionDirective('short_story',5,15,false,5,true);
-  expect(prompt).toContain('退出投标不自动触发违约金');
-  expect(prompt).toContain('报警或举报不自动授予进入特定私人场所的权限');
-  expect(prompt).toContain('辨出被破坏物品的异常不等于证明具体人员实施');
-  expect(prompt).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
+  expect(prompt).toContain('权限及实际决定');
+  expect(prompt).toContain('普通直接因果不额外强加机构或手续');
+  expect(prompt).toContain('证明范围与责任归属');
+  expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
  });
 });
 
@@ -673,7 +673,7 @@ it('fixed-pool selection uses the canonical single-output contract without obsol
  const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
  expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
  expect(rule).toContain('只输出selectedPremises；');
- expect(rule).toContain('中段及后段的推进须由主角');
+ expect(rule).toContain('主角在新阻力下要有实际选择');
  expect(rule).toContain('逐对比较');
  expect(rule).toContain('必要条件');
  expect(rule).not.toContain('6. 输出 pool 和 selectedPremises');
@@ -735,15 +735,15 @@ describe('candidate seed structural evidence prevents downstream rescue',()=>{
 describe('source-to-card payoff continuity in the existing selection call',()=>{
   it('tests opposing actors and provisional results before selecting an apparently mature premise',()=>{
     const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
-    expect(prompt).toContain('对手按已写性格可能采取的拒绝、拖延、不开门');
-    expect(prompt).toContain('暂停、调查、受理与最终撤销、退还、追责');
-    expect(prompt).toContain('旧录音只证明其实际记录过的旧事件');
-    expect(prompt).toContain('临时拦截、未签字、封存或暂缓若随后被对手撤销');
-    expect(prompt).toContain('社保稽核与工伤认定');
-    expect(prompt).toContain('进入走廊或同地出现');
-    expect(prompt).toContain('人物是否有途径得知其随后说出的秘密或单号');
-    expect(prompt).toContain('关键物证/账本/录像如何在实际地点与保管人之间移动');
-    expect(prompt).toContain('结果由谁在什么条件下作出有效决定');
+    expect(prompt).toContain('对手按已写性格可能采取的拒绝、拖延或反制');
+    expect(prompt).toContain('准备、提议、暂缓、调查等状态不等于最终生效');
+    expect(prompt).toContain('旧事件证据不能自动证明新事件');
+    expect(prompt).toContain('临时条件被撤销后须仍有真实生效的替代条件');
+    expect(prompt).toContain('不同主体的申请、受理、认定和执行分别核查');
+    expect(prompt).toContain('排除自身或同地出现不能自动归责他人');
+    expect(prompt).toContain('知情与配合动机');
+    expect(prompt).toContain('物证取得及传递');
+    expect(prompt).toContain('权限及实际决定');
     expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
   });
   it('does not upgrade a stopped process or past recording to a new completed outcome during card structuring',()=>{
@@ -770,4 +770,11 @@ describe('locked-card title recovery stays inside original quality pipeline',()=
   expect(card.sourcePremiseId).toBe('P5');
   expect(selectedPremiseEvidenceForIdeaCard(card)).toMatchObject({premiseId:'P5'});
  });
+});
+
+it('rejects hidden factual fields outside the independent source-review contract',()=>{
+ const seed={premiseId:'P1',workingTitle:'原池真实题材',storyCore:'原池已经写明完整行动、成立条件与实际结果'};
+ for(const field of ['conditions','prerequisites','secretEvidence']){
+  expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[{...selectedPremise('P1'),[field]:'未参与审核的秘密条件'}]},1,1)).toThrow('额外字段');
+ }
 });

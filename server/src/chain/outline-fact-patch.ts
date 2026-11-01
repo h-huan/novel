@@ -41,7 +41,7 @@ export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):
         ||Array.isArray(prior)&&!/^(0|[1-9]\d*)$/.test(part))throw Error('局部事实修复路径不存在：'+key);
       prior=prior[part];
     }
-    if(parts.length>1&&(typeof value!==typeof prior||(value===null)!==(prior===null)||Array.isArray(value)!==Array.isArray(prior)))
+    if(typeof value!==typeof prior||(value===null)!==(prior===null)||Array.isArray(value)!==Array.isArray(prior))
       throw Error('局部事实修复不能改变字段类型：'+key);
     return {parts,normalized,value};
   });
@@ -179,17 +179,27 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
    if(!pathOverlaps(normalizePath(oldPath),target))continue;
    const after=current.get(oldPath);
    if(after===undefined||after===before)continue;
+   // A missing event can be supplied without rewriting an existing TRUE
+   // warning/action. Admit only a substantive pure insertion in the exact
+   // cited narrative field. The unchanged fact and action reviewers still
+   // judge whether it actually supports the result; no verdict is inferred.
+   let prefix=0;while(prefix<before.length&&prefix<after.length&&before[prefix]===after[prefix])prefix++;
+   let suffix=0;while(suffix<before.length-prefix&&suffix<after.length-prefix
+     &&before[before.length-1-suffix]===after[after.length-1-suffix])suffix++;
+   const narrativeInsertion=['content','coreContent','plot'].includes(target)
+     &&normalizePath(oldPath)===target&&before.length-suffix===prefix
+     &&after.slice(prefix,after.length-suffix).replace(/[\s，。！？；：、,.!?;:]/g,'').length>=8;
    const literal=String(quote||'').trim();
-   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal));
+   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal))||narrativeInsertion;
    const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
-   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped));
+   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped))||narrativeInsertion;
    // Audit anchors retain the JSON-escaped spelling of quoted/newline text,
    // while chapter leaves contain actual characters. Decode only valid JSON
    // escapes before declaring an explicit address mismatched.
    if(literal){try{
     const decoded=JSON.parse('"'+literal+'"');
     if(typeof decoded==='string'&&before.includes(decoded))
-     return changeTouchesFragment(before,after,evidenceClause(before,decoded));
+     return changeTouchesFragment(before,after,evidenceClause(before,decoded))||narrativeInsertion;
    }catch{}}
    // If the auditor supplies an explicit quote which cannot be found at this
    // address, changing any other text in that field does not repair this gap.

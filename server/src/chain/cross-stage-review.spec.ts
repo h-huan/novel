@@ -150,3 +150,17 @@ describe('cross-module review classification and protocol', () => {
     expect(describeCrossStageReviewValidation(value).length).toBeGreaterThan(0);
   });
 });
+
+it('does not use a later chapter action or unchanged earlier prose to repair an explicitly missing stage result',()=>{
+ const brief=JSON.stringify({confirmedStory:{scopeBreakdown:[{chapters:1,outcome:'客户当场确认既有权利'},{chapters:1,outcome:'正式交付函件'}]}});
+ const chapters=[{id:'early',chapterIndex:1,content:'主角单向说明条款，客户没有回应。'},{id:'later',chapterIndex:2,content:'后章才正式回应。'}];
+ const obligations=crossStageRepairObligations(brief,['early【关键结果】客户没有确认，只有主角单向说明'],chapters,['early','later']);
+ expect(obligations[0]).toMatchObject({chapterIds:['early'],requiresStageActionEdit:true});
+ const source=JSON.stringify({world:[{rules:'合同已有该条权利，双方均有权查看并当场确认。'}]});
+ const anchors=[{id:'E1',entityType:'chapter',entityId:'early',value:chapters[0].content},{id:'E2',entityType:'chapter',entityId:'later',value:chapters[1].content}];
+ const value={repairPlans:[{ref:'P1',status:'feasible',mechanismRefs:['S1'],actions:[{anchorId:'E1'},{anchorId:'E2'}],remainingCounterexamples:[]}],edits:[{anchorId:'E2',replacement:'客户在后章实际查看合同并确认条款。'}]};
+ expect(describeCrossStageRepairPlanValidation(value,obligations,source,anchors).join()).toContain('本阶段章节 early');
+ const fixed={...value,edits:[{anchorId:'E1',replacement:'主角说明条款，客户当场查看原合同并明确确认该权利。'}]};
+ expect(describeCrossStageRepairPlanValidation(fixed,obligations,source,anchors)).toEqual([]);
+ expect(anchors[0].value).toBe(chapters[0].content);
+});

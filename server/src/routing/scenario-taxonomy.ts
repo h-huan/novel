@@ -72,7 +72,7 @@ export function standardScene(scenario?: string | null, stepKey?: string | null)
 export function isEvaluationOutput(scenario?: string | null, stepKey?: string | null): boolean {
   const scene = standardScene(scenario, stepKey);
   return ['review', 'summary', 'state_extraction'].includes(scene)
-    || /(?:^|_)(?:review|audit|judge)(?:_|$)/.test(String(stepKey || ''));
+    || /(?:^|_)(?:review|audit|judge|recheck)(?:_|$)/.test(String(stepKey || ''));
 }
 
 /**

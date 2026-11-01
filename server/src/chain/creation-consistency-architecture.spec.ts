@@ -42,7 +42,7 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain("await accept(structuredCards, 'initial')");
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
-    expect(controllerSource).toContain('证据指向具体责任人须有区别于“只是排除自己”的指认依据');
+    expect(controllerSource).toContain('证据取得/保管/传递/归责范围');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
     expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");

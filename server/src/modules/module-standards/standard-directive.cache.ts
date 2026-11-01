@@ -4,7 +4,7 @@
  * for a scene and renders their registry directives.
  */
 import { createHash } from 'node:crypto';
-import { standardScene } from '../../routing/scenario-taxonomy';
+import { standardScene, isEvaluationOutput } from '../../routing/scenario-taxonomy';
 import {
   SYSTEM_WORKFLOW_RULESET_VERSION,
   SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP,
@@ -25,14 +25,16 @@ class StandardDirectiveCacheClass {
   private format(rule: SystemWorkflowRule, scene: string, stepKey?: string | null): string {
     const lines = [`【系统规则 ${rule.id} · ${rule.level} · ${rule.name}】${rule.summary}`];
     for (const detail of (stepKey ? SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP[stepKey]?.[rule.id] : undefined) ?? rule.details ?? []) lines.push(`- ${detail}`);
+    const reviewing = isEvaluationOutput(scene, stepKey);
     const directives = rule.directives;
     if (directives) {
-      if (['review'].includes(scene) && directives.review) lines.push(`评审：${directives.review}`);
+      if (reviewing && directives.review) lines.push(`评审：${directives.review}`);
+      else if (reviewing && directives.generation) lines.push(`核查已有候选是否满足以下要求，不生成或修复候选：${directives.generation}`);
       else if (['polish'].includes(scene) && directives.repair) lines.push(`修复：${directives.repair}`);
       else if (directives.generation) lines.push(`生成：${directives.generation}`);
       if (directives.save && ['writing', 'polish', 'review'].includes(scene)) lines.push(`保存：${directives.save}`);
     }
-    if (rule.evidencePolicy && ['review', 'polish'].includes(scene)) lines.push(`证据：${rule.evidencePolicy}`);
+    if (rule.evidencePolicy && (reviewing || scene === 'polish')) lines.push(`证据：${rule.evidencePolicy}`);
     return lines.join('\n');
   }
 

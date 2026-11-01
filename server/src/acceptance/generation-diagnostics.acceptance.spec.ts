@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import * as concurrency from '../chain/discovery-concurrency';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import { GenerationMetricsService, chapterResponsibilityIssueSignature } from '../modules/generation-metrics/generation-metrics.service';
@@ -12,7 +13,10 @@ import { IdeaAppealGateService } from '../chain/idea-appeal-gate.service';
 import { updateConstitution } from '../modules/project/creative-constitution';
 import { HttpException } from '@nestjs/common';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
-afterEach(() => standardDirectiveCache.clear());
+// Fixed host headroom keeps exact physical-call assertions reproducible;
+// low/high-headroom scheduling is covered separately in review-grouping.spec.
+beforeEach(() => { vi.spyOn(concurrency, 'adaptiveDiscoveryConcurrency').mockImplementation(count => Math.max(1, Math.min(count, 2))); });
+afterEach(() => { standardDirectiveCache.clear(); vi.restoreAllMocks(); });
 
 // 这里曾有只填平台/分类的旧版灵感请求，结果绕过四维创作设定；验收样例必须和正式入口同一硬门。
 const discoveryStandards = {

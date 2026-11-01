@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as config from '../config/generation-budgets';
+import * as concurrency from './discovery-concurrency';
 import { isReviewOutputCapacityError, splitReviewMaterial } from './review-grouping';
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
@@ -125,7 +126,8 @@ describe('aggregate review before capacity partitioning', () => {
     expect(result.sourceChecks).toHaveLength(50); expect(c.realLLM.generate).toHaveBeenCalledTimes(1);
     expect(budget.remaining).toBe(5); expect(JSON.stringify(selection)).toBe(before);
   });
-  it('automatically audits five unchanged premises in parallel 3+2 without losing evidence or a real rejection', async()=>{
+  it.each([{slots:2,sizes:[3,2]},{slots:6,sizes:[3,2]}])('audits five premises within live host slots $slots without losing evidence, rejection or budget', async({slots,sizes})=>{
+    vi.spyOn(concurrency,'adaptiveDiscoveryConcurrency').mockImplementation(count=>Math.max(1,Math.min(count,slots)));
     const pool=['A','B','C','D','E'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,
       storyCore:'原创故事的前置行动、权属和结局'+premiseId}));
     const selection=normalizePremiseSelectionPayload({pool,
@@ -141,9 +143,9 @@ describe('aggregate review before capacity partitioning', () => {
         reason:'逐项核对既定事件必要条件、执行者和兑现结果'}))},input);
     });
     const budget={remaining:6},result=await c.reviewPremiseSelection(selection,'有效标准','source_drift',budget);
-    expect(seen).toEqual([3,2]);expect(result.sourceChecks).toHaveLength(50);
+    expect(seen).toEqual(sizes);expect(result.sourceChecks).toHaveLength(50);
     expect(result.issues.map((row:any)=>row.premiseId)).toEqual(['D']);expect(result.passed).toBe(false);
-    expect(budget.remaining).toBe(4);
+    expect(budget.remaining).toBe(6-sizes.length);
   });
   it('source capacity fallback preserves all refs and a real drift', async () => {
     vi.mocked(config.readGenerationBudgets).mockReturnValue({

@@ -64,13 +64,13 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
     // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
     // missing decisive actors/conditions were being discovered after expensive reselection.
-    expect(source).toContain('没有可信条件就换一条能成立的故事骨架');
+    expect(source).toContain('先在原池写清排除这种可能的事实，否则换用成立的机制');
     // These constraints now live in the single canonical selection directive,
     // not a fragile controller-side string replacement.
     const selectionDirective = read('idea-discovery-contract.ts');
     expect(source).toContain('ideaPremiseSelectionDirective(');
-    expect(selectionDirective).toContain('仅靠配角依次揭露旧资料');
-    expect(selectionDirective).toContain('原池缺少必要条件的，不得在展开字段里自造相反事实救活');
+    expect(selectionDirective).toContain('配角轮流解释旧资料不算推进');
+    expect(selectionDirective).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
     expect(source).toContain('不准只换职业、场所或物证名称');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
@@ -98,10 +98,10 @@ describe('chain HTTP architecture', () => {
   it('keeps evidenced physical proof and relationship conditions at the candidate source, not just final-card rejection', () => {
     const source = read('chain.controller.ts');
     const contract = read('idea-discovery-contract.ts');
-    expect(source).toContain('留在钥匙柄上的标记不能作为锁芯痕迹');
-    expect(source).toContain('反派私库样本');
-    expect(source).toContain('仅是男女朋友就不能凭空出现婚内财产');
-    expect(source).toContain('主角承诺亲自递送材料');
+    expect(source).toContain('证据取得/保管/传递/归责范围');
+    expect(source).toContain('行动能力及资源来源');
+    expect(source).toContain('人物关系与权利主体须一致');
+    expect(source).toContain('承担结果的必要行动须实际执行');
     expect(source).toContain('核对物证的物理来源与样本取得链');
     expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
     expect(contract).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');

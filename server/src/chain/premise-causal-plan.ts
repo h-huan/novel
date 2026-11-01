@@ -7,7 +7,8 @@ export interface PremiseCausalLink {
 }
 // Field placement is not an event's causal role. A payoff paragraph may contain
 // both a new action and its result; the semantic review must distinguish them.
-const narrativeFields = ['protagonistSituation', 'openingEvent', 'coreConflict', 'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier', 'secondOrderConsequence'];
+export const PREMISE_CAUSAL_NARRATIVE_FIELDS = ['protagonistSituation', 'openingEvent', 'coreConflict', 'activeChoice', 'escalation', 'reversalEffect', 'payoff', 'irreplaceableCarrier', 'secondOrderConsequence'];
+const narrativeFields=PREMISE_CAUSAL_NARRATIVE_FIELDS;
 const actionFields = narrativeFields, conditionFields = narrativeFields, resultFields = narrativeFields;
 const foldQuotation = (value: string) => value.replace(/["'“”‘’]/g, '"');
 
@@ -76,7 +77,7 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
  * The model can use any count of steps, including one for true direct causality.
  */
 export const PREMISE_CAUSAL_SEQUENCE_DIRECTIVE =
-  '因果计划只绑定故事已写出的实际状态变化。中间动作不得直接标终局payoff：主角准备或提出请求，只能得到已发生的直接结果；若最终胜负还依赖后续物证取得/核验、他人到场、负责人认定、对手行动或程序决定，须把这些动作及既有条件接续成后续环节，不能让前一步越级产生终局。每个result只填写该步action及其已成立conditions实际产生的结果，不能把后续结果提前填写；后一步的条件必须已在故事字段中存在，不能由终局倒推。最后一个关键环节应承接真正的payoff与代价，条件缺失时不能靠改causalPlan引用伪造成立；普通直接因果允许一环，不按示例强制凑环节。';
+  'causalPlan的每个field只能取'+PREMISE_CAUSAL_NARRATIVE_FIELDS.join('、')+'。conditions是计划环节内的引用数组，绝不是新的故事字段；所有必要条件必须已存在于上述实际故事字段；引用式选优时这些字段由sourceBindings从固定原池原样投影，禁止为补条件重写或新增原文，然后才绑定引用。禁止另造顶层conditions、prerequisites或其它故事字段；最后一个关键结果须用field=payoff引用实际兑现，不能漏掉或用结果反充行动。因果计划只绑定故事已写出的实际状态变化。中间动作不得直接标终局payoff：主角准备或提出请求，只能得到已发生的直接结果；若最终胜负还依赖后续物证取得/核验、他人到场、负责人认定、对手行动或程序决定，须把这些动作及既有条件接续成后续环节，不能让前一步越级产生终局。每个result只填写该步action及其已成立conditions实际产生的结果，不能把后续结果提前填写；后一步的条件必须已在故事字段中存在，不能由终局倒推。最后一个关键环节应承接真正的payoff与代价，条件缺失时不能靠改causalPlan引用伪造成立；普通直接因果允许一环，不按示例强制凑环节。示例仅说明引用形状和因果先后，绝不要求加入核验者、第三方裁决、证据或额外程序。每项实际声称的决定性结果都要有相应行动和条件；不能用一个局部结果跳到整片区域、全部关系或所有权利的变化。';
 
 export function premiseCausalPlanExample(): PremiseCausalLink[] {
   // Two-stage illustration prevents the old single action->payoff example
@@ -85,9 +86,9 @@ export function premiseCausalPlanExample(): PremiseCausalLink[] {
     { action: { field: 'activeChoice', quote: '主角实际发起第一项行动的连续原文' },
       conditions: [{ field: 'openingEvent', quote: '促使该行动发生的已建立条件连续原文' }],
       result: { field: 'escalation', quote: '第一项行动当下真正产生的变化连续原文' } },
-    { action: { field: 'escalation', quote: '后续核验者实际到场核验或决定的连续原文' },
-      conditions: [{ field: 'escalation', quote: '核验前已取得的独立证据与决定权限连续原文' }],
-      result: { field: 'payoff', quote: '经后续动作才兑现的结局与代价连续原文' } },
+    { action: { field: 'escalation', quote: '本故事后续实际执行并改变局面的行动连续原文' },
+      conditions: [{ field: 'escalation', quote: '该行动发生之前已具备的必要条件连续原文' }],
+      result: { field: 'payoff', quote: '由后续实际行动产生的最终结果与代价连续原文' } },
   ];
 }
 

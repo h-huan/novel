@@ -15,6 +15,23 @@ const policies = [TEMPORAL_FACT_CONTINUITY_POLICY, OUTLINE_STATE_ACCUMULATION_PO
 afterEach(() => standardDirectiveCache.clear());
 
 describe('public policy single injection', () => {
+  it('keeps story fact rules and quality policies without injecting chapter-clock protocols into inspiration, including refills',()=>{
+    standardDirectiveCache.rebuild();
+    for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_refill_selection','idea_card_structure','idea_presentation_review']){
+      const prompt=standardDirectiveCache.get('idea_generate',step);
+      const snapshot=standardDirectiveCache.snapshot('idea_generate',true,step);
+      expect(snapshot.ruleIds).toEqual(standardDirectiveCache.snapshot('idea_generate').ruleIds);
+      expect(snapshot.ruleIds).toEqual(expect.arrayContaining(['AUTH-002','CTX-005','CTX-008','GEN-002','QLT-003','QLT-007']));
+      expect(prompt).toContain('时间、因果、位置和可计数状态');
+      expect(prompt).toContain(SHORT_STORY_QUALITY_POLICY);
+      expect(prompt).not.toContain('timerId');
+      expect(prompt).not.toContain('elapsedDurationRef');
+      expect(prompt).not.toContain('首次世界观来源审核须覆盖本次实际全部字段');
+    }
+    expect(standardDirectiveCache.get('idea_generate','idea_premise_pool_refill')).toBe(standardDirectiveCache.get('idea_generate','idea_premise_pool_generation'));
+    expect(standardDirectiveCache.get('idea_generate','idea_premise_refill_selection')).toBe(standardDirectiveCache.get('idea_generate','idea_premise_selection'));
+    expect(standardDirectiveCache.get('writing')).toContain('timerId');
+  });
   it('scopes framework review without removing complete chapter language gates', () => {
     standardDirectiveCache.rebuild();
     const snapshot=standardDirectiveCache.snapshot('review',true,'creation_cross_stage_review');
@@ -137,4 +154,17 @@ it('keeps chapter causal and source requirements during outline generation witho
  expect(plan).toContain('关键');expect(plan).not.toContain('坐标由程序按 UTF-16');
  expect(standardDirectiveCache.get('review','alignment_review')).toContain('坐标由程序按 UTF-16');
  standardDirectiveCache.clear();
+});
+
+it('uses review directives for evaluation steps routed through idea_generate without changing rule scope or generation routing',()=>{
+ standardDirectiveCache.rebuild();
+ const generation=standardDirectiveCache.get('idea_generate','idea_premise_pool_generation');
+ expect(generation).toContain('生成：始终继承当前 Creative Constitution');
+ for(const step of ['idea_premise_source_drift_review','idea_premise_overlap_review','idea_presentation_review','idea_premise_payoff_recheck']){
+  const review=standardDirectiveCache.get('idea_generate',step);
+  expect(review).toContain('评审：按生成时同一 Constitution revision 评审');
+  expect(review).toContain('事实冲突必须指出互斥来源与证据');
+  expect(review).not.toContain('生成：始终继承当前 Creative Constitution');
+  expect(standardDirectiveCache.snapshot('idea_generate',true,step).ruleIds).toContain('GEN-002');
+ }
 });

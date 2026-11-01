@@ -196,7 +196,7 @@ export const CHAPTER_FORESHADOWING_CONTRACT = [
   FORESHADOWING_INTERLEAVING_POLICY,
   `伏笔字段 ${CHAPTER_FORESHADOWING_FIELD}（只在本章确有动作时填写，否则必须返回空数组 []）：`,
   `- 每项必填 content（伏笔本体：具体到物件、话语偏差、动作、地点或组织线索）、action（只能取 ${ACTIONS_TEXT} 之一）、evidenceText（本章可验证的原文证据）、riskLevel（只能取 ${RISK_TEXT} 之一，小写英文，不得写“高/中/低”等中文等级）、type（只能取 ${TYPE_TEXT} 之一）、scope（只能取 ${SCOPE_TEXT} 之一：仅本章内兑现的短线可用 chapter，同卷跨章伏笔不论短中长均用 volume，跨卷及全书用 global）；`,
-  '- 旧线索在后续章被提醒、补证或阶段揭示时，可用 reference 逐字指向已有伏笔ID或既有内容；本章仅记录本次新事实和本次作用，不重复建档、重设埋设章、重开回收窗口。多条线索同章可分别出现，各自独立保留未结结果。',
+  '- 旧线索在后续章被提醒、补证或阶段揭示时，应使用 reference 逐字指向已有伏笔ID或既有content；省略reference时content自身必须逐字等于原伏笔本体，不能用本章新事件描述代替旧身份。本批首次出现的新线索应标埋设，或仅作为普通当前事件而不填伏笔动作；不能因新角色识别新物件就凭空标激活。本章仅记录本次新事实和本次作用，不重复建档、重设埋设章、重开回收窗口。多条线索同章可分别出现，各自独立保留未结结果。',
   `- action 不是“回收”的每一项，必须同时给出 recoveryWindowStart、recoveryWindowEnd（回收窗口起止章号，整数）、recoveryCondition（满足什么条件才回收）、payoffDescription（回收时兑现什么效果）；这四项缺任意一项即为不合格，此时不要把该条写进 ${CHAPTER_FORESHADOWING_FIELD}，宁可为空数组；`,
   '- recoveryChapter（预期回收章号，整数）可选，有明确规划时填写。',
 ].join('\n');

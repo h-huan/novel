@@ -49,9 +49,9 @@ export function premiseReviewCallFloor(count:number, sourceBatchSize:number, gro
    ||!Number.isInteger(groupingMode)||![0,1].includes(groupingMode))
   throw Error('题材独立复核预算参数无效');
  if(!count)return 0;
- // Default mode sends 1-3 premises together; its source gate does not
- // partition a three-card review merely because sourceBatchSize is two.
- const sourceCalls=groupingMode===0&&count<4?1:Math.ceil(count/sourceBatchSize);
+ // Every mode respects the configured source batch ceiling. Fine-grained
+ // concurrency may spend extra calls only when the shared allowance funds it.
+ const sourceCalls=Math.ceil(count/sourceBatchSize);
  return sourceCalls+(count>1?1:0);
 }
 
@@ -67,13 +67,9 @@ export function affordableReviewedPremiseCount(
   throw Error('补充题材审核额度无效');
  let count=availableCount;
  while(count>0&&premiseReviewCallFloor(count,sourceBatchSize,groupingMode)>sourceCredits)count--;
- if(count>=mandatoryCount)return count;
- // In default grouping mode the existing source reviewer deliberately tries
- // one complete monolithic review when there are not enough credits to split.
- // Keep that valid route for MANDATORY delivery slots, while never spending
- // money on an unauditable optional screening hedge.
- const oneSourcePlusOverlap=mandatoryCount>1?2:mandatoryCount;
- return groupingMode===0&&sourceCredits>=oneSourcePlusOverlap?mandatoryCount:count;
+ // Demand never creates credits. Report a real deficit rather than buying
+ // an unpartitioned review outside the admission planner's capacity model.
+ return count;
 }
 
 export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
@@ -97,11 +93,9 @@ export function minimumReselectionReviewCalls(
    ||!Number.isInteger(changedCount)||changedCount<1||changedCount>selectedCount
    ||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1||![0,1].includes(groupingMode))
   throw Error('重选复核的已选数量或来源分组无效');
- // Changed facts require source/payoff re-review. With explicit grouping,
- // every disjoint source partition must be funded before reselection.
- // Default grouping retains its existing single-review fallback if split
- // partitions are unaffordable; this is a lower bound, not a quality pass.
- const sourceCalls=groupingMode===1?Math.ceil(changedCount/sourceBatchSize):1;
+ // Use the same source partition floor as execution in BOTH modes.
+ const sourceCalls=premiseReviewCallFloor(changedCount,sourceBatchSize,groupingMode)
+   -(changedCount>1?1:0);
  return sourceCalls+(forcesNewIdentity&&selectedCount>1?1:0);
 }
 
@@ -130,4 +124,30 @@ export function retainValidStructuredIdeaTitle<T extends {title?:unknown;alterna
  const alternatives=Array.isArray(card.alternateTitles)?card.alternateTitles:[];
  const replacement=[...alternatives,originalWorkingTitle].find(valid);
  return replacement?{...card,title:replacement}:card;
+}
+
+/** Optional screening surplus must fit the entire original review allowance.
+ * Never reduce the actual user demand or borrow from the final refill reserve. */
+export function preferFineSourceReview(count:number,batchSize:number,concurrency:number,groupingMode=0):boolean{
+ return groupingMode===0&&count>batchSize&&concurrency>=Math.ceil(count/2)+1;
+}
+export function plannedPreselectionCount(requested:number,desired:number,credits:number,batchSize:number,groupingMode:number,concurrency:number):number{
+ if(!Number.isInteger(requested)||requested<1||!Number.isInteger(concurrency)||concurrency<1)throw Error('选优容量参数无效');
+ const mandatory=Math.min(requested,desired);
+ const count=affordableReviewedPremiseCount(desired,credits,batchSize,groupingMode,mandatory);
+ if(count<mandatory)return 0;
+ // Screening surplus must not be traded for unaffordable extra partitions.
+ // The scheduler below funds fine partitions only after a whole correction.
+ return count;
+}
+export function fundedSourceReviewGroups(count:number,batchSize:number,credits:number,concurrency:number,groupingMode=0):number{
+ const minimum=premiseReviewCallFloor(count,batchSize,groupingMode)-(count>1?1:0);
+ if(!Number.isInteger(credits)||credits<0||!Number.isInteger(concurrency)||concurrency<1)throw Error('来源审核容量无效');
+ if(!count||credits<minimum)return 0;
+ const correctionFloor=premiseReviewCallFloor(count,batchSize,groupingMode);
+ // Never spend the last correction credits merely to make the first audit
+ // narrower. An independently rejected premise still needs replacement and
+ // a new source/overlap verdict inside the same allowance.
+ return preferFineSourceReview(count,batchSize,concurrency,groupingMode)&&credits>=count+correctionFloor
+  ?count:minimum;
 }

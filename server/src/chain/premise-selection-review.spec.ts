@@ -252,11 +252,11 @@ describe('premise selection before identity lock', () => {
    }
  });
 
-  it('reviews all five-premise fields in aggregate or funded concurrent batches',async()=>{
+  it('rejects an unfunded five-premise review before calling a model and covers every field in funded partitions',async()=>{
     const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
       selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
     const originalMethod=(ChainController.prototype as any).reviewPremiseSelection;
-    for(const allowed of [1,2]){
+    for(const allowed of [1,2,5,10]){
       const c=Object.create(ChainController.prototype) as any,requested:string[][]=[];
       c.logger={warn:vi.fn()};
       c.reviewPremiseSelection=vi.fn(async(...args:any[])=>{
@@ -270,10 +270,15 @@ describe('premise selection before identity lock', () => {
         return materializePremiseSourceReview({sourceChecks},batch);
       });
       const credits={remaining:allowed};
+      if(allowed===1){
+        await expect(c.reviewPremiseSelection(current,'原有标准','source_drift',credits)).rejects.toThrow('额度不足');
+        expect(requested).toEqual([]);expect(credits.remaining).toBe(1);continue;
+      }
       const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
       expect(requested.flat()).toEqual(['A','B','C','D','E']);
-      expect(requested).toHaveLength(allowed===1?1:2);
-      expect(credits.remaining).toBe(0);
+      expect(requested).toHaveLength(allowed===10?5:2);
+      expect(credits.remaining).toBe(allowed-requested.length);
+      expect(requested.every(batch=>batch.length<=3)).toBe(true);
       expect(review.passed).toBe(true);
       expect(review.sourceChecks?.map((row:any)=>row.ref))
         .toEqual(premiseSourceComparisonCatalog(current).map(row=>row.ref));
@@ -1030,4 +1035,26 @@ it('preserves independently failed overlap evidence across plan-only edits, neve
  expect(retainUnchangedOverlapIssues(previous,new Set(['B','D']))).toEqual([]);
  expect(retainUnchangedOverlapIssues(undefined,new Set())).toEqual([]);
  expect(previous.issues).toHaveLength(2);
+});
+
+it('keeps source-correctable original IDs eligible when screening target exceeds delivery demand',async()=>{
+ const c=Object.create(ChainController.prototype) as any,input=selection();
+ const issues=input.selected.map(row=>({kind:'source_drift',premiseId:row.premiseId,referencePremiseId:row.premiseId,
+  field:'activeChoice',quote:row.activeChoice,referenceQuote:row.storyCore,reason:'展开遗漏原池已有条件，允许沿原身份恢复实际事实'}));
+ let sourceCalls=0;
+ c.logger={warn:vi.fn(),log:vi.fn()};
+ c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:any,mode:string)=>mode==='source_drift'&&sourceCalls++===0
+   ?{passed:false,issues}:{passed:true,issues:[]});
+ let allowed:string[]=[],accepted=false;
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+  allowed=JSON.parse(prompt.split('【可用原池ID】')[1].split('【固定保留身份】')[0]);
+  const slots=JSON.parse(prompt.split('【必须处理的位置及模式】')[1].split('【可用原池ID】')[0]);
+  const data={replacements:slots.map((slot:any)=>({replacesPremiseId:slot.replacesPremiseId,premise:premise(slot.replacesPremiseId==='A'?'A':'C')}))};
+  accepted=options.validate(data);
+  return {data,warnings:[]};
+ });
+ await c.reconcilePremiseSelection(input,2,3,['悬疑'],'',[],undefined,1);
+ expect(allowed).toEqual(expect.arrayContaining(['A','C']));
+ expect(allowed).not.toContain('B'); // forced replacement hedge must still change identity
+ expect(accepted).toBe(true);expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });
