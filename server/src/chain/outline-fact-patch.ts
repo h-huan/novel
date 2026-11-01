@@ -46,6 +46,26 @@ export function extractOutlineFactPatch(value:unknown):Record<string,unknown> {
  return candidate;
 }
 
+/** Existing original current-chapter leaf addresses cited by the independent
+ * action/result audit. This guides the SAME authorized patch attempt; it
+ * cannot approve, modify, or infer a missing story action. */
+export function outlineFactRepairTargetPaths(
+ chapter:Record<string,any>,evidence:{gaps?:readonly {actionPath?:string|null;resultPath?:string|null}[]},
+):string[] {
+ return [...new Set((evidence.gaps||[]).flatMap(gap=>
+   [gap.actionPath,gap.resultPath]).filter((key):key is string=>
+   typeof key==='string'&&!!key.trim()))].filter(key=>{
+   const parts=key.replace(/\\[(0|[1-9]\\d*)\\]/g,'.$1').replace(/^0\\./,'').split('.');
+   if(!OUTLINE_FACT_REPAIR_FIELDS.includes(parts[0] as any))return false;
+   let value:any=chapter;
+   for(const part of parts){
+     if(value===null||typeof value!=='object'||!Object.hasOwn(value,part))return false;
+     value=value[part];
+   }
+   return typeof value==='string';
+ });
+}
+
 /** Apply only existing addresses under authorized story fields. Validate the
  * whole patch before mutating a clone; never append a guessed array member. */
 export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):Record<string,any> {
