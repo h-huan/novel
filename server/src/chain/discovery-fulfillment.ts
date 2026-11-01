@@ -1,5 +1,3 @@
-import { shouldBatchIdeaPresentation } from './idea-presentation-review';
-
 /** Lend initial preselection only its share of the EXISTING review calls.
  * Keep enough credits for a potential final-card deficit. Both stages still
  * use independent semantic/source/overlap Gates; credits are never cloned.
@@ -40,13 +38,11 @@ export function affordableFullCardRefillCount(
   throw Error('完整卡补足容量参数无效');
  let count=Math.min(availableSeeds,physicalCredits);
  while(count>0) {
-   const availableReviews=physicalCredits-count;
-   // Follow the actual independent final review grouping. Default aggregate
-   // mode needs only one call for small or unfunded-to-split batches;
-   // configured split mode needs a call for EVERY batch.
-   const split=groupingMode===1||shouldBatchIdeaPresentation(
-     count,groupingMode,reviewBatchSize,availableReviews);
-   const reviewCalls=split?Math.ceil(count/reviewBatchSize):1;
+   // Default mode audits <=3 full cards in one aggregate call. Larger
+   // groups must reserve the bounded split capacity: relying on an unfunded
+   // oversized aggregate risks a token-cap failure without recovery credits.
+   // Both modes still independently review every actual card.
+   const reviewCalls=groupingMode===0&&count<4?1:Math.ceil(count/reviewBatchSize);
    if(count+reviewCalls<=physicalCredits)return count;
    count--;
  }
