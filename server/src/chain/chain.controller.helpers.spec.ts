@@ -28,8 +28,29 @@ import {
 } from './chain.controller';
 import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
+import { RealLLMService } from './real-llm.service';
 import { STANDARD_PRECONDITIONS } from '../acceptance/test-standards';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
+
+describe('idea discovery reasoning latency contract',()=>{
+ it('bounds preliminary identity ranking only; independent semantic quality Gates retain their original effort',()=>{
+   vi.stubEnv('LLM_REASONING_EFFORT','');
+   try {
+     const effort=(RealLLMService.prototype as any).resolveReasoningEffort;
+     const pick=(stepKey:string)=>effort.call({},'idea_generate',stepKey);
+     expect(pick('idea_premise_selection')).toBe('medium');
+     expect(pick('idea_premise_refill_selection')).toBe('medium');
+     expect(pick('idea_premise_causal_plan_contract')).toBe('low');
+     for(const audited of ['idea_premise_source_drift_review',
+       'idea_premise_overlap_review','idea_premise_payoff_recheck',
+       'idea_presentation_review','idea_card_structure']){
+       expect(pick(audited)).toBeUndefined();
+     }
+     vi.stubEnv('LLM_REASONING_EFFORT','high');
+     expect(pick('idea_premise_selection')).toBe('high');
+   }finally {vi.unstubAllEnvs();}
+ });
+});
 
 /**
  * 单测替身：以下用例只验证 prompt 拼装与守卫流程本身，不验证执行标准解析。生产代码现在要求
