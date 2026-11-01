@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, summarizeDiscoveryStepMetrics, summarizeRecentIdeaActivity, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, summarizeRecentIdeaActivity, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -599,6 +599,11 @@ if (!health.ok) {
       runtimeProblems.push('latest_idea_discovery_over_8_minutes');
     else if(runFull&&!latency.measured)
       runtimeProblems.push('latest_idea_discovery_latency_unverified');
+  }
+  // Final acceptance cannot pass on missing, incomplete or contradictory
+  // historical discovery counts. Quick diagnosis remains observational.
+  if(runFull)for(const issue of discoveryProductionAcceptanceIssues(latestAuditSummary)){
+    if(!runtimeProblems.includes(issue))runtimeProblems.push(issue);
   }
 }
 
