@@ -5121,7 +5121,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective;
         const promptSchema = promptPhase === 'pool'
           ? {pool:[{...premiseSchema.pool[0],premiseId:'B'+(batchIndex+1)+'-P1'}]}
-          : {selectedPremises:[{premiseId:'固定原池真实ID',storyCategoryId:'原池实际K编号',readerQuestion:'仅追问本题材已有事实'}]};
+          : {selectedPremises:[{premiseId:'固定原池真实ID',storyCategoryId:'原池实际K编号',readerQuestion:'仅追问本题材已有事实',causalPlan:premiseCausalPlanExample()}]};
         const phaseContext = promptPhase === 'pool'
           ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。输出pool'+'；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
           : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。';
