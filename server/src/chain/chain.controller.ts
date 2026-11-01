@@ -8929,6 +8929,21 @@ ${(() => {
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
             const defects = dependencyCheck.defects;
             const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure);
+            // Use the independent review's existing authorized leaf addresses
+            // for the correction exemplar. Do not guess a path or story event.
+            const citedRepairPaths=[...new Set(actionRepairEvidence.gaps.flatMap(gap=>
+              [gap.actionPath,gap.resultPath]).filter((key):key is string=>
+              typeof key==='string'&&!!key.trim()))].filter(key=>{
+                const parts=key.replace(/\[(0|[1-9]\d*)\]/g,'.$1').split('.');
+                if(!OUTLINE_FACT_REPAIR_FIELDS.includes(parts[0] as any))return false;
+                let value:any=chData;
+                for(const part of parts){
+                  if(value===null||typeof value!=='object'||!Object.hasOwn(value,part))return false;
+                  value=value[part];
+                }
+                return typeof value==='string';
+              });
+            const repairExamplePath=citedRepairPaths[0]||'content';
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实与结果依赖局部修复`,
               `只修复当前章纲被事实与行动结果审查逐项点名的缺口。两类检查共享本章仅一次局部修复，不因新增审查再开修复循环。已确认题材与前章事实优先，世界观只能作不冲突的补充。本章尚未兑现的独立职责不得删除；若独立审核已证明原职责结果在前章完成，则必须删除当前章对旧结果的重复兑现声明，保留前章已确认事实，并在当前章原有人物、场景和结局边界内，把本章的content、scenes.outcome、characterActions.result等同步改为实际发生的后续行动、代价或关系变化。保留真实未完成任务，不新增人物、不虚构行动、不更换故事。
 【确认题材】${canonicalCreativeBrief}
@@ -8938,6 +8953,7 @@ ${(() => {
 【当前章纲】${JSON.stringify(chData)}
 【必须逐项修复；引文按位置到前章及当前章原始资料核对，不重复传送全文引文】${JSON.stringify(outlineFactRepairPromptDefects(defects))}
 【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
+【本章需要直接修改的有效原字段路径】${JSON.stringify(citedRepairPaths)}；只修改被点名的真实断言及同源投影，不得随意更改邻近无关句子。
 按已注入CTX-005、CTX-008、RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；本章的文件保管、后续行动或付出代价，不得重述为前章已完成的联名、机构决定或救援成功；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
 
 【跨字段数量矛盾定向修复】若独立审查已按实际行动算出同一事件的数量（例如三条中两条早已死亡、第三条之后死亡，另一条随后死亡，合计四条），须保留有行动证据的数量并把冲突的台词、content与characterActions逐处统一；只改台词不改行动字段、或只改行动不改台词，都不算修复。绝不把已成立的计数改成错误数字以迁就其它字段。若角色故意虚报，必须有原故事支持，不能临时编造解释。\n【冲突原句优先】若独立审查已经逐字指明相互矛盾的原话、问答或行动结果，先在本章content、scenes、characterActions等实际原字段找到被点名的完整旧断言，再确定符合前章及世界规则的最小改法；补丁必须直接改变至少一处错误断言及其同源投影。只修改同一字段周围的其它文字，即使措辞更顺，也不能消除该冲突。若证据不足以判定哪一句错，禁止猜造，保留明确失败。\n【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段或其已存在子路径（如characterActions.7.action或characterActions[7].action）。允许的顶层字段=${JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)}。禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}`,
@@ -8985,7 +9001,8 @@ ${(() => {
                     +'\n必须直接修复已有actionPath/resultPath指向的因果断言；计数、对话、content、scenes及characterActions的同源结果同时保持一致，不改写前章，不凭空新增事实。'
                     +'\n【授权补丁路径】'+JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)
                     +OUTLINE_FACT_PATCH_ADDRESS_POLICY+OUTLINE_FACT_REPAIR_SYNC_POLICY
-                    +'\n只能返回完整JSON对象 {"patch":{"content":"修正后的完整content原文"}}，或使用其它实际已存在的授权字段路径替换content。patch必须非空，只修改原有字段及已核实的缺口，不得发明事实；禁止返回分析、完整章纲、无实际变化的patch。';
+                    +'\n【本次需要直接修改的真实字段路径】'+JSON.stringify(citedRepairPaths)
+                    +'\n只能返回完整JSON对象 {"patch":{'+JSON.stringify(repairExamplePath)+':"该路径修正后的完整原类型字段值"}}；补丁必须使用实际存在且获授权的字段路径。其它同源投影也须一致，不得只改无关句子；不得发明事实、输出分析或整章纲，空补丁和无变化补丁一律失败。';
                 },
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
