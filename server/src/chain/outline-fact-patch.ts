@@ -40,9 +40,10 @@ export function extractOutlineFactPatch(value:unknown):Record<string,unknown> {
    }
    patch=mapped;
  }
- if(!record(patch)||Object.keys(patch).length===0)
+ const candidate=record(patch);
+ if(!candidate||Object.keys(candidate).length===0)
    throw Error('事实局部修复必须返回包含非空patch对象的JSON；不得返回完整章纲、文字解释或空补丁');
- return patch as Record<string,unknown>;
+ return candidate;
 }
 
 /** Apply only existing addresses under authorized story fields. Validate the
