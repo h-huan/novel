@@ -353,7 +353,7 @@ it('generates a complete idea batch through preselection plus structuring and re
     ...Array(6).fill('idea_premise_source_drift_review'),
     ...Array(3).fill('idea_premise_overlap_review'),
     ...Array(14).fill('idea_card_structure'),
-    ...Array(7).fill('idea_presentation_review'),
+    ...Array(5).fill('idea_presentation_review'),
     ...Array(2).fill('idea_premise_pool_refill'),
   ].sort());
   expect(partialResult.appealGate.fulfillment.actions.some((action:any)=>
