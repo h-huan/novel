@@ -1,7 +1,7 @@
 import {type ReviewCallBudget} from './independent-review-batches';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, sourceReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
 
 /** Source/payoff/genre/category reviews are premise-local. Independently review
  * every disjoint group concurrently, keeping cross-card overlap in its separate
@@ -26,8 +26,12 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
   // chosen number of funded review calls. No field or Gate is omitted.
   const groups=groupCount??Math.ceil(count/size);
   if(!Number.isInteger(groups)||groups<Math.ceil(count/size)||groups>count)throw Error('来源审核分组不能越过批次大小或实际数量');
+  // Partition by exactly the story evidence actually transmitted to the
+  // independent source review, not by server-only metadata or duplicated
+  // sourceBindings. This avoids allocating a long prompt to one unlucky group.
   const weights=items.map(item=>JSON.stringify({
-    selected:item,pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
+    selected:sourceReviewSelectionView([item])[0],
+    pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
   }).length);
   const prefix=[0];
   for(const weight of weights)prefix.push(prefix[prefix.length-1]+weight);
