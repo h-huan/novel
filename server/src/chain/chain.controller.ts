@@ -5879,7 +5879,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         discoveryBudget.reviewGroupingMode===0
           &&!boundedPresentationReview(count,presentationBudget.remaining-generationCalls)
           ?1:Math.ceil(count/discoveryBudget.presentationBatchSize);
-      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial') => {
+      const accept = async (candidates: any[], attempt: 'initial' | 'repair' = 'initial', reviewBudget=presentationBudget) => {
         // Existing metadata-only repair contract had no production caller:
         // invalid dictionary tags or an ordinal/quantity mix-up went directly
         // to rejection even when the already-produced card could be fixed
@@ -5907,13 +5907,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // cards. No fresh model allowance, retry loop or story mutation.
         const reservedReviewCalls=Math.ceil(candidates.length/batchSize);
         const fundedGroups=repairGroups.slice(0,
-          Math.max(0,presentationBudget.remaining-reservedReviewCalls));
+          Math.max(0,reviewBudget.remaining-reservedReviewCalls));
         if(fundedGroups.length<repairGroups.length)
           this.logger.warn('idea-discover: 部分元数据修复缺少共享预算，未修复卡保留原拒绝结论：'
             +fundedGroups.length+'/'+repairGroups.length+' 批');
         if(fundedGroups.length){
           const repairedGroups=await independentReviewBatches(
-            fundedGroups,presentationBudget,adaptiveDiscoveryConcurrency(fundedGroups.length),
+            fundedGroups,reviewBudget,adaptiveDiscoveryConcurrency(fundedGroups.length),
             async(group,groupIndex,budget)=>{
               const targets=group.map(item=>{
                 const fields=['storyTone','writingStyle','webNovelGenre','plotTags'] as const;
@@ -5984,7 +5984,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           && !alreadyBlocked(candidate));
         const reviewableSet=new Set(reviewable);
         const presentationReviews=reviewable.length
-          ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,presentationBudget,false,boundedPresentationReview(reviewable.length)) : [];
+          ? await this.reviewIdeaPresentation(reviewable,accepted,dto.customPlatformNote,reviewBudget,false,boundedPresentationReview(reviewable.length,reviewBudget.remaining)) : [];
         const presentationByCandidate=bindIdeaPresentationVerdicts(reviewable,presentationReviews);
         for (const candidate of candidates) {
           const titleKey = normalizeTitle(candidate?.title);
@@ -6089,37 +6089,119 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // 数量只在完整卡独立质量门之后截取，不在此前留下待生成候补。
       if(presentationBudget.remaining<selectedPremises.length+minimumCardReviewCalls(selectedPremises.length,selectedPremises.length))throw Error('完整卡共享预算不足以生成并验收当前目标数量，未发起完整卡请求');
       const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length,selectedPremises.length);
+      // The configured final-review batch count is already reserved before
+      // generation. When there are multiple fully funded independent batches,
+      // review an eligible prefix as soon as its cards arrive, overlapping the
+      // remaining generation latency WITHOUT changing calls, identity or gates.
+      // A deterministically blocked/repairable prefix is deferred to the
+      // original whole-batch acceptance path, where its metadata can be fixed.
+      const reviewBatchSize=discoveryBudget.presentationBatchSize;
+      const streamedReview=reservedInitialReviewCalls>1
+        &&reservedInitialReviewCalls===Math.ceil(selectedPremises.length/reviewBatchSize);
+      const initialCardResults:Array<PromiseSettledResult<Record<string,unknown>>|undefined>
+        =Array(selectedPremises.length).fill(undefined);
+      let streamedNextIndex=0;
+      let streamedReviewChain=Promise.resolve();
+      let streamedReviewFailure:unknown;
+      let streamedPrefixStopped=false;
+      let spentReviewReservations=0;
+      const recordInitialCard=(index:number,result:PromiseSettledResult<Record<string,unknown>>) => {
+        const selectedPremise=selectedPremises[index] as Record<string,unknown>;
+        if(result.status==='fulfilled'){
+          structuredCards.push(result.value);
+          return result.value;
+        }
+        const detail=result.reason instanceof Error?result.reason.message:String(result.reason);
+        const sourcePremiseId=String(selectedPremise.premiseId||'').trim();
+        structuringErrors.push({sourcePremiseId,error:detail});
+        candidateAssessments.push({sourcePremiseId,attempt:'initial',passed:false,issues:[detail]});
+        rejectedReasons.push(detail);
+        this.logger.warn('idea-discover: '+sourcePremiseId+' 结构化失败，继续其它已选题材：'+detail);
+        return null;
+      };
+      const streamingReviewBudget=()=>{
+        // Exactly one of the originally reserved review credits belongs to
+        // this completed full-size batch. All later credits stay isolated;
+        // any metadata repair or protocol retry draws only the EXISTING
+        // additional shared allowance, never the next batch's first review.
+        let owned=1;
+        spentReviewReservations++;
+        return {
+          get remaining(){return owned+presentationBudget.remaining;},
+          set remaining(value:number){
+            const spent=this.remaining-value;
+            if(!Number.isInteger(value)||value<0||spent<0)
+              throw Error('完整卡流水终审共享物理调用预算不得透支');
+            const fromOwned=Math.min(owned,spent);
+            owned-=fromOwned;presentationBudget.remaining-=spent-fromOwned;
+          },
+          release(){presentationBudget.remaining+=owned;owned=0;},
+        };
+      };
+      const scheduleReadyPrefix=()=>{
+        if(!streamedReview||streamedPrefixStopped)return;
+        while(streamedNextIndex+reviewBatchSize<=selectedPremises.length){
+          const begin=streamedNextIndex,end=begin+reviewBatchSize;
+          const rows=initialCardResults.slice(begin,end);
+          if(rows.some(row=>!row))break;
+          // A prefix that needs a correction is not paid for early. Preserve
+          // the original card metadata repair, whole-batch budget and semantic
+          // verdict path; do not cause a larger number of review calls.
+          const cards=rows.map(row=>row!.status==='fulfilled'?row!.value:null);
+          const good=cards.every(card=>card
+            &&assessIdeaQuality(card).length===0
+            &&this.ideaAppealGate.assess(card,dto.storyType).issues.length===0);
+          const titles=cards.map(card=>normalizeTitle(card?.title));
+          const distinct=good&&new Set(titles).size===titles.length
+            &&cards.every(card=>!initialExcludes.some(existing=>ideaSemanticSimilarity(card,existing)>=0.42));
+          if(!distinct){streamedPrefixStopped=true;break;}
+          streamedNextIndex=end;
+          const funding=streamingReviewBudget();
+          streamedReviewChain=streamedReviewChain.then(async()=>{
+            if(streamedReviewFailure)return;
+            const staged:Record<string,unknown>[]=[];
+            for(let offset=begin;offset<end;offset++){
+              const card=recordInitialCard(offset,initialCardResults[offset]!);
+              if(card)staged.push(card);
+            }
+            try{await accept(staged,'initial',funding);}
+            finally{funding.release();}
+          }).catch(error=>{streamedReviewFailure=error;});
+        }
+      };
       presentationBudget.remaining-=reservedInitialReviewCalls;
       let results:PromiseSettledResult<Record<string,unknown>>[];
-      try {results=await independentReviewBatches(selectedPremises,presentationBudget,adaptiveDiscoveryConcurrency(selectedPremises.length),
-        async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{try{return {status:'fulfilled',value:await generateStructuredCard(premise,index,budget)};}catch(reason){return {status:'rejected',reason};}});}
-      finally {presentationBudget.remaining+=reservedInitialReviewCalls;}
-      // A scheduling duplicate must never be hidden by the later card/slot
-      // counter. In particular, six paid card tasks for five vetted premises
-      // are a failed dispatch invariant, not "five cards generated".
+      try{
+        results=await independentReviewBatches(selectedPremises,presentationBudget,
+          adaptiveDiscoveryConcurrency(selectedPremises.length),
+          async(premise,index,budget):Promise<PromiseSettledResult<Record<string,unknown>>>=>{
+            let result:PromiseSettledResult<Record<string,unknown>>;
+            try{result={status:'fulfilled',value:await generateStructuredCard(premise,index,budget)};}
+            catch(reason){result={status:'rejected',reason};}
+            initialCardResults[index]=result;
+            scheduleReadyPrefix();
+            return result;
+          });
+        await streamedReviewChain;
+        if(streamedReviewFailure)throw streamedReviewFailure;
+      }finally{
+        // Unclaimed reserved credits are returned exactly once. Claimed ones
+        // have already been spent or refunded by their per-batch budget.
+        presentationBudget.remaining+=reservedInitialReviewCalls-spentReviewReservations;
+      }
+      // Scheduling duplication or identity confusion is a hard failure even
+      // if an early independently reviewed card was already accepted locally.
       const dispatchedIds=new Set(fullCardDispatchPremiseIds);
-      if (fullCardDispatchPremiseIds.length!==selectedPremises.length
+      if(fullCardDispatchPremiseIds.length!==selectedPremises.length
         ||dispatchedIds.size!==selectedPremises.length
-        ||selectedPremises.some((row:any)=>!dispatchedIds.has(String(row.premiseId)))) {
+        ||selectedPremises.some((row:any)=>!dispatchedIds.has(String(row.premiseId)))){
         throw new Error('完整卡模型派发与已审核选优题材不一致：入选='+selectedPremises.length
           +'，派发='+fullCardDispatchPremiseIds.length
           +'，具体ID='+fullCardDispatchPremiseIds.join('、')+'；已停止，不将异常调用伪装成正常结果');
       }
-      for (let index = 0; index < results.length; index++) {
-        const selectedPremise = selectedPremises[index] as Record<string, unknown>;
-        try {
-          const result = results[index];
-          if (result.status === 'rejected') throw result.reason;
-          structuredCards.push(result.value);
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          const sourcePremiseId = String(selectedPremise.premiseId || '').trim();
-          structuringErrors.push({ sourcePremiseId, error: detail });
-          candidateAssessments.push({ sourcePremiseId, attempt: 'initial', passed: false, issues: [detail] });
-          rejectedReasons.push(detail);
-          this.logger.warn(`idea-discover: ${sourcePremiseId} 结构化失败，继续其它已选题材：${detail}`);
-        }
-      }
+      for(let index=streamedNextIndex;index<results.length;index++)
+        recordInitialCard(index,results[index]);
+
       const structuredPremiseIds = structuredCards.map((item: any) => String(item?.sourcePremiseId || '').trim());
       const structuredUniqueIds = new Set(structuredPremiseIds);
       const missingPremiseIds = [...selectedPremiseIdSet].filter(id => !structuredUniqueIds.has(id));
@@ -6129,7 +6211,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         throw new Error(`完整题材卡没有逐一保持创建前筛选结果；生成=${structuredCards.length}/${requestedCount}，缺失=${missingPremiseIds.join('、') || '无'}，越界=${unknownPremiseIds.join('、') || '无'}。身份对应异常时停止，不把未知身份当成已通过的原池换选。`);
       }
       if (failureSelectionAudit) failureSelectionAudit.generated = structuredCards.length;
-      await accept(structuredCards, 'initial');
+      // Early-reviewed prefix is already independently gated against all
+      // earlier accepted references; only remaining cards need a new verdict.
+      const pendingIds=new Set(selectedPremises.slice(streamedNextIndex).map(row=>String(row.premiseId)));
+      await accept(structuredCards.filter(card=>pendingIds.has(String(card.sourcePremiseId))), 'initial');
 
       // Complete-card rejects are a DELIVERY deficit, not an instruction to
       // quietly return fewer cards. Reuse unused LIGHTWEIGHT seeds first. If the
