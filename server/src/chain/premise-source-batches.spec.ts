@@ -120,6 +120,21 @@ describe('bounded premise source review batches',()=>{
    expect(after).toEqual(plain);
    expect(after.flat()).toEqual(base.selected.map(item=>item.premiseId));
  });
+ it('uses already-required causal audit complexity to avoid a slow two-card bottleneck',()=>{
+   const original=selection();
+   const heavy={...original.selected[1],causalPlan:Array.from({length:7},()=>({
+     action:{field:'activeChoice',quote:'主角选择承担当面冲突和直接损失'},
+     conditions:[{field:'escalation',quote:'原池已建立下一阶段必须行动的条件'}],
+     result:{field:'payoff',quote:'原池已确认执行后的实际改变与代价'},
+   }))};
+   const input={...original,selected:original.selected.map((item,index)=>index===1?heavy:item)};
+   const before=JSON.stringify(input);
+   const batches=premiseSourceBatches(input);
+   expect(batches.map(batch=>batch.selected.map(item=>item.premiseId))).toEqual([['A','B'],['C','D','E']]);
+   expect(JSON.stringify(input)).toBe(before);
+   expect(batches.flatMap(batch=>batch.selected).map(item=>item.premiseId)).toEqual(original.selected.map(item=>item.premiseId));
+   expect(batches).toHaveLength(2); // exactly the SAME two paid model reviews
+ });
  it('balances uneven review material without increasing calls, changing order or dropping any source evidence',()=>{
    const original=selection();
    const heavy={...original.selected[0],activeChoice:'主角亲自完成不可替代的实际行动'.repeat(220)};
