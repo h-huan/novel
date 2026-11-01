@@ -2244,7 +2244,9 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   // The six remaining cards are passed as ONE group to the original
   // independent final reviewer; it then fans out into its normal concurrent
   // 2-card semantic batches, rather than serializing four reviews here.
-  expect(c.reviewIdeaPresentation.mock.calls[1][1].length).toBe(0);
+  // References are passed by mutable accepted-array identity; checking them
+  // after completion would read later accepted cards, not the call-time snapshot.
+  expect(c.reviewIdeaPresentation.mock.calls[1][0]).toHaveLength(6);
 
   expect(c.reviewIdeaPresentation.mock.calls.every((call:any[])=>call[3].remaining>=0)).toBe(true);
   // A chat-platform brand in optional prose is normalized before premise
