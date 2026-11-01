@@ -6140,6 +6140,22 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
       const scheduleReadyPrefix=()=>{
         if(!streamedReview||streamedPrefixStopped)return;
+        // Aggregate mode needs at least four reviewable cards before the
+        // original independent review would split its response. Launching
+        // a two-card early review with only three eventual eligible cards
+        // would turn ONE original review call into TWO. Never do that.
+        if(streamedNextIndex===0&&discoveryBudget.reviewGroupingMode===0){
+          const firstEligibleLength=Math.min(selectedPremises.length,
+            Math.ceil(4/reviewBatchSize)*reviewBatchSize);
+          const firstRows=initialCardResults.slice(0,firstEligibleLength);
+          if(firstRows.some(row=>!row))return;
+          if(firstRows.some(row=>row?.status!=='fulfilled'
+            ||assessIdeaQuality(row.value).length
+            ||this.ideaAppealGate.assess(row.value,dto.storyType).issues.length)){
+            streamedPrefixStopped=true;
+            return;
+          }
+        }
         while(streamedNextIndex+reviewBatchSize<=selectedPremises.length){
           const begin=streamedNextIndex,end=begin+reviewBatchSize;
           const rows=initialCardResults.slice(begin,end);
