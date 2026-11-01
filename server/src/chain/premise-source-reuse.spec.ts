@@ -26,6 +26,22 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
+it('reuses independently reviewed facts after transport-only changes but audits changed causal evidence',async()=>{
+ const input=selection(),receipts:PremiseSourceReceipts=new Map();
+ const review=vi.fn(async current=>report(current));
+ await reviewChangedPremiseSources(input,'same standards',receipts,review);
+ const transportOnly=structuredClone(input);
+ transportOnly.selected[0].sourceBindings={copy:'same pool source'};
+ transportOnly.selected[1].serverDebug='diagnostic-only';
+ await reviewChangedPremiseSources(transportOnly,'same standards',receipts,review);
+ expect(review).toHaveBeenCalledTimes(1);
+ const changed=structuredClone(transportOnly);
+ changed.selected[0].activeChoice+='改变实际行动';
+ await reviewChangedPremiseSources(changed,'same standards',receipts,review);
+ expect(review).toHaveBeenCalledTimes(2);
+ expect(review.mock.calls[1][0].selected.map(row=>row.premiseId)).toEqual(['A']);
+});
+
 it('reuses only complete failed evidence unchanged, never upgrading a rejection; unknown and invalid reviews remain uncached',async()=>{
  const input=selection(),cache:PremiseSourceReceipts=new Map();
  const review=vi.fn(async pending=>{const r=report(pending),index=pending.selected.findIndex(item=>item.premiseId==='B');
