@@ -2173,6 +2173,8 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     estimatedWords:20000,plannedChapters:5,
     scopeBreakdown:[{arc:'主要事件闭环',chapters:5,reason:'五章完成递进、核验、反转与代价'}],
   });
+  let finishLastCard!:()=>void;
+  const lastCardGate=new Promise<void>(resolve=>{finishLastCard=resolve;});
   const generate=vi.fn(async(request:any)=>{
     const step=request.metrics?.stepKey;
     if(step==='idea_premise_pool_generation'){
@@ -2181,8 +2183,13 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     }
     if(step==='idea_premise_selection')
       return {content:JSON.stringify({selectedPremises:Array.from({length:8},(_,i)=>selectionFields('P'+(i+1)))})};
-    if(step==='idea_card_structure')
-      return {content:JSON.stringify({ideas:[strong(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure').length-1)]})};
+    if(step==='idea_card_structure'){
+      // Keep the final model card unresolved. The first independently
+      // reviewed 4+ cards must enter their paid final Gate BEFORE this
+      // unrelated generation finishes, with unchanged model call limits.
+      if(request.metrics?.attempt===7)await lastCardGate;
+      return {content:JSON.stringify({ideas:[strong(Number(request.metrics?.attempt||0))]})};
+    }
     throw Error('unexpected step '+step);
   });
   const c=Object.create(ChainController.prototype) as any;
@@ -2208,10 +2215,15 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
       },
     };
   }));
-  const outcome=await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
+  const pendingOutcome=c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
     customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
     webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
     genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},5);
+  try{
+    await vi.waitFor(()=>expect(c.reviewIdeaPresentation).toHaveBeenCalled(),{timeout:2000});
+    expect(generate.mock.calls.filter(([row]:any[])=>row.metrics?.stepKey==='idea_card_structure')).toHaveLength(8);
+  }finally{finishLastCard();}
+  const outcome=await pendingOutcome;
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure'),
     JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(8);
