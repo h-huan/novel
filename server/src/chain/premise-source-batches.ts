@@ -42,7 +42,7 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
     const linksWork=links.reduce((total:number,link:any)=>
       total+1+(Array.isArray(link?.conditions)?link.conditions.length:0),0);
     const outcomeClauses=['reversalEffect','payoff'].reduce((total,key)=>
-      total+String(item[key]||'').split(/[。；！？\\n]+/u).filter(v=>v.trim().length>=6).length,0);
+      total+String(item[key]||'').split(/[。；！？\n]+/u).filter(v=>v.trim().length>=6).length,0);
     return materialLength+linksWork*360+outcomeClauses*150;
   });
   const prefix=[0];
