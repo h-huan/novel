@@ -21,10 +21,17 @@ it('keeps final-card refill review credits without cloning or overspending the o
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
  expect(affordableFullCardRefillCount(5,6,2)).toBe(4);
- expect(affordableFullCardRefillCount(5,4,2)).toBe(2);
+ expect(affordableFullCardRefillCount(5,4,2)).toBe(3);
  expect(affordableFullCardRefillCount(5,2,2)).toBe(1);
  expect(affordableFullCardRefillCount(5,1,2)).toBe(0);
  expect(affordableFullCardRefillCount(0,24,2)).toBe(0);
+  // These cases previously rejected affordable 3-card refills by reserving
+  // nonexistent second aggregate-review calls, causing real 5/5 shortfalls.
+  expect(affordableFullCardRefillCount(3,4,2,0)).toBe(3);
+  expect(affordableFullCardRefillCount(3,4,2,1)).toBe(2);
+  expect(affordableFullCardRefillCount(4,5,2,0)).toBe(4);
+  expect(affordableFullCardRefillCount(4,6,2,1)).toBe(4);
+  expect(()=>affordableFullCardRefillCount(3,4,2,2)).toThrow('补足容量');
  expect(()=>affordableFullCardRefillCount(5,3,0)).toThrow();
 });
 
