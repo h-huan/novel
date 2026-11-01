@@ -24,7 +24,7 @@ import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS , extractOutlineFactPatch } from './outline-fact-patch';
+import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, outlineFactRepairTargetPaths, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS , extractOutlineFactPatch } from './outline-fact-patch';
 import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
 import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
@@ -8929,20 +8929,7 @@ ${(() => {
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
             const defects = dependencyCheck.defects;
             const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure);
-            // Use the independent review's existing authorized leaf addresses
-            // for the correction exemplar. Do not guess a path or story event.
-            const citedRepairPaths=[...new Set(actionRepairEvidence.gaps.flatMap(gap=>
-              [gap.actionPath,gap.resultPath]).filter((key):key is string=>
-              typeof key==='string'&&!!key.trim()))].filter(key=>{
-                const parts=key.replace(/\[(0|[1-9]\d*)\]/g,'.$1').split('.');
-                if(!OUTLINE_FACT_REPAIR_FIELDS.includes(parts[0] as any))return false;
-                let value:any=chData;
-                for(const part of parts){
-                  if(value===null||typeof value!=='object'||!Object.hasOwn(value,part))return false;
-                  value=value[part];
-                }
-                return typeof value==='string';
-              });
+            const citedRepairPaths=outlineFactRepairTargetPaths(chData,actionRepairEvidence);
             const repairExamplePath=citedRepairPaths[0]||'content';
             const repair = await this.llmCallWithRetry<any>(`第${order + 1}章事实与结果依赖局部修复`,
               `只修复当前章纲被事实与行动结果审查逐项点名的缺口。两类检查共享本章仅一次局部修复，不因新增审查再开修复循环。已确认题材与前章事实优先，世界观只能作不冲突的补充。本章尚未兑现的独立职责不得删除；若独立审核已证明原职责结果在前章完成，则必须删除当前章对旧结果的重复兑现声明，保留前章已确认事实，并在当前章原有人物、场景和结局边界内，把本章的content、scenes.outcome、characterActions.result等同步改为实际发生的后续行动、代价或关系变化。保留真实未完成任务，不新增人物、不虚构行动、不更换故事。
