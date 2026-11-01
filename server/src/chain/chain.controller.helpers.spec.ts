@@ -2184,6 +2184,10 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     if(step==='idea_premise_selection')
       return {content:JSON.stringify({selectedPremises:Array.from({length:8},(_,i)=>selectionFields('P'+(i+1)))})};
     if(step==='idea_card_structure'){
+      // A physical LLM call consumes its scoped shared credit even when
+      // independent review runs concurrently with other card generations.
+      expect(request.physicalCallBudget.remaining).toBeGreaterThanOrEqual(1);
+      request.physicalCallBudget.remaining--;
       // Keep the final model card unresolved. The first independently
       // reviewed 4+ cards must enter their paid final Gate BEFORE this
       // unrelated generation finishes, with unchanged model call limits.
@@ -2203,7 +2207,10 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   c.ideaAppealGate={assess:vi.fn(()=>({issues:[],warnings:[],
     signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
     readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
-  c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((card,index)=>{
+  c.reviewIdeaPresentation=vi.fn(async(cards:any[],refs:any[],note:string,budget:any)=>{
+    expect(budget.remaining).toBeGreaterThanOrEqual(1);
+    budget.remaining--;
+    return cards.map((card,index)=>{
     const passed=Number(/(\d+)$/.exec(card.title)?.[1]||0)>2;
     return {position:index+1,title:card.title,titleCompelling:true,openingCompelling:true,
       distinctFromBatch:true,storyCoherent:true,payoffCredible:passed,platformFit:true,
@@ -2214,7 +2221,8 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
         click:{status:'supported'},completion:{status:'supported'},sharing:{status:'supported'},immersion:{status:'supported'},
       },
     };
-  }));
+  });
+  });
   const pendingOutcome=c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',storyCategory:'悬疑',
     customPlatformNote:'',storyTone:['紧张'],writingStyle:['简洁'],
     webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],
@@ -2233,6 +2241,7 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   expect(c.reviewIdeaPresentation).toHaveBeenCalledTimes(4);
   expect(c.reviewIdeaPresentation.mock.calls.map((call:any[])=>call[0].length)).toEqual([2,2,2,2]);
   expect(c.reviewIdeaPresentation.mock.calls.flatMap((call:any[])=>call[0])).toHaveLength(8);
+  expect(c.reviewIdeaPresentation.mock.calls.every((call:any[])=>call[3].remaining>=0)).toBe(true);
   // A chat-platform brand in optional prose is normalized before premise
   // binding, without skipping the full-card independent quality review.
   const reviewedCards=c.reviewIdeaPresentation.mock.calls.flatMap((call:any[])=>call[0]);
