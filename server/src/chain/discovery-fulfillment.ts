@@ -1,3 +1,5 @@
+import { shouldBatchIdeaPresentation } from './idea-presentation-review';
+
 /** Lend initial preselection only its share of the EXISTING review calls.
  * Keep enough credits for a potential final-card deficit. Both stages still
  * use independent semantic/source/overlap Gates; credits are never cloned.
@@ -31,14 +33,24 @@ export function reserveFinalRefillReviewCapacity(
  * new candidates to paid screening. Never allocate from a delivery shortfall
  * alone: a missing 3/5 and only 2 affordable reviews cannot complete 5/5. */
 export function affordableFullCardRefillCount(
- availableSeeds: number, physicalCredits: number, reviewBatchSize: number,
+ availableSeeds: number, physicalCredits: number, reviewBatchSize: number, groupingMode=0,
 ): number {
- if (![availableSeeds,physicalCredits,reviewBatchSize].every(Number.isInteger)
-  || availableSeeds < 0 || physicalCredits < 0 || reviewBatchSize < 1)
+ if (![availableSeeds,physicalCredits,reviewBatchSize,groupingMode].every(Number.isInteger)
+  || availableSeeds < 0 || physicalCredits < 0 || reviewBatchSize < 1 || ![0,1].includes(groupingMode))
   throw Error('完整卡补足容量参数无效');
  let count=Math.min(availableSeeds,physicalCredits);
- while(count>0 && count+Math.ceil(count/reviewBatchSize)>physicalCredits)count--;
- return count;
+ while(count>0) {
+   const availableReviews=physicalCredits-count;
+   // Follow the actual independent final review grouping. Default aggregate
+   // mode needs only one call for small or unfunded-to-split batches;
+   // configured split mode needs a call for EVERY batch.
+   const split=groupingMode===1||shouldBatchIdeaPresentation(
+     count,groupingMode,reviewBatchSize,availableReviews);
+   const reviewCalls=split?Math.ceil(count/reviewBatchSize):1;
+   if(count+reviewCalls<=physicalCredits)return count;
+   count--;
+ }
+ return 0;
 }
 
 /** Minimum independent source/payoff and overlap calls required to vet
