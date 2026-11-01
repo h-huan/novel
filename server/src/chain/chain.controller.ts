@@ -5583,8 +5583,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             if(excludedIds.length){
               this.logger.warn('idea-discover: 原池选优中引用仍无效的题材独立隔离：'
                 +excludedIds.join('、')+'；仍须原有来源、兑现、流派、同构独立审核');
-              Object.assign(poolGenerationAudit.selectionTransport as Record<string,unknown>,
-                {invalidCausalPlanIds:excludedIds});
+              Object.assign(poolGenerationAudit,{invalidCausalPlanIds:excludedIds});
             }
             const selected = normalizePremiseSelectionPayload({pool:candidatePool,selectedPremises:repaired.selected},
               preselectionTarget,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
