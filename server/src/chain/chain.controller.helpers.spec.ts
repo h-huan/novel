@@ -1800,6 +1800,8 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     // in this same model response; the existing repair call is fallback only.
     expect(selectionCall?.[0].prompt).toContain('"causalPlan"');
     expect(selectionCall?.[0].prompt).toContain('有效索引就直接进入原有独立来源');
+    expect(generate.mock.calls.filter(([request]:any[])=>
+      request.metrics?.stepKey==='idea_premise_causal_plan_contract')).toHaveLength(0);
      if(failure==='pool_naming'){
        expect(selectionCall?.[0].prompt).not.toContain('禁止命名的前置候选');
        expect(selectionCall?.[0].prompt).not.toContain('宠物豆包被接回家');
