@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeIdeaDiscoveryAudit, discoveryProductionAcceptanceIssues } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const reportPath = process.argv[2] || path.join(root, 'verification', 'latest.json');
@@ -11,6 +12,13 @@ const mode = String(report?.options?.mode || '');
 const fullTests = report?.options?.fullTests === true;
 const problems = new Set(Array.isArray(report?.verdict?.runtimeProblems) ? report.verdict.runtimeProblems : []);
 const terminalPersistenceMismatches = [];
+// Independent guard for externally supplied/legacy reports: a full verdict
+// must never become PASS without an actual completed, quantified idea audit.
+if (fullTests) {
+  const audit=normalizeIdeaDiscoveryAudit(report?.runtime?.ideaDiscovery);
+  for(const issue of discoveryProductionAcceptanceIssues(audit))problems.add(issue);
+}
+
 const backendIdentity = report?.runtime?.backendIdentity;
 
 if (!backendIdentity || typeof backendIdentity !== 'object') {
