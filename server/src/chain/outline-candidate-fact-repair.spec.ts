@@ -1,11 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
+import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 
 const candidates = () => [{ order: 4, title: '收束', targetWords: 2000,
   content: '核对账目。'.repeat(100) + '积攒多年',
   scenes: JSON.stringify({ scenes: [{ content: '积攒多年' }], wordCountReason: '完整收束' }) }];
 const patch = (field = 'content', match = '积攒多年', replacement = '此前积攒') =>
   ({ chapterNumber: 5, field, match, replacement });
+
+describe('cited outline conflict repair targeting', () => {
+ const before=[
+  {order:0,content:'旧图走的是南边大道，大道被塌坡截断了。另有旁白。',scenes:'{"scenes":[]}'},
+  {order:2,content:'郭崇说，南边大道上没有塌坡。他据此质问何三。',scenes:'{"scenes":[]}'},
+ ];
+ const evidence=[JSON.stringify({
+  location1:'本批·第1章.content',location2:'本批·第3章.content',
+  quote1:before[0].content,quote2:before[1].content,
+  conflict:'第1章称“旧图走的是南边大道，大道被塌坡截断了”，第3章却说“南边大道上没有塌坡”，同一道路互斥。',
+ })];
+ it('rejects an unrelated edit even when JSON and all paths are legal',()=>{
+  const other=applyOutlineCandidateFactPatches(before,{patches:[
+   {chapterNumber:3,field:'content',match:'他据此质问何三',replacement:'他直接追问何三'},
+  ]});
+  expect(outlineCandidateFactRepairTargetIssues(before,other,evidence).join('；')).toContain('冲突原句');
+ });
+ it('accepts a direct evidence-targeted patch, leaving the independent semantic Gate mandatory',()=>{
+  const changed=applyOutlineCandidateFactPatches(before,{patches:[
+   {chapterNumber:3,field:'content',match:'南边大道上没有塌坡',replacement:'旧图南边大道已被塌坡截断'},
+  ]});
+  expect(outlineCandidateFactRepairTargetIssues(before,changed,evidence)).toEqual([]);
+  expect(before[1].content).toContain('南边大道上没有塌坡');
+ });
+ it('does not invent evidence when a semantic conflict lacks verbatim quoted text',()=>{
+  expect(outlineCandidateFactRepairTargetIssues(before,before,['事实互斥，具体原文待进一步审核'])).toEqual([]);
+ });
+});
 
 describe('pending outline fact patches', () => {
   it('supports repeated fact projections beyond eight replacements within the same budget', () => {
