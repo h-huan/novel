@@ -248,7 +248,9 @@ describe('chain HTTP architecture', () => {
     expect(afterGate).not.toContain('fulfillDiscoveryGaps(');
     expect(source).toContain('全部进入并发完整卡生成');
     expect(source).toContain("const selectedAccepted = accepted");
-    expect(source).toContain("await accept(structuredCards, 'initial')");
+    expect(source).toContain("await accept(staged,'initial',funding)");
+    expect(source).toContain("await accept(structuredCards.filter(card=>pendingIds.has(String(card.sourcePremiseId))), 'initial')");
+    expect(source).toContain('reservedInitialReviewCalls-spentReviewReservations');;
     const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
     expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
     expect(jsonRetry).not.toContain('const lineParsed: any[] = []');
