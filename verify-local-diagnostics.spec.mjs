@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 test('discovery performance acceptance uses real request wall-clock time regardless of 5/5 quality success',()=>{
  const base={available:true,startedAt:'2026-10-31T05:15:33.587Z'};
@@ -11,6 +11,25 @@ test('discovery performance acceptance uses real request wall-clock time regardl
  assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:29:20.031Z'}),
    {measured:true,wallMs:826444,passed:false});
  assert.equal(discoveryEightMinuteCheck({available:true,startedAt:null,finishedAt:null}).measured,false);
+});
+
+test('full production acceptance refuses missing, incomplete and contradictory audits without weakening Gates', () => {
+ const good=normalizeIdeaDiscoveryAudit({available:true,audit:{
+   startedAt:'2026-10-31T05:00:00.000Z',finishedAt:'2026-10-31T05:07:30.000Z',
+   success:true,totalIdeas:5,request:{requestedCount:5},
+   appealGate:{requested:5,returned:5,qualified:5,shortfall:0},
+ }});
+ assert.deepEqual(discoveryProductionAcceptanceIssues(good),[]);
+ assert.deepEqual(discoveryProductionAcceptanceIssues(normalizeIdeaDiscoveryAudit({available:false})),
+   ['latest_idea_discovery_audit_unavailable']);
+ assert.ok(discoveryProductionAcceptanceIssues({...good,success:false}).includes('latest_idea_discovery_not_successful'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,returned:4,shortfall:0}).includes('latest_idea_discovery_quantity_mismatch'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,qualified:3}).includes('latest_idea_discovery_quantity_mismatch'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,requested:null}).includes('latest_idea_discovery_quantity_unverified'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:null}).includes('latest_idea_discovery_latency_unverified'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.000Z'}).includes('latest_idea_discovery_over_8_minutes'));
+ const dynamic={...good,requested:2,returned:2,qualified:2,totalIdeas:2,shortfall:0};
+ assert.deepEqual(discoveryProductionAcceptanceIssues(dynamic),[]);
 });
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {
