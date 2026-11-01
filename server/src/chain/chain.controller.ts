@@ -6161,7 +6161,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         if(streamedNextIndex===0&&streamedNextIndex+reviewBatchSize<=selectedPremises.length){
           const begin=streamedNextIndex,end=begin+reviewBatchSize;
           const rows=initialCardResults.slice(begin,end);
-          if(rows.some(row=>!row))break;
+          if(rows.some(row=>!row))return;
           // A prefix that needs a correction is not paid for early. Preserve
           // the original card metadata repair, whole-batch budget and semantic
           // verdict path; do not cause a larger number of review calls.
@@ -6172,7 +6172,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const titles=cards.map(card=>normalizeTitle(card?.title));
           const distinct=good&&new Set(titles).size===titles.length
             &&cards.every(card=>!initialExcludes.some(existing=>ideaSemanticSimilarity(card,existing)>=0.42));
-          if(!distinct){streamedPrefixStopped=true;break;}
+          if(!distinct){streamedPrefixStopped=true;return;}
           streamedNextIndex=end;
           const funding=streamingReviewBudget();
           streamedReviewChain=streamedReviewChain.then(async()=>{
