@@ -5576,7 +5576,16 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             const indexed = { ...shaped, selected: shaped.selected.map(item => bindPremiseCausalPlan({
               ...item, causalPlan: rawSelected.find((row: any) => row?.premiseId === item.premiseId)?.causalPlan,
             })) };
-            const repaired = await this.completePremiseCausalPlans(indexed, reselectionCompletionBudget);
+            const repaired = await this.completePremiseCausalPlans(indexed, reselectionCompletionBudget,
+              minimumSelectedCountForPool(candidatePool.length));
+            const excludedIds=indexed.selected.filter(item=>
+              !repaired.selected.some(valid=>valid.premiseId===item.premiseId)).map(item=>String(item.premiseId));
+            if(excludedIds.length){
+              this.logger.warn('idea-discover: 原池选优中引用仍无效的题材独立隔离：'
+                +excludedIds.join('、')+'；仍须原有来源、兑现、流派、同构独立审核');
+              Object.assign(poolGenerationAudit.selectionTransport as Record<string,unknown>,
+                {invalidCausalPlanIds:excludedIds});
+            }
             const selected = normalizePremiseSelectionPayload({pool:candidatePool,selectedPremises:repaired.selected},
               preselectionTarget,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
             selectionWallMs = Date.now() - selectionStartedAt;
@@ -6464,7 +6473,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   /** 每个项目的已发最大进度，用于把总进度钳制成单调不降（避免步骤回退导致前端进度条倒走） */
   private projectLastPercent = new Map<string, number>();
 
-  private async completePremiseCausalPlans<T extends { selected: Record<string, unknown>[] }>(selection: T, budget: { remaining: number }): Promise<T> {
+  private async completePremiseCausalPlans<T extends { selected: Record<string, unknown>[] }>(
+    selection: T, budget: { remaining: number }, minimumSelectedCount=selection.selected.length,
+  ): Promise<T> {
     const targets = premiseCausalPlanRepairInput(selection);
     if (!targets.length) return selection;
     const response = await this.realLLM.generate({
@@ -6474,7 +6485,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       timeout: LLM_TUNABLES.timeoutComplex(), maxEmptyRetries: 0, physicalCallBudget: budget,
       metrics: { stepKey: 'idea_premise_causal_plan_contract', attempt: 0 },
     });
-    return applyPremiseCausalPlanRepairs(selection, this.safeExtractJson(response.content, {}));
+    return applyPremiseCausalPlanRepairs(selection, this.safeExtractJson(response.content, {}), minimumSelectedCount);
   }
 
   /** Citation-only changes must independently recheck the ACTUAL outcome links,
