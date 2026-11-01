@@ -135,7 +135,12 @@ export function premiseCausalPlanRepairInput(selection: { selected: Record<strin
   }));
 }
 
-export function applyPremiseCausalPlanRepairs<T extends { selected: Record<string, unknown>[] }>(selection: T, value: any): T {
+export function applyPremiseCausalPlanRepairs<T extends { selected: Record<string, unknown>[] }>(
+  selection: T, value: any, minimumSelectedCount = selection.selected.length,
+): T {
+  if (!Number.isSafeInteger(minimumSelectedCount) || minimumSelectedCount < 1
+    || minimumSelectedCount > selection.selected.length)
+    throw new Error('因果索引修复的最低候选数量无效');
   const targets = premiseCausalPlanRepairInput(selection), rows = value?.plans;
   if (!value || Object.keys(value).some(key => key !== 'plans') || !Array.isArray(rows)
     || rows.length !== targets.length || new Set(rows.map(row => row?.premiseId)).size !== targets.length
@@ -146,8 +151,19 @@ export function applyPremiseCausalPlanRepairs<T extends { selected: Record<strin
     const row = rows.find(row => row.premiseId === item.premiseId);
     return row ? bindPremiseCausalPlan({ ...item, causalPlan: row.causalPlan }) : item;
   }) };
-  assertPremiseCausalPlans(next);
-  return next;
+  // A single model citation can have a stale word or an invented clause.
+  // Never silently rewrite those facts or approve the invalid citation. In a
+  // surplus preselection only, quarantine that one candidate rather than
+  // discarding already-valid independent screening opportunities. Delivery
+  // minimum is caller-owned and never reduced. Other call sites remain strict.
+  const invalid = next.selected.map(item => ({item,issues:premiseCausalPlanIssues(item)}))
+    .filter(entry => entry.issues.length > 0);
+  if (!invalid.length) return next;
+  const valid = next.selected.filter(item => premiseCausalPlanIssues(item).length === 0);
+  if (valid.length < minimumSelectedCount)
+    throw new Error('生成前因果索引有效候选不足：'+valid.length+'/'+minimumSelectedCount
+      +'；'+invalid.map(({item,issues})=>String(item.premiseId)+': '+issues.join('、')).join('；'));
+  return {...next,selected:valid};
 }
 
 export function premiseCausalCatalog(item: Record<string, unknown>, prefix: string) {
