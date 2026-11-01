@@ -162,7 +162,7 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
   });
   assert.equal(result.status, 1);
   assert.equal(next.verdict.status, 'failed');
-  assert.deepEqual(next.verdict.runtimeProblems, ['long_project_missing']);
+  assert.deepEqual(next.verdict.runtimeProblems, ['latest_idea_discovery_audit_unavailable', 'long_project_missing']);
   assert.match(nextMarkdown, /最终结果：\*\*FAILED\*\*/u);
   assert.match(nextMarkdown, /long_project_missing/u);
 }
