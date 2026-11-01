@@ -57,7 +57,8 @@ export function outlineFactRepairTargetPaths(
    typeof key==='string'&&!!key.trim()).map(key=>
    key.replace(/\[(0|[1-9]\d*)\]/g,'.$1').replace(/^0\./,'')))].filter(key=>{
    const parts=key.split('.');
-   if(!OUTLINE_FACT_REPAIR_FIELDS.includes(parts[0] as any))return false;
+   if(!OUTLINE_FACT_REPAIR_FIELDS.includes(parts[0] as any)
+     ||parts.some(part=>!part||['__proto__','prototype','constructor'].includes(part)))return false;
    let value:any=chapter;
    for(const part of parts){
      if(value===null||typeof value!=='object'||!Object.hasOwn(value,part))return false;
