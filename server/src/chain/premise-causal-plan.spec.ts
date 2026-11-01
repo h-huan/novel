@@ -99,6 +99,21 @@ describe('plan critical prerequisites before full story cards',()=>{
     expect(()=>applyPremiseCausalPlanRepairs(input,
       {plans:[{premiseId:'A',causalPlan:badIndex,storyCore:'伪造来源'}]},5)).toThrow('只能逐项');
   });
+  it('the live selection controller retains seven valid candidates with the existing single correction call',async()=>{
+    const input=selection(['A','B','C','D','E','F','G','H']);
+    input.selected[0].causalPlan[1].result.quote='救援队打开仓库救出了被困者';
+    const controller=Object.create(ChainController.prototype) as any;
+    const budget={remaining:2};
+    controller.realLLM={generate:vi.fn(async(request:any)=>{
+      expect(request.physicalCallBudget).toBe(budget);
+      budget.remaining-=1;
+      return {content:JSON.stringify({plans:[{premiseId:'A',causalPlan:input.selected[0].causalPlan}]})};
+    })};
+    const result=await controller.completePremiseCausalPlans(input,budget,5);
+    expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['B','C','D','E','F','G','H']);
+    expect(controller.realLLM.generate).toHaveBeenCalledOnce();
+    expect(budget.remaining).toBe(1);
+  });
   it('spends one existing reselection credit only for invalid plans and keeps the semantic gate independent',async()=>{
     const input=selection(),complete=structuredClone(input.selected[0].causalPlan);input.selected[0].causalPlan.pop();
     const c=Object.create(ChainController.prototype) as any,budget={remaining:3};
