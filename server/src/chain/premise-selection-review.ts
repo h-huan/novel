@@ -130,11 +130,22 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
 }
 
 /** Build repair slots from verified reviews; unaffected selections stay server-owned. */
-/** The identical original pool storyCore and workingTitle are supplied in the
- * source-review pool section. Omit only those redundant keys from selected
- * review input; preserve category, expanded facts and all causalPlan links. */
+/** Explicit source-review transport: original pool stories are supplied in the
+ * dedicated immutable-source section. Carry every independently checked
+ * expanded story field, identity/category and the entire causal chain, but
+ * never resend arbitrary server-only metadata or a second sourceBindings copy.
+ * Review catalog, source/payoff/category/genre/overlap Gates are unchanged. */
 export function sourceReviewSelectionView(selected: PremiseSelectionResult['selected']) {
- return selected.map(({storyCore:_source,workingTitle:_title,...expanded})=>expanded);
+ return selected.map(item=>{
+   const view:Record<string,unknown>={
+     premiseId:item.premiseId,
+     storyCategoryId:item.storyCategoryId,
+     storyCategory:item.storyCategory,
+   };
+   for(const field of SELECTED_PREMISE_FIELDS)view[field]=item[field];
+   if(item.causalPlan!==undefined)view.causalPlan=item.causalPlan;
+   return view;
+ });
 }
 
 /** Keep source storyCore and the selected expanded evidence for pairwise
