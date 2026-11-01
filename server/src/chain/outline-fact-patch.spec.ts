@@ -5,6 +5,14 @@ it('unpacks an independently audited factual patch without inventing story chang
  expect(extractOutlineFactPatch({patch})).toEqual(patch);
  expect(extractOutlineFactPatch({data:{patch}})).toEqual(patch);
  expect(extractOutlineFactPatch({result:{patch}})).toEqual(patch);
+ expect(extractOutlineFactPatch({data:{result:{patch}}})).toEqual(patch);
+ expect(extractOutlineFactPatch({patches:[{field:'characterActions.0.result',value:'客户收到函件，但未签署续约协议'}]})).toEqual(patch);
+ expect(()=>extractOutlineFactPatch({patch, data:{patch}})).toThrow('唯一非空patch对象');
+ expect(()=>extractOutlineFactPatch({patches:[{field:'content',match:'旧句',replacement:'新句'}]})).toThrow('field/value');
+ expect(()=>extractOutlineFactPatch({patches:[{field:'content',value:'甲'},{field:'content',value:'乙'}]})).toThrow('field/value');
+ expect(()=>applyOutlineFactPatch({characterActions:[{result:'客户已签署续约协议'}]},
+   extractOutlineFactPatch({patches:[{field:'characterActions.0.result',value:'客户收到函件，但未签署续约协议'}]}))).not.toThrow();
+
  for(const invalid of [null,{patch:{}},{patch:[]},{content:'直接重写整章'}, {data:{status:'ok'}},{patch:'text'}])
    expect(()=>extractOutlineFactPatch(invalid)).toThrow('非空patch对象');
  expect(()=>applyOutlineFactPatch({characterActions:[{result:'客户已签署续约协议'}]},
