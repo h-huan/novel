@@ -12,17 +12,37 @@ export const OUTLINE_FACT_REPAIR_FIELDS = [
  * single provider data/result envelope. Do not mistake an invalid/missing
  * patch for an empty successful repair; never synthesize edits. */
 export function extractOutlineFactPatch(value:unknown):Record<string,unknown> {
- const obj=(value&&typeof value==='object'&&!Array.isArray(value))
-   ?value as Record<string,unknown>:null;
- const nested=(obj?.data&&typeof obj.data==='object'&&!Array.isArray(obj.data))
-   ?obj.data as Record<string,unknown>:
-   (obj?.result&&typeof obj.result==='object'&&!Array.isArray(obj.result))
-   ?obj.result as Record<string,unknown>:null;
- const candidate=obj&&Object.hasOwn(obj,'patch')?obj.patch:nested?.patch;
- if(!candidate||typeof candidate!=='object'||Array.isArray(candidate)
-   ||Object.keys(candidate).length===0)
-  throw Error('事实局部修复必须返回包含非空patch对象的JSON；不得返回完整章纲、文字解释或空补丁');
- return candidate as Record<string,unknown>;
+ const record=(item:unknown):Record<string,unknown>|null=>
+   item&&typeof item==='object'&&!Array.isArray(item)?item as Record<string,unknown>:null;
+ const root=record(value),data=record(root?.data),result=record(root?.result);
+ // Strip only known transport envelopes. Competing patches are ambiguous and
+ // cannot be silently selected as a mutation of reviewed source facts.
+ const levels=[root,data,result,record(data?.result),record(result?.data)].filter(
+   (item):item is Record<string,unknown>=>Boolean(item));
+ const holders=levels.filter(item=>Object.hasOwn(item,'patch')||Object.hasOwn(item,'patches'));
+ if(holders.length!==1)throw Error('事实局部修复必须返回唯一非空patch对象；不得返回冲突补丁或完整章纲');
+ const holder=holders[0];
+ let patch:unknown=holder.patch;
+ if(Object.hasOwn(holder,'patches')){
+   // A list is accepted only when each row supplies an ENTIRE replacement
+   // field value. A match/replacement snippet must never overwrite a whole
+   // chapter field or fabricate omitted text.
+   const rows=holder.patches;
+   if(!Array.isArray(rows)||!rows.length)throw Error('事实局部修复必须返回非空patch对象');
+   const mapped:Record<string,unknown>={};
+   for(const row of rows){
+     const item=record(row);
+     if(!item||Object.keys(item).some(key=>!['field','value'].includes(key))
+       ||typeof item.field!=='string'||!item.field.trim()
+       ||!Object.hasOwn(item,'value')||Object.hasOwn(mapped,item.field))
+       throw Error('事实局部修复必须返回唯一且完整的field/value补丁，不能猜测片段或重复路径');
+     mapped[item.field]=item.value;
+   }
+   patch=mapped;
+ }
+ if(!record(patch)||Object.keys(patch).length===0)
+   throw Error('事实局部修复必须返回包含非空patch对象的JSON；不得返回完整章纲、文字解释或空补丁');
+ return patch as Record<string,unknown>;
 }
 
 /** Apply only existing addresses under authorized story fields. Validate the
