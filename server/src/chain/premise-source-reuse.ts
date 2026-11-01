@@ -1,5 +1,5 @@
 import {type PremiseSelectionResult} from './idea-discovery-contract';
-import {type PremiseSelectionReview, premiseSourceReviewIssues, premiseSelectionReviewIssues, materializePremiseSourceReview} from './premise-selection-review';
+import {type PremiseSelectionReview, premiseSourceReviewIssues, premiseSelectionReviewIssues, materializePremiseSourceReview, sourceReviewSelectionView} from './premise-selection-review';
 import {mergePremiseSourceBatches} from './premise-source-batches';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import {independentReviewBatches, type ReviewCallBudget} from './independent-review-batches';
@@ -14,7 +14,11 @@ export type PremiseSourceReceipts=Map<string,Receipt>;
 /** Use precisely the same cache identity when preflighting a changed selection
  * and when executing its independent source review. */
 const sourceReceiptKey = (selection:PremiseSelectionResult, scope:string,
-  item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,item,
+  item:PremiseSelectionResult['selected'][number]) => JSON.stringify({scope,
+    // Use exactly the gate-bearing facts actually transmitted to the reviewer.
+    // Server-only transport metadata cannot invalidate a verified receipt;
+    // category, causal plan, all authored facts and immutable pool seed still can.
+    item:sourceReviewSelectionView([item])[0],
     seed:selection.pool.find(seed=>seed.premiseId===item.premiseId)});
 
 function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionReview,index:number):Receipt {
@@ -99,7 +103,7 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
     const previous=receipt.selection.selected[0];
     if(!previous||previous.premiseId!==item.premiseId
       ||JSON.stringify(receipt.selection.pool[0])!==JSON.stringify(seed)
-      ||JSON.stringify({...previous,causalPlan:undefined})!==JSON.stringify({...item,causalPlan:undefined})
+      ||JSON.stringify({...sourceReviewSelectionView([previous])[0],causalPlan:undefined})!==JSON.stringify({...sourceReviewSelectionView([item])[0],causalPlan:undefined})
       ||JSON.stringify(previous.causalPlan)===JSON.stringify(item.causalPlan)
       ||receipt.review.sourceChecks?.some(row=>row.status!=='preserved')
       ||!receipt.review.sourceChecks?.length
