@@ -1,5 +1,22 @@
 import {it,expect} from 'vitest';
-import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, alignOutlineFactCountProjections, extractOutlineFactPatch} from './outline-fact-patch';
+import {applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, outlineFactRepairTargetPaths, alignOutlineFactCountProjections, extractOutlineFactPatch} from './outline-fact-patch';
+it('locates only real authorized current-chapter action and result fields for a factual retry',()=>{
+ const chapter={content:'钥匙已经放在床头柜，后来误称仍在口袋。',
+   characterActions:[{action:'姜晚试着打开柜台',result:'钥匙仍在兜里'}],
+   scenes:[{outcome:'没有去取钥匙，也未陪同手术'}],targetWords:4000};
+ const evidence={gaps:[
+   {actionPath:'characterActions[0].result',resultPath:'scenes.0.outcome'},
+   {actionPath:'characterActions.99.result',resultPath:'targetWords'},
+   {actionPath:'__proto__.toString',resultPath:'characterActions.0.unknown'},
+   {actionPath:'characterActions[0].result',resultPath:'content'},
+ ]};
+ const before=JSON.stringify(chapter);
+ expect(outlineFactRepairTargetPaths(chapter,evidence)).toEqual([
+   'characterActions[0].result','scenes.0.outcome','characterActions.0.result','content',
+ ]);
+ expect(outlineFactRepairTargetPaths(chapter,{gaps:[{actionPath:'characterActions.99.result'}]})).toEqual([]);
+ expect(JSON.stringify(chapter)).toBe(before);
+});
 it('unpacks an independently audited factual patch without inventing story changes',()=>{
  const patch={'characterActions.0.result':'客户收到函件，但未签署续约协议'};
  expect(extractOutlineFactPatch({patch})).toEqual(patch);
