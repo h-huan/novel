@@ -111,6 +111,15 @@ describe('bounded premise source review batches',()=>{
  expect(merged.payoffChecks?.find(row=>row.ref==='S4.payoff')?.reversalCheck?.actionEvidenceRef).toBe('S4.activeChoice');
   expect(merged.issues[0].premiseId).toBe('D');expect(JSON.stringify(original)).toBe(before);
  });
+ it('ignores server-only transport duplication when balancing source partitions',()=>{
+   const base=selection(),plain=premiseSourceBatches(base).map(batch=>batch.selected.map(item=>item.premiseId));
+   const withExtras=structuredClone(base);
+   withExtras.selected[0].sourceBindings={duplicate:'not transmitted to source audit'.repeat(500)};
+   withExtras.selected[0].serverDebug='private transport marker'.repeat(500);
+   const after=premiseSourceBatches(withExtras).map(batch=>batch.selected.map(item=>item.premiseId));
+   expect(after).toEqual(plain);
+   expect(after.flat()).toEqual(base.selected.map(item=>item.premiseId));
+ });
  it('balances uneven review material without increasing calls, changing order or dropping any source evidence',()=>{
    const original=selection();
    const heavy={...original.selected[0],activeChoice:'主角亲自完成不可替代的实际行动'.repeat(220)};
