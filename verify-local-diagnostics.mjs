@@ -61,6 +61,30 @@ export function discoveryEightMinuteCheck(audit) {
  return {measured:true,wallMs,passed:wallMs<480000};
 }
 
+/** A full report can certify production only with a completed current-request
+ * audit, exact dynamic delivery count, independent qualified-card count and
+ * end-to-end wall-clock evidence. No model call or quality Gate is changed. */
+export function discoveryProductionAcceptanceIssues(audit) {
+ const issues=[];
+ if (!audit?.available) return ['latest_idea_discovery_audit_unavailable'];
+ if (audit.success !== true) issues.push('latest_idea_discovery_not_successful');
+ const validCount=(value)=>Number.isSafeInteger(value)&&value>=0;
+ if (!validCount(audit.requested)||audit.requested<1
+     ||!validCount(audit.returned)||!validCount(audit.qualified)
+     ||!validCount(audit.shortfall)) {
+   issues.push('latest_idea_discovery_quantity_unverified');
+ } else if (audit.returned!==audit.requested
+     ||audit.qualified<audit.requested||audit.shortfall!==0
+     ||(audit.totalIdeas!==null&&audit.totalIdeas!==undefined
+       &&(!validCount(audit.totalIdeas)||audit.totalIdeas!==audit.returned))) {
+   issues.push('latest_idea_discovery_quantity_mismatch');
+ }
+ const time=discoveryEightMinuteCheck(audit);
+ if (!time.measured) issues.push('latest_idea_discovery_latency_unverified');
+ else if (!time.passed) issues.push('latest_idea_discovery_over_8_minutes');
+ return issues;
+}
+
 export function normalizeIdeaDiscoveryAudit(value) {
   const root = isRecord(value?.data) ? value.data : (isRecord(value) ? value : {});
   const envelope = isRecord(root.audit) ? root.audit : root;
