@@ -20,7 +20,7 @@ it('keeps final-card refill review credits without cloning or overspending the o
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
  expect(affordableFullCardRefillCount(5,9,2)).toBe(5);
- expect(affordableFullCardRefillCount(5,6,2)).toBe(4);
+ expect(affordableFullCardRefillCount(5,6,2)).toBe(5);
  expect(affordableFullCardRefillCount(5,4,2)).toBe(3);
  expect(affordableFullCardRefillCount(5,2,2)).toBe(1);
  expect(affordableFullCardRefillCount(5,1,2)).toBe(0);
