@@ -1,4 +1,5 @@
 import * as budgetConfig from '../config/generation-budgets';
+import * as discoveryConcurrency from './discovery-concurrency';
 beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,premiseReselectionMaxCalls:3}));
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -253,6 +254,9 @@ describe('premise selection before identity lock', () => {
  });
 
   it('rejects an unfunded five-premise review before calling a model and covers every field in funded partitions',async()=>{
+    // Review coverage must be deterministic across CI runners with different CPU/RAM headroom.
+    // Exercise funded fine partitioning without changing production concurrency or review budgets.
+    vi.spyOn(discoveryConcurrency,'adaptiveDiscoveryConcurrency').mockImplementation(count=>Math.max(1,Math.min(count,4)));
     const current=normalizePremiseSelectionPayload({pool:['A','B','C','D','E'].map(premise),
       selectedPremises:['A','B','C','D','E'].map(premise)},5,5);
     const originalMethod=(ChainController.prototype as any).reviewPremiseSelection;
