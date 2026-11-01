@@ -2492,7 +2492,7 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
     }]};
    });
    chosen=selected;
-   if(identityOnly){const shape=JSON.parse(request.prompt.split('JSON 结构：')[1]);expect(Object.keys(shape.selectedPremises[0])).toEqual(['premiseId','storyCategoryId','readerQuestion']);}
+   if(identityOnly){const shape=JSON.parse(request.prompt.split('JSON 结构：')[1]);expect(Object.keys(shape.selectedPremises[0])).toEqual(['premiseId','storyCategoryId','readerQuestion','causalPlan']);}
    if(duplicateSelection)selected[1]=selected[0];
    return {content:JSON.stringify({selectedPremises:identityOnly?selected.map(({premiseId,storyCategoryId,readerQuestion})=>({premiseId,storyCategoryId,readerQuestion})):selected})};
   });
