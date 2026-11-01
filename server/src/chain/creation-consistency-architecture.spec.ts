@@ -45,6 +45,11 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
     expect(controllerSource).toContain('证据取得/保管/传递/归责范围');
+    // The creation fact patch must use the independent action verifier's
+    // CURRENT chapter field paths, not a hard-coded content-only example.
+    expect(controllerSource).toContain('outlineFactRepairTargetPaths(chData,actionRepairEvidence)');
+    expect(controllerSource).toContain('JSON.stringify(repairExamplePath)');
+    expect(controllerSource).not.toContain('{"patch":{"content":"修正后的完整content原文"}}');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
     expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");
