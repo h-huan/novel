@@ -243,14 +243,20 @@ describe('premise selection before identity lock', () => {
    const current=selection(), viewed=sourceReviewSelectionView(current.selected);
    expect(viewed).toHaveLength(current.selected.length);
    expect(viewed.every(row=>!('storyCore' in row)&&!('workingTitle' in row))).toBe(true);
-   for(let i=0;i<viewed.length;i++) {
-     expect(viewed[i].premiseId).toBe(current.selected[i].premiseId);
-     expect(viewed[i].activeChoice).toBe(current.selected[i].activeChoice);
-     for(const [key,value]of Object.entries(current.selected[i])) {
-       if(!['storyCore','workingTitle'].includes(key))expect(viewed[i][key]).toEqual(value);
-     }
+   const gateFields=['premiseId','storyCategoryId','storyCategory','protagonistSituation',
+    'openingEvent','coreConflict','activeChoice','escalation','reversalEffect',
+    'payoff','irreplaceableCarrier','secondOrderConsequence','readerQuestion','differentiation'];
+   for(let i=0;i<viewed.length;i++){
+     for(const key of gateFields)expect(viewed[i][key]).toEqual(current.selected[i][key]);
+     expect(Object.keys(viewed[i]).sort()).toEqual([...gateFields,
+       ...(current.selected[i].causalPlan!==undefined?['causalPlan']:[])].sort());
      expect(current.pool[i].storyCore).toBe(current.selected[i].storyCore);
    }
+   const extra={...current.selected[0],sourceBindings:{copy:'duplicate'},serverDebug:'metadata'};
+   const compressed=sourceReviewSelectionView([extra])[0];
+   expect(compressed).not.toHaveProperty('sourceBindings');
+   expect(compressed).not.toHaveProperty('serverDebug');
+   expect(compressed.payoff).toBe(extra.payoff);
  });
 
   it('rejects an unfunded five-premise review before calling a model and covers every field in funded partitions',async()=>{
