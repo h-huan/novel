@@ -343,7 +343,10 @@ it('generates a complete idea batch through preselection plus structuring and re
   // Each distinct request with fewer than eight screened seeds may top up once.
   // The simulated provider rejects unknown refill operations; the server must
   // keep the three passed cards and never regenerate those passed premises.
-  expect(realLLM.generate).toHaveBeenCalledTimes(44);
+  // Early two-card review + aggregate three-card remainder both remain fully
+  // independent; two distinct five-card requests now save one final review
+  // call each without omitting any card or increasing the shared allowance.
+  expect(realLLM.generate).toHaveBeenCalledTimes(42);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
     ...Array(9).fill('idea_premise_pool_generation'),
     ...Array(3).fill('idea_premise_selection'),
