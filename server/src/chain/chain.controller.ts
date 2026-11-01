@@ -45,7 +45,7 @@ import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, 
 import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosis } from './upstream-repair-routing';
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
-import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
+import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
@@ -7127,13 +7127,26 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       + '\n【全部候选，仅修本批】' + JSON.stringify(allCandidates)
       + '\n【允许章节】' + JSON.stringify(batch.map(c => c.order + 1))
       + '\n【矛盾证据】' + JSON.stringify(review.contradictions)
+      + '\n先找出独立审查在conflict中逐字引述且确实存在于本批原文的冲突断言；patches必须直接改动至少一个相关断言，并同步它在本批其余字段中的投影，不能仅改旁边的无关句子。基于已确认世界、事件、人物和前章事实确定最小正确改法，勿通过删掉核心情节或凭空补事实求通过。'
       + '\n【通信渠道矛盾修复规则】工作群/群聊消息与私聊回复、电话通话是不同事件；不得把私聊改称群回复来掩盖矛盾。对同一群消息，“底下无人回复”与“回复挂在该消息下”不能同时保留；优先在content和scenes的最小必要位置同步修正。修复前必须通读本批完整content与全部字段：若原文已明确写出导演签字、当事人承认或其它决定性动作，不得删除或忽略该直接证据去迁就错误审查；只修复真正互斥的事实，不重写已成立的因果。'
       + '\n只输出JSON:{"patches":[{"chapterNumber":1,"field":"content或scenes","match":"唯一连续原文","replacement":"最小替换"}]}。'
       + `1—${OUTLINE_FACT_REPAIR_LIMITS.maxPatches}项，单章总改动不得超过content与scenes总长${OUTLINE_FACT_REPAIR_LIMITS.maxChangedRatio * 100}%，不得改结构、篇幅配置或篇幅依据。逐处核对同一矛盾在全部候选字段的重复投影，不能只修其中一处。`,
       { projectId, scenario: 'outline', stepKey: 'creation_outline_final_fact_repair', temperature: 0.2,
         timeout: LLM_TUNABLES.timeoutContent(),
-        validate: value => { try { applyOutlineCandidateFactPatches(batch, value); return true; } catch { return false; } },
-        describeValidation: value => { try { applyOutlineCandidateFactPatches(batch, value); return []; } catch (error) { return [error instanceof Error ? error.message : String(error)]; } } });
+        validate: value => {
+          try {
+            const candidate=applyOutlineCandidateFactPatches(batch,value);
+            return outlineCandidateFactRepairTargetIssues(batch,candidate,review.contradictions).length===0;
+          }catch{return false;}
+        },
+        describeValidation: value => {
+          try {
+            const candidate=applyOutlineCandidateFactPatches(batch,value);
+            return outlineCandidateFactRepairTargetIssues(batch,candidate,review.contradictions);
+          }catch(error){return [error instanceof Error?error.message:String(error)];}
+        } });
+    if(!repair.data)throw Error('保存前章纲事实局部修复没有通过已举证冲突原句定位与补丁协议：'
+      +(repair.validationIssues||repair.warnings||[]).join('；'));
     return { candidates: applyOutlineCandidateFactPatches(batch, repair.data), runId: repair.runId };
   }
 
