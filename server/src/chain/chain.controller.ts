@@ -6090,9 +6090,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(presentationBudget.remaining<selectedPremises.length+minimumCardReviewCalls(selectedPremises.length,selectedPremises.length))throw Error('完整卡共享预算不足以生成并验收当前目标数量，未发起完整卡请求');
       const reservedInitialReviewCalls=minimumCardReviewCalls(selectedPremises.length,selectedPremises.length);
       // The configured final-review batch count is already reserved before
-      // generation. When there are multiple fully funded independent batches,
-      // review an eligible prefix as soon as its cards arrive, overlapping the
-      // remaining generation latency WITHOUT changing calls, identity or gates.
+      // generation. Review ONLY the first eligible batch early, overlapping
+      // remaining generation latency. All remaining cards must retain their
+      // original concurrent independent final-review batches after generation.
+      // Serially awaiting every early batch increases wall time versus the
+      // original parallel final gate even if each starts a little earlier.
       // A deterministically blocked/repairable prefix is deferred to the
       // original whole-batch acceptance path, where its metadata can be fixed.
       const reviewBatchSize=discoveryBudget.presentationBatchSize;
@@ -6156,7 +6158,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             return;
           }
         }
-        while(streamedNextIndex+reviewBatchSize<=selectedPremises.length){
+        if(streamedNextIndex===0&&streamedNextIndex+reviewBatchSize<=selectedPremises.length){
           const begin=streamedNextIndex,end=begin+reviewBatchSize;
           const rows=initialCardResults.slice(begin,end);
           if(rows.some(row=>!row))break;
