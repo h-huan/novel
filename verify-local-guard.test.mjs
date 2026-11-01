@@ -173,6 +173,7 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
     options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: 'long-1' },
     runtime: {
       backendIdentity: verifiedIdentity,
+      ideaDiscovery:{available:true,audit:{startedAt:'2026-10-31T05:00:00Z',finishedAt:'2026-10-31T05:07:00Z',success:true,totalIdeas:5,request:{requestedCount:5},appealGate:{requested:5,returned:5,qualified:5,shortfall:0}}},
       projects: { short: { project: { status: 'active' }, cockpit: { diagnostics: {} } }, long: { project: { status: 'active' }, cockpit: { diagnostics: {} } } },
     },
     verdict: { status: 'passed', failedTests: [], runtimeProblems: [] },
@@ -181,6 +182,17 @@ const verifiedIdentity = { loadedLocalRevision: 'match', diagnosticsMarkerStatus
   assert.equal(next.verdict.status, 'passed');
   assert.deepEqual(next.verdict.runtimeProblems, []);
   assert.match(nextMarkdown, /Verification Guard\n\n- PASS/u);
+}
+
+// Even valid project shells cannot certify a full run without a new idea audit.
+{
+  const { result, next } = run({
+    options: { mode: 'auto_latest_active_short_and_long', fullTests: true, shortProjectId: 'short-1', longProjectId: 'long-1' },
+    runtime: { backendIdentity: verifiedIdentity, projects: { short:{project:{status:'active'}},long:{project:{status:'active'}} } },
+    verdict: { status:'passed',failedTests:[],runtimeProblems:[] },
+  });
+  assert.equal(result.status,1);
+  assert.ok(next.verdict.runtimeProblems.includes('latest_idea_discovery_audit_unavailable'));
 }
 
 // A failed project and a terminal persistence mismatch can never be reported as PASS.
