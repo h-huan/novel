@@ -5124,7 +5124,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           : {selectedPremises:[{premiseId:'固定原池真实ID',storyCategoryId:'原池实际K编号',readerQuestion:'仅追问本题材已有事实',causalPlan:premiseCausalPlanExample()}]};
         const phaseContext = promptPhase === 'pool'
           ? '当前阶段=灵感发现的题材预选（候选池并发广搜），尚未确认故事卡或创建项目。输出pool'+'；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。每个候选骨架都须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的骨架不得入池。'
-          : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；' + '维度选择参数：' + autoSelectionRules + '；' + submissionRule + '。选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。';
+          : '当前阶段=灵感发现的题材预选（从固定候选池选优），尚未确认故事卡或创建项目。只输出selectedPremises；选中项须落实全部手动流派的真实人物条件与行动机制，不能把流派分摊到不同题材；缺失关键机制的题材不得入选。字典候选和投稿标签的展开仅由已经完成的原池生成及后续完整卡执行；本阶段不输出这些字段，作者已选参数仍见本次执行设定，不允许改变。';
         const priorDefectContext = promptPhase === 'pool' && options.failureReasons?.length
           ? '\n【已拒绝的因果缺陷样例：仅用于避免再次生成同类错误，不得复写旧故事、也不得篡改审核结论】'
             + JSON.stringify(options.failureReasons.slice(-8).map(reason => String(reason).slice(0,380)))
