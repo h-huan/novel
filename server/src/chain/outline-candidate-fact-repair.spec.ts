@@ -9,8 +9,8 @@ const patch = (field = 'content', match = '积攒多年', replacement = '此前�
 
 describe('cited outline conflict repair targeting', () => {
  const before=[
-  {order:0,content:'旧图走的是南边大道，大道被塌坡截断了。另有旁白。',scenes:'{"scenes":[]}'},
-  {order:2,content:'郭崇说，南边大道上没有塌坡。他据此质问何三。',scenes:'{"scenes":[]}'},
+  {order:0,content:'旧图走的是南边大道，大道被塌坡截断了。另有旁白。'+'无关的军中行军记录已经明确保留。'.repeat(32),scenes:'{"scenes":[]}'},
+  {order:2,content:'郭崇说，南边大道上没有塌坡。他据此质问何三。'+'除此之外其他既定军情并未变化。'.repeat(32),scenes:'{"scenes":[]}'},
  ];
  const evidence=[JSON.stringify({
   location1:'本批·第1章.content',location2:'本批·第3章.content',
