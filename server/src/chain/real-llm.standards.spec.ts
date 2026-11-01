@@ -6,14 +6,16 @@ import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION } from '../m
 afterEach(() => standardDirectiveCache.clear());
 
 
-it('uses bounded reasoning only for literal causal-plan citation repair, not creative or independent quality Gates', () => {
+it('bounds preliminary selection and citation repair without changing independent quality Gates', () => {
   const service = new RealLLMService({} as any);
   const oldEffort = process.env.LLM_REASONING_EFFORT;
   try {
     delete process.env.LLM_REASONING_EFFORT;
     expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('low');
-    for (const step of ['idea_premise_pool_generation','idea_premise_selection',
-      'idea_premise_source_drift_review','idea_premise_overlap_review','idea_card_structure']) {
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('medium');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('medium');
+    for (const step of ['idea_premise_pool_generation','idea_premise_source_drift_review',
+      'idea_premise_overlap_review','idea_card_structure','idea_presentation_review']) {
       expect((service as any).resolveReasoningEffort('idea_generate',step)).toBeUndefined();
     }
     process.env.LLM_REASONING_EFFORT = 'high';
@@ -118,7 +120,7 @@ it('uses citation lookup rules for reader evidence repair while preserving compl
  expect(standardDirectiveCache.get('review','alignment_review')).toContain('【系统规则 QLT-011');
 });
 
-it('preserves provider thinking defaults unless the user explicitly configures effort', async () => {
+it('preserves final review thinking defaults while bounding preliminary identity ranking', async () => {
  const old = process.env.LLM_REASONING_EFFORT;
  const oldReview = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
  delete process.env.LLM_REASONING_EFFORT; delete process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
@@ -128,7 +130,9 @@ it('preserves provider thinking defaults unless the user explicitly configures e
   await service.generate({prompt:'完整题材审核',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_presentation_review'}});
   expect((call.mock.calls[0] as any)[7]).toBeUndefined();
   expect((call.mock.calls[0] as any)[8]).not.toBe(true);
-  for(const [scene,step] of [['idea_generate','idea_card_structure'],['idea_generate','idea_premise_selection'],['writing','idea_presentation_review'],['review','alignment_review']])expect((service as any).resolveReasoningEffort(scene,step)).toBeUndefined();
+  for(const [scene,step] of [['idea_generate','idea_card_structure'],['idea_generate','idea_presentation_review'],['writing','idea_presentation_review'],['review','alignment_review']])expect((service as any).resolveReasoningEffort(scene,step)).toBeUndefined();
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('medium');
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('medium');
   process.env.LLM_IDEA_REVIEW_REASONING_EFFORT='high';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('high');
   process.env.LLM_REASONING_EFFORT='medium';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('medium');
  } finally { if(old===undefined)delete process.env.LLM_REASONING_EFFORT;else process.env.LLM_REASONING_EFFORT=old; if(oldReview===undefined)delete process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;else process.env.LLM_IDEA_REVIEW_REASONING_EFFORT=oldReview; }
