@@ -80,6 +80,25 @@ describe('plan critical prerequisites before full story cards',()=>{
       {plans:[]},
     ])expect(()=>applyPremiseCausalPlanRepairs(input,invalid)).toThrow();
   });
+  it('quarantines one stale quotation instead of aborting seven unchanged valid candidates',()=>{
+    const input=selection(['A','B','C','D','E','F','G','H']);
+    input.selected[0].causalPlan[1].result.quote='救援队打开仓库救出了被困者';
+    const badIndex=structuredClone(input.selected[0].causalPlan);
+    const repaired=applyPremiseCausalPlanRepairs(input,
+      {plans:[{premiseId:'A',causalPlan:badIndex}]},5);
+    expect(repaired.selected.map(item=>item.premiseId)).toEqual(['B','C','D','E','F','G','H']);
+    expect(repaired.selected.every(item=>premiseCausalPlanIssues(item).length===0)).toBe(true);
+    expect(repaired.pool).toBe(input.pool);
+    expect(input.selected).toHaveLength(8);
+    expect(()=>applyPremiseCausalPlanRepairs(input,{plans:[{premiseId:'A',causalPlan:badIndex}]})).toThrow('有效候选不足');
+    const narrow=selection(['A','B','C']);
+    narrow.selected[0].causalPlan[1].result.quote='救援队打开仓库救出了被困者';
+    const response={plans:[{premiseId:'A',causalPlan:narrow.selected[0].causalPlan}]};
+    expect(()=>applyPremiseCausalPlanRepairs(narrow,response,3)).toThrow('有效候选不足');
+    expect(applyPremiseCausalPlanRepairs(narrow,response,2).selected.map(item=>item.premiseId)).toEqual(['B','C']);
+    expect(()=>applyPremiseCausalPlanRepairs(input,
+      {plans:[{premiseId:'A',causalPlan:badIndex,storyCore:'伪造来源'}]},5)).toThrow('只能逐项');
+  });
   it('spends one existing reselection credit only for invalid plans and keeps the semantic gate independent',async()=>{
     const input=selection(),complete=structuredClone(input.selected[0].causalPlan);input.selected[0].causalPlan.pop();
     const c=Object.create(ChainController.prototype) as any,budget={remaining:3};
