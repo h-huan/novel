@@ -673,6 +673,10 @@ it('fixed-pool selection uses the canonical single-output contract without obsol
  const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
  expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
  expect(rule).toContain('只输出selectedPremises；');
+ expect(rule).toContain('一次完成全池比较、选择已有身份及这些身份的因果引用索引');
+ expect(rule).toContain('有效索引就直接进入原有独立来源');
+ expect(rule).not.toContain('不装配引用索引');
+ expect(rule).not.toContain('不要返回sourceBindings、causalPlan');
  expect(rule).toContain('主角在新阻力下要有实际选择');
  expect(rule).toContain('逐对比较');
  expect(rule).toContain('必要条件');
