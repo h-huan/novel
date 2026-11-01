@@ -6158,14 +6158,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           streamedNextIndex=end;
           const funding=streamingReviewBudget();
           streamedReviewChain=streamedReviewChain.then(async()=>{
-            if(streamedReviewFailure)return;
-            const staged:Record<string,unknown>[]=[];
-            for(let offset=begin;offset<end;offset++){
-              const card=recordInitialCard(offset,initialCardResults[offset]!);
-              if(card)staged.push(card);
-            }
-            try{await accept(staged,'initial',funding);}
-            finally{funding.release();}
+            try{
+              if(streamedReviewFailure)return;
+              const staged:Record<string,unknown>[]=[];
+              for(let offset=begin;offset<end;offset++){
+                const card=recordInitialCard(offset,initialCardResults[offset]!);
+                if(card)staged.push(card);
+              }
+              await accept(staged,'initial',funding);
+            }finally{funding.release();}
           }).catch(error=>{streamedReviewFailure=error;});
         }
       };
