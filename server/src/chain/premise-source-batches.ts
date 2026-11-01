@@ -29,10 +29,22 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
   // Partition by exactly the story evidence actually transmitted to the
   // independent source review, not by server-only metadata or duplicated
   // sourceBindings. This avoids allocating a long prompt to one unlucky group.
-  const weights=items.map(item=>JSON.stringify({
-    selected:sourceReviewSelectionView([item])[0],
-    pool:selection.pool.find(seed=>seed.premiseId===item.premiseId),
-  }).length);
+  const weights=items.map(item=>{
+    const source=selection.pool.find(seed=>seed.premiseId===item.premiseId);
+    const sent=sourceReviewSelectionView([item])[0];
+    const materialLength=JSON.stringify({selected:sent,pool:source}).length;
+    // Model review time is also driven by the NUMBER of independent causal
+    // judgments, not just bytes. A short story with several causal links
+    // and separately claimed outcomes can be slower than a longer, simple
+    // story. Include their already-required audit work when balancing the
+    // SAME funded groups; neither calls nor quality checks are added.
+    const links=Array.isArray(item.causalPlan)?item.causalPlan:[];
+    const linksWork=links.reduce((total:number,link:any)=>
+      total+1+(Array.isArray(link?.conditions)?link.conditions.length:0),0);
+    const outcomeClauses=['reversalEffect','payoff'].reduce((total,key)=>
+      total+String(item[key]||'').split(/[。；！？\\n]+/u).filter(v=>v.trim().length>=6).length,0);
+    return materialLength+linksWork*360+outcomeClauses*150;
+  });
   const prefix=[0];
   for(const weight of weights)prefix.push(prefix[prefix.length-1]+weight);
   const costs=Array.from({length:groups+1},()=>Array<number>(count+1).fill(Infinity));
