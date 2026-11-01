@@ -39,7 +39,9 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('const minimumPremiseSelectionCount = requestedCount;');
     expect(controllerSource).toContain("'preselection_shortfall'");
     expect(controllerSource).toContain('全部进入并发完整卡生成');
-    expect(controllerSource).toContain("await accept(structuredCards, 'initial')");
+    expect(controllerSource).toContain("await accept(staged,'initial',funding)");
+    expect(controllerSource).toContain("await accept(structuredCards.filter(card=>pendingIds.has(String(card.sourcePremiseId))), 'initial')");
+    expect(controllerSource).toContain('reservedInitialReviewCalls-spentReviewReservations');;
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
     expect(controllerSource).toContain('证据取得/保管/传递/归责范围');
