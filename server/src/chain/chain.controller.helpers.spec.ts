@@ -2197,7 +2197,7 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
     signals:{distinctivenessScore:4,descriptionProgressions:4,hookHasRelationship:true},
     readerExperienceProfile:{densityMode:'balanced',pace:'continuous',evidence:[]}}))};
   c.reviewIdeaPresentation=vi.fn(async(cards:any[])=>cards.map((card,index)=>{
-    const passed=index>=2;
+    const passed=Number(/(\d+)$/.exec(card.title)?.[1]||0)>2;
     return {position:index+1,title:card.title,titleCompelling:true,openingCompelling:true,
       distinctFromBatch:true,storyCoherent:true,payoffCredible:passed,platformFit:true,
       storyEvidence:card.hook,payoffEvidence:card.description,platformEvidence:card.hook,
@@ -2215,12 +2215,17 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_premise_selection')).toHaveLength(1);
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure'),
     JSON.stringify({error:(c.logger.error.mock.calls||[]),warn:(c.logger.warn.mock.calls||[])}).slice(0,1200)).toHaveLength(8);
-  expect(c.reviewIdeaPresentation).toHaveBeenCalledOnce();
-  expect(c.reviewIdeaPresentation.mock.calls[0][0]).toHaveLength(8);
+  // All eight selected candidates still receive an independent verdict.
+  // Existing review budget covers four 2-card calls, and streaming overlaps
+  // their execution with unfinished generation without adding physical calls.
+  expect(c.reviewIdeaPresentation).toHaveBeenCalledTimes(4);
+  expect(c.reviewIdeaPresentation.mock.calls.map((call:any[])=>call[0].length)).toEqual([2,2,2,2]);
+  expect(c.reviewIdeaPresentation.mock.calls.flatMap((call:any[])=>call[0])).toHaveLength(8);
   // A chat-platform brand in optional prose is normalized before premise
   // binding, without skipping the full-card independent quality review.
-  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).toContain('青信');
-  expect(c.reviewIdeaPresentation.mock.calls[0][0][4].description).not.toContain('微信');
+  const reviewedCards=c.reviewIdeaPresentation.mock.calls.flatMap((call:any[])=>call[0]);
+  expect(reviewedCards[4].description).toContain('青信');
+  expect(reviewedCards[4].description).not.toContain('微信');
   expect(outcome.success,JSON.stringify({error:outcome.error,gate:outcome.appealGate?.candidateAssessments?.map((x:any)=>({id:x.sourcePremiseId,issues:x.issues}))})).toBe(true);
   expect(outcome.ideas).toHaveLength(5);
   expect(generate.mock.calls.filter(([request]:any[])=>request.metrics?.stepKey==='idea_card_structure')
