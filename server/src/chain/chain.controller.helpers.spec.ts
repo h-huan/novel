@@ -1796,6 +1796,12 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
     expect(selectionCall?.[0].prompt).toContain('只输出selectedPremises');
+    // Selection only returns original identities and causal references, so
+    // repeating huge dictionary/tag option menus here cannot affect its output.
+    expect(selectionCall?.[0].prompt).toContain('【本次作者明确选择');
+    expect(selectionCall?.[0].prompt).toContain('【每项分类核心机制');
+    expect(selectionCall?.[0].prompt).not.toContain('维度选择参数：');
+    expect(poolCalls[0][0].prompt).toContain('维度选择参数：');
     // Fixed-pool selection must offer the already-authored causal citation
     // in this same model response; the existing repair call is fallback only.
     expect(selectionCall?.[0].prompt).toContain('"causalPlan"');
