@@ -2238,9 +2238,14 @@ it('dispatches every independently vetted shortlist premise to concurrent full-c
   // All eight selected candidates still receive an independent verdict.
   // Existing review budget covers four 2-card calls, and streaming overlaps
   // their execution with unfinished generation without adding physical calls.
-  expect(c.reviewIdeaPresentation).toHaveBeenCalledTimes(4);
-  expect(c.reviewIdeaPresentation.mock.calls.map((call:any[])=>call[0].length)).toEqual([2,2,2,2]);
+  expect(c.reviewIdeaPresentation).toHaveBeenCalledTimes(2);
+  expect(c.reviewIdeaPresentation.mock.calls.map((call:any[])=>call[0].length)).toEqual([2,6]);
   expect(c.reviewIdeaPresentation.mock.calls.flatMap((call:any[])=>call[0])).toHaveLength(8);
+  // The six remaining cards are passed as ONE group to the original
+  // independent final reviewer; it then fans out into its normal concurrent
+  // 2-card semantic batches, rather than serializing four reviews here.
+  expect(c.reviewIdeaPresentation.mock.calls[1][1].length).toBe(0);
+
   expect(c.reviewIdeaPresentation.mock.calls.every((call:any[])=>call[3].remaining>=0)).toBe(true);
   // A chat-platform brand in optional prose is normalized before premise
   // binding, without skipping the full-card independent quality review.
