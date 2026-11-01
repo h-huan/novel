@@ -89,6 +89,10 @@ describe('plan critical prerequisites before full story cards',()=>{
     expect(repaired.selected.map(item=>item.premiseId)).toEqual(['B','C','D','E','F','G','H']);
     expect(repaired.selected.every(item=>premiseCausalPlanIssues(item).length===0)).toBe(true);
     expect(repaired.pool).toBe(input.pool);
+    // The real downstream normalizer still checks pool identity and original
+    // dynamic delivery minimum before any independent quality review.
+    const normalized=normalizePremiseSelectionPayload({pool:input.pool,selectedPremises:repaired.selected},8,15,undefined,5);
+    expect(normalized.selected).toHaveLength(7);
     expect(input.selected).toHaveLength(8);
     expect(()=>applyPremiseCausalPlanRepairs(input,{plans:[{premiseId:'A',causalPlan:badIndex}]})).toThrow('有效候选不足');
     const narrow=selection(['A','B','C']);
