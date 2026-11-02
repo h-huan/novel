@@ -189,6 +189,25 @@ describe('bounded premise source review batches',()=>{
   parent.remaining--;expect(budget.remaining).toBe(1);budget.remaining--;
   expect(parent.remaining).toBe(0);expect(budget.remaining).toBe(0);
  });
+ it('does not mint, reset or corrupt shared source-review call credits',()=>{
+  const parent={remaining:2},budget=premiseSourceCallBudget(parent);
+  expect(()=>{budget.remaining=3;}).toThrow('不得透支或重置');
+  expect(()=>{budget.remaining=-1;}).toThrow('不得透支或重置');
+  expect(()=>{budget.remaining=1.5;}).toThrow('不得透支或重置');
+  expect(()=>{budget.remaining=Number.NaN;}).toThrow('不得透支或重置');
+  expect(parent.remaining).toBe(2);expect(budget.remaining).toBe(2);
+  budget.remaining=1;expect(parent.remaining).toBe(1);
+  budget.remaining=0;expect(parent.remaining).toBe(0);
+  expect(()=>{budget.remaining=1;}).toThrow('不得透支或重置');
+  expect(parent.remaining).toBe(0);
+  expect(()=>budget.refundReservedCalls(-1)).toThrow('退款额度无效');
+  expect(()=>budget.refundReservedCalls(0.5)).toThrow('退款额度无效');
+  expect(parent.remaining).toBe(0);
+  const failedParent={remaining:1,refundReservedCalls:(_amount:number)=>{throw Error('upstream refused');}};
+  const nested=premiseSourceCallBudget(failedParent);
+  expect(()=>nested.refundReservedCalls(1)).toThrow('upstream refused');
+  expect(nested.remaining).toBe(1);
+ });
  it('runs two source batches through the existing review helper with the same physical allowance',async()=>{
   const c=Object.create(ChainController.prototype) as any,original=selection(),batches=premiseSourceBatches(original);let calls=0;
   const budgets:any[]=[];
