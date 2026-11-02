@@ -120,13 +120,19 @@ export function premiseSourceCallBudget(parent?: ReviewCallBudget) {
   let remaining: number = readGenerationBudgets().sourceMaxPhysicalCalls;
   return {
     refundReservedCalls(amount:number) {
-      remaining+=amount;
+      if(!Number.isSafeInteger(amount)||amount<0)throw Error('来源审核退款额度无效');
+      // Refund the upstream reservation first: a rejected parent refund must
+      // not leave the local allowance artificially increased.
       if(parent?.refundReservedCalls)parent.refundReservedCalls(amount);
       else if(parent)parent.remaining+=amount;
+      remaining+=amount;
     },
     get remaining() { return Math.min(remaining, parent?.remaining ?? remaining); },
     set remaining(value: number) {
-      const used = this.remaining - value;
+      const available=this.remaining;
+      if(!Number.isSafeInteger(value)||value<0||value>available)
+        throw Error('来源审核调用预算不得透支或重置');
+      const used = available - value;
       remaining -= used;
       if (parent) parent.remaining -= used;
     },
