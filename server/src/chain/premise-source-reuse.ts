@@ -83,10 +83,17 @@ export async function reviewChangedPremiseSources(selection:PremiseSelectionResu
  receipts:PremiseSourceReceipts,review:(pending:PremiseSelectionResult,budget?:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
  observe?:(counts:{reused:number;reviewed:number})=>void,
  reviewPlanOnly?:(pending:PremiseSelectionResult,prior:PremiseSelectionReview,budget:ReviewCallBudget)=>Promise<PremiseSelectionReview>,
- sharedBudget?:ReviewCallBudget):Promise<PremiseSelectionReview> {
+ sharedBudget?:ReviewCallBudget,
+ onReused?:(selection:PremiseSelectionResult,review:PremiseSelectionReview)=>void):Promise<PremiseSelectionReview> {
  const key=(item:PremiseSelectionResult['selected'][number])=>sourceReceiptKey(selection,scope,item);
  const requiredGenres=(()=>{try{const parsed=JSON.parse(scope);return Array.isArray(parsed?.requiredGenres)?parsed.requiredGenres as string[]:[];}catch{return [];}})();
  const hits=selection.selected.map(item=>receipts.get(key(item)));
+ // These immutable, same-scope receipts have already passed the exact
+ // source/category/genre/payoff validators. Notify before awaiting changed
+ // sources; the caller still waits for the current independent pair Gate.
+ hits.forEach((receipt,index)=>{
+  if(receipt)onReused?.({...structuredClone(receipt.selection),selected:[structuredClone(selection.selected[index])]},structuredClone(receipt.review));
+ });
  const pending=selection.selected.filter((_item,index)=>!hits[index]);
  observe?.({reused:selection.selected.length-pending.length,reviewed:pending.length});
  // A citation-only correction changes the causalPlan, not the already

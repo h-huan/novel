@@ -6,6 +6,11 @@ export class GenerationCancelledError extends Error {
 }
 const context = new AsyncLocalStorage<AbortSignal>();
 export function currentGenerationSignal(): AbortSignal | undefined { return context.getStore(); }
+export function withGenerationSignal<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
+  const parent = context.getStore();
+  const combined = parent ? AbortSignal.any([parent, signal]) : signal;
+  return context.run(combined, async () => { assertGenerationActive(); return work(); });
+}
 export function assertGenerationActive(): void {
   if (currentGenerationSignal()?.aborted) throw new GenerationCancelledError();
 }

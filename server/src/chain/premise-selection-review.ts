@@ -1,3 +1,5 @@
+import { compactRepeatedPremiseText } from './premise-source-bindings';
+import { exactPremiseSourceFields, SOURCE_BINDING_EXAMPLE } from './premise-source-bindings';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload, type PremiseSelectionResult } from './idea-discovery-contract';
 import type { PremisePayoffCheck } from './premise-payoff-review';
 import { assertPremiseCausalPlans } from './premise-causal-plan';
@@ -135,6 +137,9 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
  * expanded story field, identity/category and the entire causal chain, but
  * never resend arbitrary server-only metadata or a second sourceBindings copy.
  * Review catalog, source/payoff/category/genre/overlap Gates are unchanged. */
+/** Prompt transport only. References are local to one identity and point
+ * directly to an earlier literal field; exact different numbers, negations,
+ * chronology and punctuation never collapse. Server validators keep originals. */
 export function sourceReviewSelectionView(selected: PremiseSelectionResult['selected']) {
  return selected.map(item=>{
    const view:Record<string,unknown>={
@@ -143,8 +148,9 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
      storyCategory:item.storyCategory,
    };
    for(const field of SELECTED_PREMISE_FIELDS)view[field]=item[field];
+   for(const field of ['storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags'])if(item[field]!==undefined)view[field]=item[field];
    if(item.causalPlan!==undefined)view.causalPlan=item.causalPlan;
-   return view;
+   return compactRepeatedPremiseText(view);
  });
 }
 
@@ -152,7 +158,7 @@ export function sourceReviewSelectionView(selected: PremiseSelectionResult['sele
  * mechanism comparison; omit only the repeated causalPlan quotations. The
  * source and payoff Gates independently inspect and validate the full plan. */
 export function overlapReviewSelectionView(selected: PremiseSelectionResult['selected']) {
- return selected.map(({causalPlan:_plan,...expanded})=>expanded);
+ return selected.map(({causalPlan:_plan,sourceBindings:_bindings,...expanded})=>compactRepeatedPremiseText(expanded));
 }
 
 /** Every unordered comparison involving a changed identity must be reviewed
@@ -351,4 +357,26 @@ export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelecti
  if(!Array.isArray(issues))return [];
  return issues.filter(item=>!focused.has(String(item.premiseId))&&!focused.has(String(item.referencePremiseId)))
   .map(()=> '本次同构审核只允许返回变化项与保留项之间的问题，旧配对不得重复否决换选');
+}
+
+export function premiseSourceReviewWork(selection:PremiseSelectionResult){
+ const catalog=premiseSourceComparisonCatalog(selection);
+ const proven=new Map(selection.selected.map(candidate=>[candidate.premiseId,exactPremiseSourceFields(candidate,selection.pool.find(seed=>seed.premiseId===candidate.premiseId))]));
+ return {pending:catalog.filter(row=>!proven.get(row.premiseId)?.has(row.field)),
+  exact:catalog.filter(row=>proven.get(row.premiseId)?.has(row.field)).map(row=>({ref:row.ref,status:'preserved' as const,reason:'服务器逐字核对固定原池分节与当前字段一致，未替代独立语义质量判断'}))};
+}
+export function completePremiseSourceProof(value:any,selection:PremiseSelectionResult):any {
+ if(!value||typeof value!=='object'||!Array.isArray(value.sourceChecks))return value;
+ const exact=premiseSourceReviewWork(selection).exact;
+ // Keep conflicting, duplicate or malformed model rows fail-closed. Only a
+ // missing, mathematically identical server projection may be supplied here.
+ return {...value,sourceChecks:[...value.sourceChecks,...exact.filter(row=>!value.sourceChecks.some((check:any)=>check?.ref===row.ref))]};
+}
+export function premiseSourceAuditView(selection:PremiseSelectionResult){
+ return selection.selected.map(candidate=>{
+  const exact=exactPremiseSourceFields(candidate,selection.pool.find(seed=>seed.premiseId===candidate.premiseId));
+  const view=sourceReviewSelectionView([candidate])[0];
+  for(const field of exact)view[field]={fromSourceSections:SOURCE_BINDING_EXAMPLE[field as keyof typeof SOURCE_BINDING_EXAMPLE]};
+  return view;
+ });
 }

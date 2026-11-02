@@ -61,6 +61,8 @@ describe('plan critical prerequisites before full story cards',()=>{
     expect(steps[1].action.field).toBe('escalation');
     expect(steps[1].conditions[0].field).toBe('escalation');
     expect(steps[1].result.field).toBe('payoff');
+    expect(steps[1].result.quote).not.toContain('与代价');
+    expect(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE).toContain('不把不同原因的胜利和代价强绑到最后一环');
     expect(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE).toContain('中间动作不得直接标终局payoff');
     expect(ideaPremiseSelectionDirective('short_story',5)).toContain(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE);
   });
@@ -294,4 +296,28 @@ describe('plan critical prerequisites before full story cards',()=>{
     expect(ideaPremiseSelectionDirective('short_story',5)).toContain(STORY_PREREQUISITE_POLICY);
     expect(IDEA_PRESELECTION_REVIEW_POLICY).not.toMatch(/锁定前允许一轮|多个问题位置按单项顺序|再尝试第二个备用/);
   });
+});
+
+it('keeps an earlier paid cost separate from a later reward without rewriting either event',()=>{
+ const p=premise();
+ p.activeChoice='我把自己的押金付给供货人，买齐本次试餐食材。';
+ p.escalation='店主核验试餐收入和客户反馈，决定把正式摊位交给我。';
+ p.payoff='押金已经用于食材采购。店主签字把正式摊位交给我。';
+ p.causalPlan=[
+  {action:{field:'activeChoice',quote:p.activeChoice},conditions:[],result:{field:'payoff',quote:'押金已经用于食材采购。'}},
+  {action:{field:'escalation',quote:p.escalation},conditions:[],result:{field:'payoff',quote:'店主签字把正式摊位交给我。'}},
+ ];
+ const before=structuredClone(p);
+ expect(premiseCausalPlanIssues(p)).toEqual([]);
+ expect(()=>assertPremiseCausalPlans({selected:[p]})).not.toThrow();
+ expect(bindPremiseCausalPlan(p)).toEqual(before);
+ expect(p).toEqual(before);
+});
+
+it('keeps one invalid numbered citation repairable without throwing away valid peer plans',()=>{
+ const good={premiseId:'A',activeChoice:'主角实际搬来木料并完成桥面修理',payoff:'孩子随后安全通过已修好的桥面',causalPlan:[{action:{field:'activeChoice',quote:'主角实际搬来木料并完成桥面修理'},conditions:[],result:{field:'payoff',quote:'孩子随后安全通过已修好的桥面'}}]};
+ const bad=bindPremiseCausalPlan({...good,premiseId:'B',causalPlan:[{action:{field:'activeChoice',sourceRef:'其他身份:2:1'},conditions:[],result:{field:'payoff',quote:good.payoff}}]});
+ expect(premiseCausalPlanIssues(bad).length).toBeGreaterThan(0);
+ const repaired=applyPremiseCausalPlanRepairs({selected:[good,bad]},{plans:[{premiseId:'B',causalPlan:bad.causalPlan}]},1);
+ expect(repaired.selected).toEqual([good]);
 });

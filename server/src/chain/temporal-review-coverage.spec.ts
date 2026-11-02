@@ -211,3 +211,8 @@ describe('compound durations and wall-clock precision',()=>{
  it('still blocks a duration outside minute resolution',()=>{expect(review('4分03秒').issues.join('')).toContain('不满足');});
  it('keeps second-precision clocks strict',()=>{expect(review('2分03秒',true).issues.join('')).toContain('不满足');expect(review('2分00秒',true)).toMatchObject({verified:true,issues:[]});});
 });
+
+it.each([['下午六点一刻',1095],['下午六点三刻',1125],['六点一刻',375],['六点三刻',405],['六点一分',361]])('preserves complete quarter-hour clock precision: %s',(text,minutes)=>{
+ const clock=temporalNumbers(text).clocks[0];
+ expect(clock.original).toBe(text.replace(/^下午/,''));expect(clock.minutes).toBe(minutes);
+});

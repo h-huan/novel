@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { RealLLMService } from './real-llm.service';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
-import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION } from '../modules/module-standards/system-workflow-rules.registry';
+import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION, STORY_PREREQUISITE_POLICY } from '../modules/module-standards/system-workflow-rules.registry';
 
 afterEach(() => standardDirectiveCache.clear());
 
@@ -12,9 +12,12 @@ it('bounds preliminary selection and citation repair without changing independen
   try {
     delete process.env.LLM_REASONING_EFFORT;
     expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('low');
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('medium');
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('medium');
-    for (const step of ['idea_premise_pool_generation','idea_premise_source_drift_review',
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_generation')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_refill')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_reselection')).toBe('low');
+    for (const step of ['idea_premise_source_drift_review',
       'idea_premise_overlap_review','idea_card_structure','idea_presentation_review']) {
       expect((service as any).resolveReasoningEffort('idea_generate',step)).toBeUndefined();
     }
@@ -50,8 +53,9 @@ it('injects the same missing-prerequisite constraint into initial selection, sou
  for(const step of ['idea_premise_pool_generation','idea_premise_selection','idea_premise_source_drift_review','idea_card_structure']){
   const directive=standardDirectiveCache.get('idea_generate',step);
   expect(directive).toContain('【系统规则 GEN-002');
-  expect(directive).toContain('原池与展开都缺的关键桥接应在首次选优审查判gap');
-  expect(directive).toContain('异常读数不等于证明了具体收费账目或责任人');
+  expect(directive).toContain(STORY_PREREQUISITE_POLICY);
+  expect(directive).toContain('第五节分类流派机制只解释前四节已有事实');
+  expect(directive).toContain('证据存在不等于足以指认或自动处分');
  }
 });
 
@@ -130,9 +134,20 @@ it('preserves final review thinking defaults while bounding preliminary identity
   await service.generate({prompt:'完整题材审核',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_presentation_review'}});
   expect((call.mock.calls[0] as any)[7]).toBeUndefined();
   expect((call.mock.calls[0] as any)[8]).not.toBe(true);
+  await service.generate({prompt:'原池身份选优',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_premise_selection'}});
+  expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
+  expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
+  await service.generate({prompt:'轻量候选生成',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_premise_pool_generation'}});
+  expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
+  expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
+  for(const step of ['idea_premise_pool_reselection','idea_premise_pool_refill']){
+    await service.generate({prompt:'原池有界补位',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:step}});
+    expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
+    expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
+  }
   for(const [scene,step] of [['idea_generate','idea_card_structure'],['idea_generate','idea_presentation_review'],['writing','idea_presentation_review'],['review','alignment_review']])expect((service as any).resolveReasoningEffort(scene,step)).toBeUndefined();
-  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('medium');
-  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('medium');
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('low');
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('low');
   process.env.LLM_IDEA_REVIEW_REASONING_EFFORT='high';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('high');
   process.env.LLM_REASONING_EFFORT='medium';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('medium');
  } finally { if(old===undefined)delete process.env.LLM_REASONING_EFFORT;else process.env.LLM_REASONING_EFFORT=old; if(oldReview===undefined)delete process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;else process.env.LLM_IDEA_REVIEW_REASONING_EFFORT=oldReview; }
@@ -145,4 +160,21 @@ it('retains failed partial output for diagnosis without promoting it as success'
  (service as any).generateInternal=vi.fn().mockRejectedValue(failure);
  await expect(service.generate({prompt:'只处理一项',scenario:'idea_generate',deferQualityGate:true})).rejects.toThrow('truncated');
  expect(metrics.finishRun).toHaveBeenCalledWith('failed-run','failed',expect.any(Number),failure.generatedContent,'structured output truncated');
+});
+
+it('projects the actual payoff recheck and citation-only protocols instead of the entire generation workflow',async()=>{
+ const rules=await import('../modules/module-standards/system-workflow-rules.registry');
+ standardDirectiveCache.rebuild();
+ const full=standardDirectiveCache.get('idea_generate');
+ const recheck=standardDirectiveCache.get('idea_generate','idea_premise_payoff_recheck');
+ const contract=standardDirectiveCache.get('idea_generate','idea_premise_causal_plan_contract');
+ expect(recheck).toContain(rules.PREMISE_PAYOFF_REVIEW_POLICY);
+ expect(contract).toContain(rules.IDEA_PROTOCOL_BINDING_POLICY);
+ expect(standardDirectiveCache.snapshot('idea_generate',true,'idea_premise_payoff_recheck').ruleIds).toEqual(standardDirectiveCache.snapshot('idea_generate',true,'idea_premise_source_drift_review').ruleIds);
+ expect(recheck).not.toContain(rules.IDEA_SCOPE_ALLOCATION_POLICY);
+ expect(recheck).not.toContain(rules.IDEA_PREMISE_DIFFERENCE_POLICY);
+ expect(recheck.length).toBeLessThan(full.length/2);
+ expect(contract.length).toBeLessThan(full.length/2);
+ expect(standardDirectiveCache.get('idea_generate','idea_presentation_review')).toContain(rules.READER_ENGAGEMENT_POLICY);
+ expect(standardDirectiveCache.get('idea_generate','idea_premise_source_drift_review')).toContain(rules.PREMISE_PAYOFF_REVIEW_POLICY);
 });

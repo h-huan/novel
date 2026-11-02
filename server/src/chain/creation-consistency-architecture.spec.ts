@@ -1,3 +1,4 @@
+import {STORY_PREREQUISITE_POLICY} from '../../shared/src/执行标准';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -39,12 +40,10 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('const minimumPremiseSelectionCount = requestedCount;');
     expect(controllerSource).toContain("'preselection_shortfall'");
     expect(controllerSource).toContain('全部进入并发完整卡生成');
-    expect(controllerSource).toContain("await accept(staged,'initial',funding)");
-    expect(controllerSource).toContain("await accept(structuredCards.filter(card=>pendingIds.has(String(card.sourcePremiseId))), 'initial')");
-    expect(controllerSource).toContain('reservedInitialReviewCalls-spentReviewReservations');;
+    expect(controllerSource).toContain("work.runReview(budget=>accept(batch,");
     expect(controllerSource).not.toContain('this.reservePremiseSelection(');
     expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
-    expect(controllerSource).toContain('证据取得/保管/传递/归责范围');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资料的发现/取得/复制/转交/出示');
     // The creation fact patch must use the independent action verifier's
     // CURRENT chapter field paths, not a hard-coded content-only example.
     expect(controllerSource).toContain('outlineFactRepairTargetPaths(chData,actionRepairEvidence)');

@@ -290,7 +290,7 @@ describe('five-card bounded semantic review preserves independent gates and full
   const c=Object.create(ChainController.prototype) as any;
   c.logger={warn:vi.fn(),error:vi.fn()};
   c.realLLM={generate:vi.fn(async(request:any)=>{
-   const section=request.prompt.split('【实际题材卡与已通过参考卡】')[1]?.split('\n若存在standardLines')[0];
+   const section=request.prompt.split('【实际待审题材卡与完整卡差异参考（参考可含同批待审卡，不代表其已通过）】')[1]?.split('\n若存在standardLines')[0];
    if(!section)throw Error('丢失完整卡和参考卡');
    const input=JSON.parse(section);
    prompts.push(input);

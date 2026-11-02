@@ -1,7 +1,7 @@
 import {type ReviewCallBudget} from './independent-review-batches';
 import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, sourceReviewSelectionView, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSourceAuditView, type PremiseSelectionReview } from './premise-selection-review';
 
 /** Source/payoff/genre/category reviews are premise-local. Independently review
  * every disjoint group concurrently, keeping cross-card overlap in its separate
@@ -22,7 +22,7 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
   if(!count)return [];
   // A slow large partition dictates wall time even when smaller peers finish
   // in parallel. Balance actual transmitted story material while preserving
-  // consecutive premise order, each existing batch-size cap and EXACTLY the
+  // premise identity, each existing batch-size cap and EXACTLY the
   // chosen number of funded review calls. No field or Gate is omitted.
   const groups=groupCount??Math.ceil(count/size);
   if(!Number.isInteger(groups)||groups<Math.ceil(count/size)||groups>count)throw Error('来源审核分组不能越过批次大小或实际数量');
@@ -31,7 +31,7 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
   // sourceBindings. This avoids allocating a long prompt to one unlucky group.
   const weights=items.map(item=>{
     const source=selection.pool.find(seed=>seed.premiseId===item.premiseId);
-    const sent=sourceReviewSelectionView([item])[0];
+    const sent=premiseSourceAuditView({...selection,selected:[item]})[0];
     const materialLength=JSON.stringify({selected:sent,pool:source}).length;
     // Model review time is also driven by the NUMBER of independent causal
     // judgments, not just bytes. A short story with several causal links
@@ -45,33 +45,19 @@ export function premiseSourceBatches(selection: PremiseSelectionResult,groupCoun
       total+String(item[key]||'').split(/[。；！？\n]+/u).filter(v=>v.trim().length>=6).length,0);
     return materialLength+linksWork*360+outcomeClauses*150;
   });
-  const prefix=[0];
-  for(const weight of weights)prefix.push(prefix[prefix.length-1]+weight);
-  const costs=Array.from({length:groups+1},()=>Array<number>(count+1).fill(Infinity));
-  const boundaries=Array.from({length:groups+1},()=>Array<number>(count+1).fill(-1));
-  costs[0][0]=0;
-  for(let group=1;group<=groups;group++){
-    for(let end=group;end<=count;end++){
-      const minimumStart=Math.max(group-1,end-size);
-      for(let start=minimumStart;start<end;start++){
-        if(!Number.isFinite(costs[group-1][start]))continue;
-        const cost=Math.max(costs[group-1][start],prefix[end]-prefix[start]);
-        // On an exact tie retain the original full-first-batch partition.
-        if(cost<costs[group][end]||(cost===costs[group][end]&&start>boundaries[group][end])){
-          costs[group][end]=cost;boundaries[group][end]=start;
-        }
-      }
-    }
+  // Premise-local judgments have no adjacency dependency. Pairwise judgments
+  // remain in the separate original Gate. Spread the heaviest actual workloads
+  // across the SAME funded groups, respecting the configured per-group cap.
+  const buckets=Array.from({length:groups},()=>({indices:[] as number[],weight:0}));
+  const ranked=weights.map((weight,index)=>({weight,index})).sort((a,b)=>b.weight-a.weight||a.index-b.index);
+  for(const item of ranked){
+    const target=buckets.filter(bucket=>bucket.indices.length<size)
+      .sort((a,b)=>a.weight-b.weight||a.indices.length-b.indices.length)[0];
+    if(!target)throw Error('来源审核批次没有原有容量');
+    target.indices.push(item.index);target.weight+=item.weight;
   }
-  if(!Number.isFinite(costs[groups][count]))throw new Error('来源审核批次无法无损分组');
-  const parts:Array<typeof items>=[];
-  let end=count;
-  for(let group=groups;group>0;group--){
-    const start=boundaries[group][end];
-    if(start<0)throw new Error('来源审核批次边界无效');
-    parts.push(items.slice(start,end));end=start;
-  }
-  parts.reverse();
+  const parts=buckets.map(bucket=>bucket.indices.sort((a,b)=>a-b))
+    .sort((a,b)=>a[0]-b[0]).map(indices=>indices.map(index=>items[index]));
   return parts.map(selected=>({
     ...selection,selected,pool:selection.pool.filter(row=>selected.some(item=>item.premiseId===row.premiseId)),
   }));
@@ -124,6 +110,8 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
         ...(check.reversalCheck.actionEvidenceRef?{actionEvidenceRef:rebind(check.reversalCheck.actionEvidenceRef)}:{})}}:{}),
       ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{})};
   }));
+  const owner=(row:{ref:string})=>Number(/^S(\d+)\./.exec(row.ref)?.[1]||0);
+  for(const rows of [result.sourceChecks,result.payoffChecks,result.genreChecks,result.categoryChecks])rows?.sort((a,b)=>owner(a)-owner(b));
   result.passed=result.issues.length===0;return result;
 }
 

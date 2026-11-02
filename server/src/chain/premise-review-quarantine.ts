@@ -14,7 +14,7 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
   requiredGenres: readonly string[]): any {
   if (!value || typeof value !== 'object' || !Array.isArray(value.sourceChecks)
     || !Array.isArray(value.payoffChecks)
-    || (requiredGenres.length > 0 && !Array.isArray(value.genreChecks))
+    || (premiseGenreFitCatalog(selection,requiredGenres).length > 0 && !Array.isArray(value.genreChecks))
     || (premiseCategoryCatalog(selection).length > 0 && !Array.isArray(value.categoryChecks))) return value;
   const allRows = [value.sourceChecks, value.payoffChecks, value.genreChecks || [], value.categoryChecks || []];
   if (allRows.some(rows => rows.some((row: any) => !row || typeof row.ref !== 'string'

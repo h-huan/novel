@@ -1,7 +1,7 @@
 import {type PremiseSelectionResult,SELECTED_PREMISE_FIELDS} from './idea-discovery-contract';
 import {type PremiseSelectionReview} from './premise-selection-review';
 export function premiseGenreFitCatalog(selection:PremiseSelectionResult,genres:readonly string[]){
- return selection.selected.flatMap((item,index)=>genres.map((genre,g)=>({ref:'S'+(index+1)+'.genre'+(g+1),premiseId:String(item.premiseId),genre})));
+ return selection.selected.flatMap((item,index)=>(genres.length?genres:Array.isArray(item.webNovelGenre)?item.webNovelGenre.filter((value):value is string=>typeof value==='string'):[]).map((genre,g)=>({ref:'S'+(index+1)+'.genre'+(g+1),premiseId:String(item.premiseId),genre})));
 }
 /** Same server-owned field references as the complete-card evidence protocol.
  * Never search other premises or the original pool to salvage a wrong reference. */
@@ -22,8 +22,8 @@ export function resolvePremiseGenreEvidence(value:any,selection:PremiseSelection
  })};
 }
 export function premiseGenreFitIssues(value:any,selection:PremiseSelectionResult,genres:readonly string[]):string[]{
- if(!genres.length)return [];
- const expected=premiseGenreFitCatalog(selection,genres),rows=resolvePremiseGenreEvidence(value,selection)?.genreChecks;
+ const expected=premiseGenreFitCatalog(selection,genres);if(!expected.length)return [];
+ const rows=resolvePremiseGenreEvidence(value,selection)?.genreChecks;
  if(!Array.isArray(rows)||rows.length!==expected.length)return ['genreChecks须逐卡逐项覆盖全部手动选择的流派'];
  const seen=new Set<string>(),errors:string[]=[];
  for(const row of rows){
@@ -36,7 +36,7 @@ export function premiseGenreFitIssues(value:any,selection:PremiseSelectionResult
 }
 export function materializePremiseGenreFit(value:any,selection:PremiseSelectionResult,genres:readonly string[]):PremiseSelectionReview['issues']{
  const errors=premiseGenreFitIssues(value,selection,genres);if(errors.length)throw Error(errors.join('；'));
- if(!genres.length)return [];
+ if(!premiseGenreFitCatalog(selection,genres).length)return [];
  value=resolvePremiseGenreEvidence(value,selection);
  const catalog=premiseGenreFitCatalog(selection,genres);
  return value.genreChecks.filter((row:any)=>row.status!=='fulfilled').map((row:any)=>{

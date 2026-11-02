@@ -1,3 +1,4 @@
+import {STORY_PREREQUISITE_POLICY,IDEA_PREMISE_DIFFERENCE_POLICY} from '../../shared/src/执行标准';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -64,14 +65,14 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
     // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
     // missing decisive actors/conditions were being discovered after expensive reselection.
-    expect(source).toContain('先在原池写清排除这种可能的事实，否则换用成立的机制');
+    expect(source).toContain('既有行动全部成立而所称结果仍可能不成立');
     // These constraints now live in the single canonical selection directive,
     // not a fragile controller-side string replacement.
     const selectionDirective = read('idea-discovery-contract.ts');
     expect(source).toContain('ideaPremiseSelectionDirective(');
     expect(selectionDirective).toContain('配角轮流解释旧资料不算推进');
     expect(selectionDirective).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
-    expect(source).toContain('不准只换职业、场所或物证名称');
+    expect(IDEA_PREMISE_DIFFERENCE_POLICY).toContain('只换职业、道具、名字或分类不算实质差异');
     expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
     expect(source).toContain("success: false, status: 'incomplete', ideas: []");
@@ -90,7 +91,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('const finalReview=postReselectionReview;');
     expect(source).not.toContain('reserveReconciliationRounds');
 
-    expect(source).toContain('quarantineIncompletePremiseReviews(value,selection,requiredGenres)');
+    expect(source).toContain('quarantineIncompletePremiseReviews(completePremiseSourceProof(value,selection),selection,requiredGenres)');
     expect(source).toContain('review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection))');
     expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
   });
@@ -98,10 +99,10 @@ describe('chain HTTP architecture', () => {
   it('keeps evidenced physical proof and relationship conditions at the candidate source, not just final-card rejection', () => {
     const source = read('chain.controller.ts');
     const contract = read('idea-discovery-contract.ts');
-    expect(source).toContain('证据取得/保管/传递/归责范围');
-    expect(source).toContain('行动能力及资源来源');
-    expect(source).toContain('人物关系与权利主体须一致');
-    expect(source).toContain('承担结果的必要行动须实际执行');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资料的发现/取得/复制/转交/出示');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资源时序');
+    expect(STORY_PREREQUISITE_POLICY).toContain('单个人同意不替代其它实际权利人或有权办理者的决定');
+    expect(source).toContain('承担结果的人物选择与必要条件须已实际发生');
     expect(source).toContain('核对物证的物理来源与样本取得链');
     expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
     expect(contract).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');
@@ -188,11 +189,12 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('await fulfillDiscoveryGaps(');
     expect(source).not.toContain("kind:'repair_patch_rejected'");
     expect(source).toContain("mode: 'parallel_vetted_full_card_filter'");
-    expect(source).toContain('await accept(structuredCards');
+    expect(source).toContain("work.runReview(budget=>accept(batch,");
     expect(source).toContain('const missingAfterFirstGate=Math.max(0,requestedCount-accepted.length)');
     expect(source).toContain("stepKey:'idea_premise_pool_refill'");
     expect(source).toContain("stepKey:'idea_premise_refill_selection'");
-    expect(source).toContain("await accept(supplementaryStructured,'repair')");
+    expect(source).toContain('reviewReadyCards(refillWork,refillWave())');
+    expect(source).not.toContain("await accept(supplementaryStructured,'repair')");
     expect(source).toContain('affordableFullCardRefillCount(');
     expect(source).toContain('desiredSupplement>=missingAfterFirstGate');
     expect(source).toContain('affordableReviewedPremiseCount(');
@@ -242,15 +244,13 @@ describe('chain HTTP architecture', () => {
   });
   it('keeps one JSON extraction path and removes post-card retry/replacement without weakening review', () => {
     const source = read('chain.controller.ts');
-    const afterGate = source.slice(source.indexOf('await accept(structuredCards'), source.indexOf('const selectedAccepted = accepted'));
+    const afterGate = source.slice(source.indexOf("work.runReview(budget=>accept(batch,"), source.indexOf('const selectedAccepted = accepted'));
     expect(afterGate).not.toContain('reservePremiseSelection(');
     expect(afterGate).not.toContain('repairMissing(');
     expect(afterGate).not.toContain('fulfillDiscoveryGaps(');
     expect(source).toContain('全部进入并发完整卡生成');
     expect(source).toContain("const selectedAccepted = accepted");
-    expect(source).toContain("await accept(staged,'initial',funding)");
-    expect(source).toContain("await accept(structuredCards.filter(card=>pendingIds.has(String(card.sourcePremiseId))), 'initial')");
-    expect(source).toContain('reservedInitialReviewCalls-spentReviewReservations');;
+    expect(source.includes("work.runReview(budget=>accept(batch,")).toBe(true);
     const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
     expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
     expect(jsonRetry).not.toContain('const lineParsed: any[] = []');

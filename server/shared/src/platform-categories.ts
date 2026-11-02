@@ -1301,6 +1301,32 @@ const FANQIE_SHORT_STORY_REFERENCE_CATEGORIES = [
   '都市日常', '宫斗宅斗', '现言甜宠', '古言甜宠', '民国旧影', '年代', '女性成长',
 ] as const;
 
+/** Public writing descriptions are independent of a submission category tree.
+ * Paraphrased from the publisher's 2023 short-story introduction, checked
+ * 2026-11-02. They establish narrative scope, not current eligibility, market
+ * statistics, incentive rates or the complete author-console option list.
+ * Only exact, explicitly described labels are covered. */
+const FANQIE_SHORT_STORY_PUBLIC_WRITING:Readonly<Record<string,string>>={
+ '现言甜宠':'现代生活中的恋爱故事；以通俗轻快的表达、贴近日常的人物与清晰情节节点，持续推进甜蜜关系和新的情绪看点。',
+ '现实情感':'从现实亲密关系的矛盾和人物选择推进故事；生活细节与真实动机支撑紧凑发展和情绪共鸣。',
+ '古言甜宠':'古代背景的恋爱故事；以容易代入的人物关系、清楚设定和浪漫转折推进甜宠情节。',
+ '古言虐恋':'古代背景的感情故事；身份、处境或信息差造成情感错位，以关系拉扯与选择后果推进。',
+ '悬疑脑洞':'将异常设定落入具体处境，用连贯线索、推理与信息揭示维持悬念，形成可回溯的解释。',
+ '现实生活':'从具体生活和社会关系中的矛盾展开，人物选择及现实后果形成共鸣，关注范围不限于恋爱。',
+};
+export function platformCategoryPublicWritingReference(platform:string|null|undefined,category:string|null|undefined,projectType:string|null|undefined){
+ if(platform!=='fanqie'||projectType!=='short_story')return undefined;
+ const label=String(category||'').trim(),definition=FANQIE_SHORT_STORY_PUBLIC_WRITING[label];
+ return definition?{category:label,definition,
+  sourceUrl:'https://fanqienovel.com/writer/zone/article/7176894591558221861',
+  publishedAt:'2023-05-30',verifiedAt:'2026-11-02'}:undefined;
+}
+export function platformCategoryPublicWritingBrief(platform:string|null|undefined,category:string|null|undefined,projectType:string|null|undefined):string{
+ const reference=platformCategoryPublicWritingReference(platform,category,projectType);
+ return reference?'平台公开短故事写作参考「'+reference.category+'」：'+reference.definition
+  +'；来源：'+reference.sourceUrl+'（发布于'+reference.publishedAt+'，核对于'+reference.verifiedAt+'）；这是公开写作说明，不是投稿后台完整分类表、当前活动准入或收益承诺':'';
+}
+
 export function categoryReferenceOptionsForProject(platform: string | null | undefined, projectType: string | null | undefined): string[] {
   if (platform === 'fanqie' && projectType === 'short_story') return [...FANQIE_SHORT_STORY_REFERENCE_CATEGORIES];
   if (platformCategoryTreeVerification(platform, projectType)?.verified === 'modeled') {

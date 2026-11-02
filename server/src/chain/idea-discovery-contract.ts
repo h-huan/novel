@@ -1,7 +1,8 @@
+import { projectedPremisePromptView, compactRepeatedPremiseText } from './premise-source-bindings';
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
-import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS} from './premise-source-bindings';
+import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
 import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
 import { bindPremiseCategory } from './premise-category-identity';
@@ -225,6 +226,7 @@ export function normalizePremiseSelectionPayload(
     return bindPremiseCausalPlan({
       ...poolItem,
       ...item,
+      ...Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>poolItem[field]!==undefined).map(field=>[field,structuredClone(poolItem[field])])),
       premiseId,
       workingTitle: String(poolItem.workingTitle).trim(),
       storyCore: String(poolItem.storyCore).trim(),
@@ -276,7 +278,10 @@ ${fixedPoolRule}
 ${selectionQuantityRule}
 ${storyTypeRule}
 必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
+${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}
+${PREMISE_SOURCE_REFERENCE_DIRECTIVE}
 本次一次完成全池比较、选择已有身份及这些身份的因果引用索引，绝不重写故事。每项只输出premiseId、storyCategoryId、readerQuestion和causalPlan；readerQuestion只能追问已有事实，不引入新事件。不要返回sourceBindings或另一份叙事字段。
+【服务器实际字段与原池分节映射】${JSON.stringify(SOURCE_BINDING_EXAMPLE)}。映射的值是实际字段按顺序拼接的原池分节；sourceRef只定位对应分节的连续原文，由服务器还原field和quote，模型不重复推测字段名。使用更短的{field,quote}引文时才按此表选择实际字段。“必要条件”是原池分节，不存在necessaryConditions字段，应按上表引用实际承载该原文的字段。行动、条件和结果的因果角色仍由实际事件决定，不能由字段名代替判断。
 服务器先从固定原池五节原样投影事实，再逐项校验causalPlan的field和quote是否逐字指向投影后的既有行动、条件及结果；由实际故事决定环节数量，普通直接因果可以只有一环。选优响应中已有有效索引就直接进入原有独立来源、因果、分类、全部流派及同构审核，不再付费重复装配索引；仅索引缺失或引用无效才动用原有同一共享预算内的因果索引纠错，不允许新增故事事实或调用额度。原池有真实缺口必须在本次比较中淘汰，不能因后续可纠错而留待补造。
 逐对比较真实主动策略、升级、反转与代价，不因为绑定来源就跳过选优。
 只输出selectedPremises；不返回或重写pool，不输出评分、比较自评或解释。`;
@@ -319,7 +324,7 @@ export function ideaCardStructuringDirective(
   includePreselectionPolicy = true,
 ): string {
   const safePremise = Object.fromEntries(
-    Object.entries(selectedPremise || {}).filter(([key]) => key !== 'premiseId'),
+    Object.entries(projectedPremisePromptView(selectedPremise || {})).filter(([key]) => key !== 'premiseId'),
   );
   // Peers are difference boundaries, not sources to be expanded again.
   // Keep every causal action, condition, reversal and consequence for comparison;
@@ -332,8 +337,9 @@ export function ideaCardStructuringDirective(
     'reversalEffect','payoff','irreplaceableCarrier',
   ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>
-    Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key))));
+    compactRepeatedPremiseText(Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key)))));
   return `【完整题材卡结构化】
+传输定位：fromSourceSections指向本项storyCore对应完整分节，sameTextAs指向同一对象内前序字段的逐字全文；原样读取，不是摘要、独立故事或通过结论。
 ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN-002锁定前继承与差异规则执行。"}
 这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
 ${includePreselectionPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的同一必要条件合同展开。'}
@@ -372,10 +378,12 @@ export function bindStructuredIdeaCardToPremise(
   if (!rawCard || typeof rawCard !== 'object' || Array.isArray(rawCard)) {
     throw new Error(`题材“${label}”的完整题材卡不是合法对象；系统不会猜测或换题。`);
   }
-  const safeCard = Object.fromEntries(
+  const generatedCard = Object.fromEntries(
     Object.entries(rawCard as Record<string, unknown>)
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId' && key !== 'causalPlan'),
   );
+  const owned=Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>selectedPremise[field]!==undefined).map(field=>[field,structuredClone(selectedPremise[field])]));
+  const safeCard={...generatedCard,...owned};
   // The conclusion is a frozen fact, not a second generation task. Keeping the
   // reviewed state prevents formatting from turning agreement into completed
   // registration or inventing a new terminal event. All other fields and the
@@ -677,4 +685,26 @@ export function packIdeaReviewStandards(cards:Record<string,any>[],references:Re
  const encoded={standardLines,cards:packedCards,references:packedReferences};
  const plain={cards,references};
  return JSON.stringify(encoded).length<JSON.stringify(plain).length?encoded:plain;
+}
+
+export const PREMISE_CREATION_CHOICE_FIELDS=['storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags'] as const;
+/** Bind author choices once; automatically chosen values must be produced with
+ * the candidate and pass the same dictionary contract before paid selection. */
+export function freezePremiseCreationChoices(raw:Record<string,unknown>,manual:Record<string,any>,options:Record<string,readonly string[]>,submission:{required:boolean;options:readonly string[]}){
+ const bound:Record<string,unknown>={};
+ for(const field of ['storyTone','writingStyle','webNovelGenre','plotTags'] as const){
+  const selected=Array.isArray(manual[field])?manual[field]:[];
+  const value=selected.length?[...selected]:raw[field];
+  if(discoveryDimensionSelectionIssues(value,selected,options[field]||[]).length)throw Error('候选未固定有效创作选项：'+field);
+  bound[field]=structuredClone(value);
+ }
+ const pov=manual.pov||raw.pov;
+ if(typeof pov!=='string'||!(manual.pov?pov===manual.pov:(options.pov||[]).includes(pov)))throw Error('候选未固定有效叙事视角');
+ bound.pov=pov;
+ const selected=Array.isArray(manual.submissionTags)?manual.submissionTags:[];
+ const tags=selected.length?[...selected]:submission.required?raw.submissionTags:[];
+ if(selected.length?discoveryDimensionSelectionIssues(tags,selected,submission.options).length
+  :submission.required?discoveryDimensionSelectionIssues(tags,[],submission.options).length:!Array.isArray(tags))throw Error('候选未固定有效投稿标签');
+ bound.submissionTags=structuredClone(tags);
+ return bound;
 }

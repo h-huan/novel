@@ -190,3 +190,13 @@ it('keeps related fact fields inside the local outline repair boundary',async()=
  expect(repair).toContain('${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
  expect(repair).not.toContain('未点名字段必须保持当前值');
 });
+
+it('normalizes the actual problem-keyed title rejection without converting it into a pass',()=>{
+ const card={title:'打饭阿姨的验收单'};
+ const row={position:1,title:card.title,titleCompelling:false,issues:[{field:'C1.title',criterion:'titleCompelling',problem:'标题只叠加身份与道具，缺少具体利益冲突和点击理由'}]};
+ const normalized=targetIdeaReviews({reviews:[row]},[card],[]).reviews[0];
+ expect(normalized.titleCompelling).toBe(false);expect(normalized.issues).toEqual(['C1.title（titleCompelling）：标题只叠加身份与道具，缺少具体利益冲突和点击理由']);
+ const conflict={...row.issues[0],reason:'另一份冲突理由不能被静默丢弃'};
+ expect(targetIdeaReviews({reviews:[{...row,issues:[conflict]}]},[card],[]).reviews[0].issues).toEqual([conflict]);
+ expect(targetIdeaReviews({reviews:[{...row,titleCompelling:true}]},[card],[]).reviews[0].issues).toEqual(row.issues);
+});

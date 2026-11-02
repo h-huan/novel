@@ -1,3 +1,5 @@
+import { resolvePremiseSourceReference, resolvePremiseSourceAnchor, exactPremiseSourceFields } from './premise-source-bindings';
+import { CAUSAL_OUTCOME_ATTRIBUTION_POLICY } from '../../shared/src/system-workflow-rules.registry';
 /** A concise story plan, not model reasoning. Anchors point to actual planned events. */
 export interface PremiseCausalAnchor { field: string; quote: string }
 export interface PremiseCausalLink {
@@ -16,6 +18,17 @@ const foldQuotation = (value: string) => value.replace(/["'“”‘’]/g, '"')
 export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(item.causalPlan)) return item;
   const bind = (anchor: any) => {
+    if(anchor && typeof anchor==='object' && 'sourceRef' in anchor){
+      const quote=resolvePremiseSourceReference(item,anchor.sourceRef);
+      const invalid={field:anchor.field,sourceRef:anchor.sourceRef};
+      if(Object.keys(anchor).some(key=>!(['field','sourceRef','quote'] as string[]).includes(key))
+        ||!quote||(anchor.quote!==undefined&&anchor.quote!==quote))return invalid;
+      if(narrativeFields.includes(anchor.field)&&typeof item[anchor.field]==='string'&&String(item[anchor.field]).includes(quote))return {field:anchor.field,quote};
+      const sourceAnchor=resolvePremiseSourceAnchor(item,anchor.sourceRef);
+      if(sourceAnchor)return sourceAnchor;
+      const matches=narrativeFields.filter(field=>typeof item[field]==='string'&&String(item[field]).includes(quote));
+      return matches.length===1?{field:matches[0],quote}:invalid;
+    }
     if (!anchor || !narrativeFields.includes(anchor.field) || typeof anchor.quote !== 'string' || !anchor.quote.trim()) return anchor;
     const inField = (field: string): PremiseCausalAnchor | undefined => {
       const text = item[field];
@@ -66,10 +79,22 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
     const matches = narrativeFields.flatMap(field => {const found=inField(field);return found?[found]:[];});
     return matches.length === 1 ? matches[0] : anchor;
   };
-  return {...item,causalPlan:item.causalPlan.map(link=>!link || typeof link!=='object' ? link : ({
+  const normalized={...item,causalPlan:item.causalPlan.map(link=>!link || typeof link!=='object' ? link : ({
     ...link,action:bind(link.action),result:bind(link.result),
     ...(Array.isArray(link.conditions)?{conditions:link.conditions.map(bind)}:{}),
   }))};
+  // These labels can be byte-identical projections of ONE source section.
+  // Renaming the last result address does not create a result or prove causality.
+  // Keep the quote and every actual causal judgment unchanged.
+  if(!normalized.causalPlan.some((link:any)=>link?.result?.field==='payoff')){
+    const last=normalized.causalPlan.at(-1),field=last?.result?.field;
+    const exact=exactPremiseSourceFields(item,item);
+    if(['reversalEffect','secondOrderConsequence'].includes(field)&&exact.has(field)&&exact.has('payoff')
+      &&item[field]===item.payoff&&typeof last.result.quote==='string'&&String(item.payoff).includes(last.result.quote))
+      normalized.causalPlan[normalized.causalPlan.length-1]={...last,result:{...last.result,field:'payoff'}};
+  }
+  return normalized;
+
 }
 
 /** One independent generation/review contract: distinguish a genuine missing
@@ -77,7 +102,7 @@ export function bindPremiseCausalPlan(item: Record<string, unknown>): Record<str
  * The model can use any count of steps, including one for true direct causality.
  */
 export const PREMISE_CAUSAL_SEQUENCE_DIRECTIVE =
-  'causalPlan的每个field只能取'+PREMISE_CAUSAL_NARRATIVE_FIELDS.join('、')+'。conditions是计划环节内的引用数组，绝不是新的故事字段；所有必要条件必须已存在于上述实际故事字段；引用式选优时这些字段由sourceBindings从固定原池原样投影，禁止为补条件重写或新增原文，然后才绑定引用。禁止另造顶层conditions、prerequisites或其它故事字段；最后一个关键结果须用field=payoff引用实际兑现，不能漏掉或用结果反充行动。因果计划只绑定故事已写出的实际状态变化。中间动作不得直接标终局payoff：主角准备或提出请求，只能得到已发生的直接结果；若最终胜负还依赖后续物证取得/核验、他人到场、负责人认定、对手行动或程序决定，须把这些动作及既有条件接续成后续环节，不能让前一步越级产生终局。每个result只填写该步action及其已成立conditions实际产生的结果，不能把后续结果提前填写；后一步的条件必须已在故事字段中存在，不能由终局倒推。最后一个关键环节应承接真正的payoff与代价，条件缺失时不能靠改causalPlan引用伪造成立；普通直接因果允许一环，不按示例强制凑环节。示例仅说明引用形状和因果先后，绝不要求加入核验者、第三方裁决、证据或额外程序。每项实际声称的决定性结果都要有相应行动和条件；不能用一个局部结果跳到整片区域、全部关系或所有权利的变化。';
+  'causalPlan的每个field只能取'+PREMISE_CAUSAL_NARRATIVE_FIELDS.join('、')+'。conditions是计划环节内的引用数组，绝不是新的故事字段；所有必要条件必须已存在于上述实际故事字段；引用式选优时这些字段由sourceBindings从固定原池原样投影，禁止为补条件重写或新增原文，然后才绑定引用。禁止另造顶层conditions、prerequisites或其它故事字段；最后一个关键结果须用field=payoff引用实际兑现，不能漏掉或用结果反充行动。因果计划只绑定故事已写出的实际状态变化。中间动作不得直接标终局payoff：主角准备或提出请求，只能得到已发生的直接结果；若最终胜负还依赖后续物证取得/核验、他人到场、负责人认定、对手行动或程序决定，须把这些动作及既有条件接续成后续环节，不能让前一步越级产生终局。每个result只填写该步action及其已成立conditions实际产生的结果，不能把后续结果提前填写；后一步的条件必须已在故事字段中存在，不能由终局倒推。'+CAUSAL_OUTCOME_ATTRIBUTION_POLICY+'条件缺失时不能靠改causalPlan引用伪造成立；普通直接因果允许一环，不按示例强制凑环节。示例仅说明引用形状和因果先后，绝不要求加入核验者、第三方裁决、证据或额外程序。每项实际声称的决定性结果都要有相应行动和条件；不能用一个局部结果跳到整片区域、全部关系或所有权利的变化。';
 
 export function premiseCausalPlanExample(): PremiseCausalLink[] {
   // Two-stage illustration prevents the old single action->payoff example
@@ -88,7 +113,7 @@ export function premiseCausalPlanExample(): PremiseCausalLink[] {
       result: { field: 'escalation', quote: '第一项行动当下真正产生的变化连续原文' } },
     { action: { field: 'escalation', quote: '本故事后续实际执行并改变局面的行动连续原文' },
       conditions: [{ field: 'escalation', quote: '该行动发生之前已具备的必要条件连续原文' }],
-      result: { field: 'payoff', quote: '由后续实际行动产生的最终结果与代价连续原文' } },
+      result: { field: 'payoff', quote: '由后续实际行动产生的最终结果连续原文' } },
   ];
 }
 
@@ -171,3 +196,9 @@ export function premiseCausalCatalog(item: Record<string, unknown>, prefix: stri
     ref: `${prefix}causalPlan[${index}]`, ...link,
   }));
 }
+
+export function premiseCausalReferenceExample(){
+ const address=()=>({sourceRef:'本项ID:实际分节号:起句-止句'});
+ return premiseCausalPlanExample().map(link=>({action:address(),conditions:link.conditions.map(()=>address()),result:address()}));
+}
+export const PREMISE_SOURCE_REFERENCE_DIRECTIVE='本次原池原文附有服务器定位编号：sourceRef="本项真实ID:分节号:分句起号-止号"；单句可省略止号。优先仅返回原文中实际行动、条件与结果的sourceRef地址，field由服务器按同一固定映射确定，不重复推测字段名。确需分句内更短原文以分离行动与结果时，允许沿原有{field,quote}逐字引用，不能同时填写sourceRef和quote；field仍须使用服务器分节到字段映射中的实际字段。编号及方括号只属传输定位，服务器从未加编号的原池逐字取回连续原文并验证同一身份、分节、范围与字段。范围不得跨分节，不能引用其它题材或把结果断言当作行动、条件；所有原因果质量判断仍独立执行。';

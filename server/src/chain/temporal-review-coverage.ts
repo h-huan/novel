@@ -54,10 +54,10 @@ export function temporalNumbers(evidence: string) {
     digitalRanges.push([match.index!,match.index!+match[0].length]);
   }
   const clocks: Array<{ original: string; minutes: number; minuteOptions:number[]; minuteBounds?:{min:number;max:number}; relativeDay?:number }> = [];
-  const clockPattern = new RegExp(`(${number})(?:点|时)(?:(半)|(?:过)?(${number})分?)?|([0-2]?\\d)[:：]([0-5]\\d)`, 'g');
+  const clockPattern = new RegExp(`(${number})(?:点|时)(?:(半)|([一三13])刻|(?:过)?(${number})分?)?|([0-2]?\\d)[:：]([0-5]\\d)`, 'g');
   for (const match of evidence.matchAll(clockPattern)) {
     if(digitalRanges.some(([start,end])=>match.index!>=start&&match.index!<end))continue;
-    let hour = timeNumber(match[1] ?? match[4]), minute = match[2] ? 30 : match[3] ? timeNumber(match[3]) : Number(match[5] ?? 0);
+    let hour = timeNumber(match[1] ?? match[5]), minute = match[2] ? 30 : match[3] ? timeNumber(match[3])*15 : match[4] ? timeNumber(match[4]) : Number(match[6] ?? 0);
     const period=evidence.slice(Math.max(0,match.index!-4),match.index!);
     if(/下午|傍晚|晚上/.test(period)&&hour<12)hour+=12;
     if(/凌晨/.test(period)&&hour===12)hour=0;

@@ -285,7 +285,7 @@ describe('premise selection before identity lock', () => {
         expect(requested).toEqual([]);expect(credits.remaining).toBe(1);continue;
       }
       const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
-      expect(requested.flat()).toEqual(['A','B','C','D','E']);
+      expect(requested.flat().sort()).toEqual(['A','B','C','D','E']);
       expect(requested).toHaveLength(allowed===10?5:2);
       expect(credits.remaining).toBe(allowed-requested.length);
       expect(requested.every(batch=>batch.length<=3)).toBe(true);
@@ -1067,4 +1067,114 @@ it('keeps source-correctable original IDs eligible when screening target exceeds
  expect(allowed).toEqual(expect.arrayContaining(['A','C']));
  expect(allowed).not.toContain('B'); // forced replacement hedge must still change identity
  expect(accepted).toBe(true);expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+});
+
+it.each([{credits:8,recover:true},{credits:7,recover:false}])('funds the observed 3-card delivery gap before optional hedges with $credits shared calls',async({credits,recover})=>{
+ vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,sourceBatchSize:2});
+ const {materializePremiseCategoryFit}=await import('./premise-category-fit');
+ const make=(id:string)=>({...premise(id),causalPlan:[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+   conditions:[{field:'escalation',quote:premise(id).escalation}],result:{field:'payoff',quote:premise(id).payoff}}]});
+ const pool='ABCDEFGHIJKL'.split('').map(make);
+ const input=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,7)},8,12,['悬疑'],5);
+ const c=Object.create(ChainController.prototype) as any;c.logger={log:vi.fn(),warn:vi.fn()};
+ const sourceInputs:string[][]=[];
+ c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string,budget:any)=>{
+   if(mode==='overlap'){budget.remaining--;return {passed:true,issues:[]};}
+   sourceInputs.push(current.selected.map((row:any)=>row.premiseId));
+   budget.remaining-=Math.ceil(current.selected.length/2);
+   const sourceChecks=premiseSourceComparisonCatalog(current).map(row=>({ref:row.ref,status:'preserved',reason:'候选原文完整保留同身份原池的事实约束'}));
+   const categoryChecks=current.selected.map((row:any,index:number)=>({ref:`S${index+1}.category`,
+     status:'CDEFG'.includes(row.premiseId)?'missing':'fulfilled',evidenceRef:`S${index+1}.activeChoice`,reason:'独立核对主线实际选择是否落实当前分类承诺'}));
+   const payoffChecks=current.selected.map((row:any,index:number)=>({ref:`S${index+1}.payoff`,status:'supported',
+     actionEvidenceRef:`S${index+1}.activeChoice`,conditionEvidenceRef:`S${index+1}.escalation`,
+     reversalCheck:{status:'supported',actionEvidenceRef:`S${index+1}.activeChoice`,reason:'独立核对既有行动和条件能够支持反转结果'},
+     links:row.causalPlan.map((_:any,n:number)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported',reason:'该实际行动及已建立条件能够产生点名结果'})),
+     reason:'全部决定性结果均经独立行动条件及代价核对'}));
+   const result=materializePremiseSourceReview({sourceChecks},current);
+   result.issues.push(...materializePremiseCategoryFit({categoryChecks},current));
+   return {...result,payoffChecks,categoryChecks,genreChecks:[],passed:result.issues.length===0};
+ });
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+   if(!recover)throw Error('mandatory review is unaffordable; must not spend a selection call');
+   expect(prompt.match(/replacements恰好(\d+)项/)?.[1]).toBe('4');
+   const finalIds=['A','B','H','I','J','K','G'];
+   const data={replacements:[['C','H'],['D','I'],['E','J'],['F','K']].map(([from,to])=>({replacesPremiseId:from,
+     premise:make(to),comparisons:finalIds.filter(id=>id!==to).map(compare)}))};
+   expect(options.validate(data)).toBe(true);options.physicalCallBudget.remaining--;return {data};
+ });
+ const budget={reviews:{remaining:credits},reselection:{remaining:3}};
+ const result=await c.reconcilePremiseSelection(input,8,12,['悬疑'],'unchanged standard',[],budget,5);
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(recover?['A','B','H','I','J','K']:['A','B']);
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(recover?1:0);
+ expect(budget.reviews.remaining).toBe(recover?0:2);
+ expect(budget.reselection.remaining).toBe(recover?2:3);
+ if(recover){
+   expect(sourceInputs).toEqual([['A','B','C','D','E','F','G'],['H','I','J','K']]);
+   expect(result.selectionAudit.finalReview.passed).toBe(true);
+   expect(result.selectionAudit.discardedSurplusPremiseIds).toEqual(['G']);
+ }
+});
+
+it.each([
+ {pair:true,badB:false,ready:['A','B']},
+ {pair:true,badB:true,ready:['A']},
+ {pair:false,badB:false,ready:['A']},
+ {pair:false,badB:false,ready:['A','C'],third:true},
+])('releases early cards only after complete own Gates and the full pair Gate: $pair/$badB',async({pair,badB,ready,third})=>{
+ const {materializePremiseCategoryFit}=await import('./premise-category-fit');
+ const make=(id:string)=>({...premise(id),causalPlan:[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+  conditions:[{field:'escalation',quote:premise(id).escalation}],result:{field:'payoff',quote:premise(id).payoff}}]});
+ const ids=third?['A','B','C']:['A','B'];
+ const input=normalizePremiseSelectionPayload({pool:ids.map(make),selectedPremises:ids.map(make)},ids.length,ids.length,['悬疑']);
+ let release!:()=>void,signalSource!:()=>void;
+ const held=new Promise<void>(done=>{release=done;}),sourceStarted=new Promise<void>(done=>{signalSource=done;});
+ const c=Object.create(ChainController.prototype) as any;c.logger={log:vi.fn(),warn:vi.fn()};
+ c.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string,_budget:any,_batch:any,_genres:any,_limiter:any,_focus:any,onSource:any)=>{
+  if(mode==='overlap'){
+   await sourceStarted;
+   return pair?{passed:true,issues:[]}:{passed:false,issues:[{kind:'overlap',premiseId:'B',referencePremiseId:'A',
+    quote:make('B').activeChoice,referenceQuote:make('A').activeChoice,reason:'两项主动策略和改变胜负的真实机制相同'}]};
+  }
+  const result=materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current)
+   .map(row=>({ref:row.ref,status:'preserved',reason:'逐项核对真实原文与原池事实约束仍然兼容'}))},current);
+  const categoryChecks=current.selected.map((row:any,index:number)=>({ref:`S${index+1}.category`,
+   status:badB&&row.premiseId==='B'?'missing':'fulfilled',evidenceRef:`S${index+1}.activeChoice`,reason:'独立核对分类所需的实际人物选择与主线结果'}));
+  result.issues.push(...materializePremiseCategoryFit({categoryChecks},current));
+  const payoffChecks=current.selected.map((row:any,index:number)=>({ref:`S${index+1}.payoff`,status:'supported',
+   actionEvidenceRef:`S${index+1}.activeChoice`,conditionEvidenceRef:`S${index+1}.escalation`,
+   reversalCheck:{status:'supported',actionEvidenceRef:`S${index+1}.activeChoice`,reason:'已建立行动与条件足以造成当前反转结果'},
+   links:row.causalPlan.map((_:any,n:number)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported',reason:'逐环核对已建立的行动与条件能够产生本结果'})),
+   reason:'真实行动与既有必要条件支持全部决定性结果'}));
+  const review={...result,categoryChecks,payoffChecks,genreChecks:[],passed:result.issues.length===0};
+  onSource?.(current,review);signalSource();await held;return review;
+ });
+ const approved=vi.fn();
+ const pending=c.reconcilePremiseSelection(input,ids.length,ids.length,['悬疑'],'unchanged',[],{reviews:{remaining:8},reselection:{remaining:0}},ids.length,approved);
+ await sourceStarted;await new Promise<void>(done=>setImmediate(done));
+ try{expect(approved.mock.calls.map(([row])=>row.premiseId)).toEqual(ready);}
+ finally{release();await pending;}
+});
+
+it('deduplicates identical narrative text losslessly within each review identity, keeping contradictory values distinct',()=>{
+ const original=selection().selected.map(item=>({...item,
+   protagonistSituation:'她已经明确递出两个包子，数量和交付对象构成同一事件事实，不因后文关系台词而改变。',
+   openingEvent:'她已经明确递出两个包子，数量和交付对象构成同一事件事实，不因后文关系台词而改变。',coreConflict:'她已经明确递出两个包子，数量和交付对象构成同一事件事实，不因后文关系台词而改变。',
+   payoff:'她只递出两个包子，他却声称吃了三个包子。',
+   reversalEffect:'她只递出两个包子，他却声称吃了三个包子。',
+   sourceBindings:{copy:'server-only duplicate'},
+ }));
+ const before=structuredClone(original),view=sourceReviewSelectionView(original);
+ expect(view[0].openingEvent).toEqual({sameTextAs:'protagonistSituation'});
+ expect(view[0].reversalEffect).not.toEqual({sameTextAs:'activeChoice'});
+ const expand=(row:Record<string,any>,field:string):unknown=>row[field]?.sameTextAs
+   ?expand(row,row[field].sameTextAs):row[field];
+ for(let i=0;i<view.length;i++)for(const field of Object.keys(view[i]))
+   expect(expand(view[i],field)).toEqual(original[i][field]);
+ expect(original).toEqual(before);
+ const overlap=overlapReviewSelectionView(original);
+ for(let i=0;i<overlap.length;i++){
+   expect(overlap[i]).not.toHaveProperty('sourceBindings');
+   for(const field of Object.keys(overlap[i]))expect(expand(overlap[i],field)).toEqual(original[i][field]);
+ }
+ expect(JSON.stringify(view).length).toBeLessThan(JSON.stringify(original).length);
 });

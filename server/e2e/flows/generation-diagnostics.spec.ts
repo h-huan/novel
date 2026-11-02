@@ -24,6 +24,12 @@ test('direct backend entry reports its checkout and rejects duplicate startup be
   expect(still.build.commit).toBe(first.build.commit);
 });
 
+test('discovery cancellation reaches the registered HTTP adapter', async ({ request }) => {
+  const response = await request.post('http://127.0.0.1:' + (process.env.E2E_PORT || '3100') + '/api/v1/chain/cancel-idea-discovery/e2e-no-active-discovery');
+  expect(response.ok()).toBe(true);
+  expect(await response.json()).toMatchObject({ cancelled: false });
+});
+
 test('unconfigured idea discovery preserves its cause and adds one visible failed run', async ({ request }) => {
   const base = `http://127.0.0.1:${process.env.E2E_PORT || 3100}/api/v1`;
   const before = await (await request.get(`${base}/platform-analytics/overview`)).json();

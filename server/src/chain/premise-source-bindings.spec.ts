@@ -1,3 +1,5 @@
+import {indexedPremiseSourcePool,resolvePremiseSourceReference,exactPremiseSourceFields} from './premise-source-bindings';
+import {premiseSourceReviewWork,completePremiseSourceProof,premiseSourceAuditView} from './premise-selection-review';
 import {it,expect} from 'vitest';
 import {materializePremiseSourceBindings,projectPremiseSourceChoices,SOURCE_BINDING_EXAMPLE,PREMISE_SOURCE_SECTIONS} from './premise-source-bindings';
 import {normalizePremiseSelectionPayload,bindStructuredIdeaCardToPremise} from './idea-discovery-contract';
@@ -71,4 +73,91 @@ it('projects an identity-only choice losslessly without inventing a causal plan 
  expect(()=>projectPremiseSourceChoices([{...choices[0],newPower:'新增获胜能力'}],[seed])).toThrow('额外故事字段');
  expect(()=>projectPremiseSourceChoices(choices,[{...seed,storyCore:'只有结果没有分节的旧来源'}])).toThrow('完整');
  const old=nomination();expect(projectPremiseSourceChoices([old],[seed])[0]).toBe(old);
+});
+
+it('resolves numbered contiguous source clauses to exact original text before every original causal validator',()=>{
+ const chosen={premiseId:'P1',readerQuestion:'主角放弃自家扩建后如何面对家人？',causalPlan:[{
+  action:{field:'activeChoice',sourceRef:'P1:2:2-3'},conditions:[{field:'escalation',sourceRef:'P1:3:3'}],
+  result:{field:'payoff',sourceRef:'P1:4:1-2'},
+ }]};
+ const result=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:projectPremiseSourceChoices([chosen],[seed])},1,1);
+ expect(result.selected[0].causalPlan).toEqual(nomination().causalPlan);
+ expect(result.selected[0].storyCore).toBe(seed.storyCore);
+ expect(indexedPremiseSourcePool([seed])[0].storyCore).toContain('[2]邻居看到桥面能站人，[3]选择带来工具共同修桥。');
+ expect(seed.storyCore).not.toContain('[2]');
+});
+
+it.each(['P2:2:1','P1:2:99','P1:4:4-2','P1:6:1','P1:4:1-P1:5:1'])('rejects a cross-owner, missing or noncontiguous source address: %s',ref=>{
+ expect(resolvePremiseSourceReference(seed,ref)).toBeUndefined();
+ const raw=nomination();(raw.causalPlan[0] as any).action={field:'activeChoice',sourceRef:ref};
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
+});
+
+it('proves exact copied facts while retaining independent review of the new reader question',()=>{
+ const selection=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[nomination()]},1,1);
+ const work=premiseSourceReviewWork(selection);
+ expect(work.exact).toHaveLength(9);expect(work.pending.map(row=>row.field)).toEqual(['readerQuestion']);
+ const unknown={sourceChecks:[{ref:'S1.readerQuestion',status:'unknown',reason:'追问引入原池没有确认的事实，不能确认兼容'}]};
+ const complete=completePremiseSourceProof(unknown,selection);
+ expect(materializePremiseSourceReview(complete,selection).passed).toBe(false);
+ expect(complete.sourceChecks.find((row:any)=>row.ref==='S1.readerQuestion').status).toBe('unknown');
+ expect(premiseSourceAuditView(selection)[0].activeChoice).toEqual({fromSourceSections:['主动选择']});
+ expect(completePremiseSourceProof({},selection)).toEqual({});
+});
+
+it('requires semantic review again after any source mutation and never overwrites a negative supplied verdict',()=>{
+ const selection=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[nomination()]},1,1);
+ selection.selected[0].activeChoice='主角新增自己有权强制全部邻居出工的权限。';
+ expect(exactPremiseSourceFields(selection.selected[0],seed).has('activeChoice')).toBe(false);
+ expect(premiseSourceReviewWork(selection).pending.map(row=>row.field)).toEqual(['activeChoice','readerQuestion']);
+ const raw={sourceChecks:[{ref:'S1.payoff',status:'drift',reason:'模型给出相反结论不能被程序填充静默覆盖'}]};
+ expect(completePremiseSourceProof(raw,selection).sourceChecks[0]).toEqual(raw.sourceChecks[0]);
+});
+
+it('normalizes an identical fixed-source terminal alias without fabricating payoff coverage for different facts',()=>{
+ const raw=nomination();raw.causalPlan[0].result.field='secondOrderConsequence';
+ const normalized=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1);
+ expect(normalized.selected[0].causalPlan).toEqual(nomination().causalPlan);
+ const legacy={...normalized.selected[0],storyCore:'未分节的旧故事，不能证明固定原池投影'};
+ legacy.causalPlan=raw.causalPlan;
+ expect(()=>normalizePremiseSelectionPayload({pool:[{...seed,storyCore:legacy.storyCore}],selectedPremises:[legacy]},1,1)).toThrow('须覆盖主线兑现');
+ const changed={...normalized.selected[0],secondOrderConsequence:'另一项不同结果不能被偷换成主线兑现',causalPlan:[{...raw.causalPlan[0],result:{field:'secondOrderConsequence',quote:'另一项不同结果'}}]};
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[changed]},1,1)).toThrow('须覆盖主线兑现');
+});
+
+it('recovers only a unique same-source field address and an exactly agreeing redundant quote',()=>{
+ const raw=nomination();
+ (raw.causalPlan[0] as any).action={field:'activeChoice',sourceRef:'P1:2:2-3',quote:raw.causalPlan[0].action.quote};
+ (raw.causalPlan[0] as any).conditions=[{field:'necessaryConditions',sourceRef:'P1:3:3'}];
+ expect(normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1).selected[0].causalPlan).toEqual(nomination().causalPlan);
+ (raw.causalPlan[0] as any).action.quote='另一段与编号冲突的原文不能被静默覆盖';
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
+});
+
+it('binds a numbered source action to its canonical exact projection despite repeated field aliases',()=>{
+ const raw=nomination();
+ (raw.causalPlan[0] as any).action={field:'activeChoice',sourceRef:'P1:4:1'};
+ (raw.causalPlan[0] as any).result={field:'payoff',sourceRef:'P1:4:2'};
+ const selected=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1).selected[0];
+ expect(selected.causalPlan[0].action).toEqual({field:'reversalEffect',quote:'大家轮流铺好桥面并试着步行通过，'});
+ expect(selected.causalPlan[0].result).toEqual({field:'payoff',quote:'孩子当天走过木桥；'});
+ expect(selected.storyCore).toBe(seed.storyCore);
+ expect(selected.activeChoice).toBe(bodies[1]);
+ const altered={...selected};
+ for(const field of ['escalation','reversalEffect','payoff','secondOrderConsequence'])altered[field]='不同且未经验证的事实'+selected[field];
+ altered.causalPlan=raw.causalPlan;
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[altered]},1,1)).toThrow('须绑定本题材实际故事字段');
+});
+
+it('accepts source-only numeric addresses and restores every field before the original causal Gate',()=>{
+ const raw=nomination();
+ (raw.causalPlan[0] as any).action={sourceRef:'P1:2:2-3'};
+ (raw.causalPlan[0] as any).conditions=[{sourceRef:'P1:3:3'}];
+ (raw.causalPlan[0] as any).result={sourceRef:'P1:4:1-2'};
+ const selected=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1).selected[0];
+ expect(selected.causalPlan[0].action.quote).toBe(nomination().causalPlan[0].action.quote);
+ expect(selected.causalPlan[0].conditions).toEqual(nomination().causalPlan[0].conditions);
+ expect(selected.causalPlan[0].result).toEqual(nomination().causalPlan[0].result);
+ (raw.causalPlan[0] as any).action={sourceRef:'P2:2:2-3'};
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
 });

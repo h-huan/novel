@@ -356,3 +356,20 @@ it('shares quantity period, count and recipient rules across generation, audit a
  expect(buildOutlineFactReviewPrompt({canonicalBrief:'原事实',world:{},previousLedger:[],chapters:[]})).toContain(OUTLINE_QUANTITY_SCOPE_POLICY);
  expect(getSystemWorkflowRule('CTX-005')!.details!.join('\n')).toContain(OUTLINE_QUANTITY_SCOPE_POLICY);
 });
+
+it('locates all original clock and duration assertions for the existing first-pass creation fact review',()=>{
+ const chapter={content:'鱼已经在后厨，他说六点到的。现在五点二十。六点一刻出锅，只能放八分钟，客人六点半到。',
+   characterActions:[{action:'把鱼放回冷柜',result:'六点一刻出锅'}]};
+ const original=structuredClone(chapter);
+ const prompt=buildOutlineFactReviewPrompt({canonicalBrief:'不改确认事实',world:{},previousLedger:[],chapters:[chapter]});
+ const marker='【原文时刻与时长定位】';
+ expect(prompt).toContain(marker);
+ const rows=JSON.parse(prompt.split(marker)[1].split('\n')[0]);
+ const content=rows.find((row:any)=>row.path==='本批·条目1.content');
+ expect(content.clocks.map((clock:any)=>clock.original)).toEqual(['六点','五点二十','六点一刻','六点半']);
+ expect(content.clocks[2].minuteOptions).toEqual([375,1095]);
+ expect(content.durations).toContainEqual(expect.objectContaining({original:'八分钟',minutes:8}));
+ expect(rows.some((row:any)=>row.path==='本批·条目1.characterActions[0].result')).toBe(true);
+ expect(chapter).toEqual(original);
+ expect(prompt).toContain('consistent');expect(prompt).toContain('contradictions');
+});

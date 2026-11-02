@@ -274,3 +274,17 @@ it('memoizes independently approved plan-only corrections without ever skipping 
  expect(full.mock.calls.at(-1)?.[0].selected.map((row:any)=>row.premiseId)).toEqual(['B']);
  expect(full).toHaveBeenCalledTimes(2);
 });
+
+it('notifies exact cached source verdicts before unrelated changed sources finish',async()=>{
+ const input=selection(),cache:PremiseSourceReceipts=new Map();
+ await reviewChangedPremiseSources(input,'same standards',cache,async current=>report(current));
+ const changed=structuredClone(input);changed.selected[4].payoff+='新的结果';
+ let release!:()=>void;const held=new Promise<void>(done=>{release=done;});
+ const observed=vi.fn(),review=vi.fn(async current=>{await held;return report(current);});
+ const pending=reviewChangedPremiseSources(changed,'same standards',cache,review,undefined,undefined,undefined,observed);
+ try{
+  expect(observed.mock.calls.map(([part])=>part.selected[0].premiseId)).toEqual(['A','B','C','D']);
+  for(const [part,review]of observed.mock.calls){expect(review.passed).toBe(true);expect(part.selected).toHaveLength(1);expect(review.sourceChecks.every((row:any)=>row.ref.startsWith('S1.'))).toBe(true);}
+  expect(review.mock.calls[0][0].selected.map((row:any)=>row.premiseId)).toEqual(['E']);
+ }finally{release();await pending;}
+});

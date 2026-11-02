@@ -1,3 +1,4 @@
+import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
 import { premiseSeedFactIssues } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -672,6 +673,9 @@ it('packs local repair standards losslessly with per-card facts and all pending 
 it('fixed-pool selection uses the canonical single-output contract without obsolete runtime substitutions', () => {
  const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
  expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
+ expect(rule).toContain('【服务器实际字段与原池分节映射】');
+ expect(rule).toContain('"escalation":["必要条件","反转兑现"]');
+ expect(rule).toContain('不存在necessaryConditions字段');
  expect(rule).toContain('只输出selectedPremises；');
  expect(rule).toContain('一次完成全池比较、选择已有身份及这些身份的因果引用索引');
  expect(rule).toContain('有效索引就直接进入原有独立来源');
@@ -780,5 +784,13 @@ it('rejects hidden factual fields outside the independent source-review contract
  const seed={premiseId:'P1',workingTitle:'原池真实题材',storyCore:'原池已经写明完整行动、成立条件与实际结果'};
  for(const field of ['conditions','prerequisites','secretEvidence']){
   expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[{...selectedPremise('P1'),[field]:'未参与审核的秘密条件'}]},1,1)).toThrow('额外字段');
+ }
+});
+
+it('uses the same causal sequence in identity-only and expanded selection',()=>{
+ for(const fixed of [false,true]){
+  const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,fixed);
+  expect(prompt.includes(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE)).toBe(true);
+  expect(prompt).toContain('每个result只填写该步action及其已成立conditions实际产生的结果');
  }
 });

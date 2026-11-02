@@ -101,7 +101,9 @@ describe('bounded premise source review batches',()=>{
  it('keeps full facts in 3+2 batches and rebinds all fifty checks without losing a real drift',()=>{
   const original=selection(),before=JSON.stringify(original),batches=premiseSourceBatches(original);
   expect(batches.map(batch=>batch.selected.length)).toEqual([3,2]);
-  const raw=batches.map(report);raw[1].sourceChecks.find(row=>row.ref==='S1.payoff')!.status='drift';
+  const raw=batches.map(report),badBatch=batches.findIndex(batch=>batch.selected.some(item=>item.premiseId==='D'));
+  const local=batches[badBatch].selected.findIndex(item=>item.premiseId==='D')+1;
+  raw[badBatch].sourceChecks.find(row=>row.ref==='S'+local+'.payoff')!.status='drift';
   const merged=mergePremiseSourceBatches(original,batches,raw.map((value,index)=>({
     ...materializePremiseSourceReview(value,batches[index]),
     payoffChecks:value.payoffChecks,
@@ -118,7 +120,7 @@ describe('bounded premise source review batches',()=>{
    withExtras.selected[0].serverDebug='private transport marker'.repeat(500);
    const after=premiseSourceBatches(withExtras).map(batch=>batch.selected.map(item=>item.premiseId));
    expect(after).toEqual(plain);
-   expect(after.flat()).toEqual(base.selected.map(item=>item.premiseId));
+   expect(after.flat().sort()).toEqual(base.selected.map(item=>item.premiseId).sort());
  });
  it('uses already-required causal audit complexity to avoid a slow two-card bottleneck',()=>{
    const original=selection();
@@ -130,9 +132,9 @@ describe('bounded premise source review batches',()=>{
    const input={...original,selected:original.selected.map((item,index)=>index===1?heavy:item)};
    const before=JSON.stringify(input);
    const batches=premiseSourceBatches(input);
-   expect(batches.map(batch=>batch.selected.map(item=>item.premiseId))).toEqual([['A','B'],['C','D','E']]);
+   expect(batches.find(batch=>batch.selected.some(item=>item.premiseId==='B'))!.selected).toHaveLength(2);
    expect(JSON.stringify(input)).toBe(before);
-   expect(batches.flatMap(batch=>batch.selected).map(item=>item.premiseId)).toEqual(original.selected.map(item=>item.premiseId));
+   expect(batches.flatMap(batch=>batch.selected).map(item=>item.premiseId).sort()).toEqual(original.selected.map(item=>item.premiseId).sort());
    expect(batches).toHaveLength(2); // exactly the SAME two paid model reviews
  });
  it('balances uneven review material without increasing calls, changing order or dropping any source evidence',()=>{
@@ -141,7 +143,7 @@ describe('bounded premise source review batches',()=>{
    const input={...original,selected:[heavy,...original.selected.slice(1)]};
    const batches=premiseSourceBatches(input);
    expect(batches.map(batch=>batch.selected.length)).toEqual([2,3]);
-   expect(batches.flatMap(batch=>batch.selected.map(item=>item.premiseId))).toEqual(['A','B','C','D','E']);
+   expect(batches.flatMap(batch=>batch.selected.map(item=>item.premiseId)).sort()).toEqual(['A','B','C','D','E']);
    expect(batches).toHaveLength(2);
    const reports=batches.map(report);
    const merged=mergePremiseSourceBatches(input,batches,reports.map((value,index)=>({
@@ -159,7 +161,9 @@ describe('bounded premise source review batches',()=>{
   expect(()=>mergePremiseSourceBatches(original,batches,missing)).toThrow('覆盖未完成');
   const duplicate=structuredClone(reviews);duplicate[1].sourceChecks![1]=duplicate[1].sourceChecks![0];
   expect(()=>mergePremiseSourceBatches(original,batches,duplicate)).toThrow();
-  const unknown=structuredClone(reviews);unknown[1].sourceChecks![0].status='unknown';
+  const unknown=structuredClone(reviews),unknownBatch=batches.findIndex(batch=>batch.selected.some(item=>item.premiseId==='D'));
+  const unknownLocal=batches[unknownBatch].selected.findIndex(item=>item.premiseId==='D')+1;
+  unknown[unknownBatch].sourceChecks!.find(row=>row.ref==='S'+unknownLocal+'.protagonistSituation')!.status='unknown';
   const partial=mergePremiseSourceBatches(original,batches,unknown);
    expect(partial.passed).toBe(false);
    expect(partial.issues).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'D',repairMode:'replace_from_pool'})]);
@@ -169,7 +173,8 @@ describe('bounded premise source review batches',()=>{
     const original=selection(),batches=premiseSourceBatches(original);
     const reviews=batches.map(batch=>{
       const raw=report(batch);
-      if(batch.selected[0]?.premiseId==='D')raw.sourceChecks[0].status='unknown';
+      const local=batch.selected.findIndex(item=>item.premiseId==='D')+1;
+      if(local>0)raw.sourceChecks.find(row=>row.ref==='S'+local+'.protagonistSituation')!.status='unknown';
       const source=materializePremiseSourceReview(raw,batch);
       return {...source,payoffChecks:raw.payoffChecks};
     });
@@ -228,4 +233,22 @@ it('composes real source partitions with the independent overlap reservation in 
   budget.remaining--;return {passed:true,issues:[]};
  });
  expect(results[0].sourceChecks).toHaveLength(50);expect(calls).toBe(2);expect(parent.remaining).toBe(2);
+});
+
+it('separates heavy adjacent identities within the same four two-card reviews and preserves all eighty field receipts',()=>{
+ (budgetConfig.readGenerationBudgets as any).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,sourceBatchSize:2,reviewGroupingMode:1});
+ const base=selection();
+ const selected='ABCDEFGH'.split('').map((premiseId,index)=>({...base.selected[index%5],premiseId,
+  ...(index<2?{activeChoice:'主角实际采取必要行动并造成新的真实后果'.repeat(150-index*10)}:{})}));
+ const input={...base,selected,pool:selected.map(item=>({premiseId:item.premiseId,workingTitle:String(item.workingTitle),storyCore:String(item.storyCore)}))};
+ const before=JSON.stringify(input),batches=premiseSourceBatches(input,4);
+ expect(batches).toHaveLength(4);expect(batches.every(batch=>batch.selected.length===2)).toBe(true);
+ expect(batches.find(batch=>batch.selected.some(item=>item.premiseId==='A'))!.selected.some(item=>item.premiseId==='B')).toBe(false);
+ expect(batches.flatMap(batch=>batch.selected.map(item=>item.premiseId)).sort()).toEqual('ABCDEFGH'.split(''));
+ const reports=batches.map(report),bad=batches.findIndex(batch=>batch.selected.some(item=>item.premiseId==='B'));
+ const local=batches[bad].selected.findIndex(item=>item.premiseId==='B')+1;
+ reports[bad].sourceChecks.find(row=>row.ref==='S'+local+'.payoff')!.status='drift';
+ const merged=mergePremiseSourceBatches(input,batches,reports.map((value,index)=>({...materializePremiseSourceReview(value,batches[index]),payoffChecks:value.payoffChecks})));
+ expect(merged.sourceChecks).toHaveLength(80);expect(merged.sourceChecks!.find(row=>row.ref==='S2.payoff')?.status).toBe('drift');
+ expect(merged.issues.map(item=>item.premiseId)).toEqual(['B']);expect(merged.passed).toBe(false);expect(JSON.stringify(input)).toBe(before);
 });

@@ -214,3 +214,12 @@ describe('constitution persistence across restart and edits', () => {
     c.confirmedStory={title:'测试'};
     expect(buildExecutionStandard(c).dimensions.find(d=>d.dimension==='category')!.requirement).not.toContain('本维可执行判据为作者已确认');
   });
+
+it('shares the actual public short-story category scope with generation while retaining unknown submission placement',()=>{
+ const c=readConstitution({type:'short_story',target_platform:'fanqie',settings:{category:'现言甜宠'}});
+ const category=buildExecutionStandard(c).dimensions.find(d=>d.dimension==='category')!;
+ expect(category.requirement).toContain('现代生活中的恋爱故事');
+ expect(category.requirement).toContain('7176894591558221861');
+ expect(category.requirement).toContain('实际体量分布仍未核验');
+ expect(category.requirement).not.toContain('头部实测');
+});

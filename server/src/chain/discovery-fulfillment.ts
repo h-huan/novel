@@ -30,6 +30,17 @@ export function reserveFinalRefillReviewCapacity(
  * enough for one independent review per presentation batch before offering
  * new candidates to paid screening. Never allocate from a delivery shortfall
  * alone: a missing 3/5 and only 2 affordable reviews cannot complete 5/5. */
+/** A preparation overlap knows a lower-bound deficit while initial final
+ * reviews are pending. Preserve enough optional source capacity for their
+ * possible failures; only the later actual gap controls full-card dispatch.
+ * This is a count request, never a new call allowance or a quality verdict. */
+export function plannedFullCardRefillCount(knownMissing:number,requested:number,accepted:number,preparing=false):number{
+ if(![knownMissing,requested,accepted].every(Number.isInteger)||requested<1||knownMissing<0
+  ||accepted<0||accepted>requested||knownMissing>requested-accepted)throw Error('补位准备的已知缺额或请求数量无效');
+ if(!knownMissing)return 0;
+ return Math.max(knownMissing+Math.ceil(knownMissing/2),preparing?requested-accepted:knownMissing);
+}
+
 export function affordableFullCardRefillCount(
  availableSeeds: number, physicalCredits: number, reviewBatchSize: number, groupingMode=0,
 ): number {

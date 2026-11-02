@@ -40,7 +40,7 @@ describe('manual genre proof contract',()=>{
  });
  it('keeps missing genre defects through source batch merge and routes them to the existing bounded repair',()=>{
   const original=selection(),batches=premiseSourceBatches(original);
-  const reviews=batches.map(batch=>{const source=materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'来源字段与原池所述行动方向和后果保持兼容'}))},batch);const raw=fit(batch);raw.genreChecks[1].status='missing';raw.genreChecks[1].reason='故事只有现实听证会，没有系统触发或奖励机制';source.issues.push(...materializePremiseGenreFit(raw,batch,genres));source.genreChecks=raw.genreChecks;source.passed=false;return source;});
+  const reviews=batches.map(batch=>{const source=materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'来源字段与原池所述行动方向和后果保持兼容'}))},batch);const raw=fit(batch);for(const [index,item] of batch.selected.entries())if(['A','D'].includes(String(item.premiseId))){const target=raw.genreChecks.find(row=>row.ref==='S'+(index+1)+'.genre2')!;target.status='missing';target.reason='故事只有现实听证会，没有系统触发或奖励机制';}source.issues.push(...materializePremiseGenreFit(raw,batch,genres));source.genreChecks=raw.genreChecks;source.passed=false;return source;});
   const merged=mergePremiseSourceBatches(original,batches,reviews);
   expect(merged.genreChecks).toHaveLength(15);expect(merged.genreChecks!.at(-1)!.ref).toBe('S5.genre3');expect(merged.passed).toBe(false);expect(merged.issues.map(i=>i.premiseId)).toEqual(['A','D']);
   expect(merged.issues.every(i=>i.kind==='selection_fit')).toBe(true);
@@ -82,7 +82,7 @@ describe('source batches through the production JSON retry helper',()=>{
    request.physicalCallBudget.remaining--;
    const batch=batches[index++],value:any={payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'人物已有实际选择与因果条件支撑反转变化'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'原池明确行动和当前展开事件及后果可同时成立'})),...fit(batch)};
    value.genreChecks=value.genreChecks.map(({field,quote,...row}:any)=>({...row,evidenceRef:row.ref.split('.')[0]+'.'+field}));
-   if(broken)value.genreChecks[0].evidenceRef='S1.storyCore';
+   if(broken)for(const [index,item] of batch.selected.entries())if(['A','D'].includes(String(item.premiseId)))value.genreChecks.find((row:any)=>row.ref==='S'+(index+1)+'.genre1').evidenceRef='S'+(index+1)+'.storyCore';
    return {content:JSON.stringify(value)};
   })};return {c,original,parent};
  }

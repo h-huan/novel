@@ -123,7 +123,7 @@ it('uses task-specific generation details while retaining full final quality rul
   .toEqual(standardDirectiveCache.snapshot('idea_generate').ruleIds);
  const presentation=standardDirectiveCache.get('idea_generate','idea_presentation_review');
  expect(presentation.length).toBeLessThan(full.length);
- for(const policy of [IDEA_PRESELECTION_REVIEW_POLICY,IDEA_CARD_PROMISE_CLOSURE_POLICY,
+ for(const policy of [IDEA_CARD_PROMISE_CLOSURE_POLICY,
    IDEA_REVIEW_EVIDENCE_POLICY,IDEA_PAYOFF_BRIDGE_POLICY,SHORT_STORY_QUALITY_POLICY,
    READER_ENGAGEMENT_POLICY,PLATFORM_MEASUREMENT_REVIEW_POLICY])expect(presentation).toContain(policy);
  expect(count(presentation,STORY_PREREQUISITE_POLICY)).toBe(1);
@@ -167,4 +167,22 @@ it('uses review directives for evaluation steps routed through idea_generate wit
   expect(review).not.toContain('生成：始终继承当前 Creative Constitution');
   expect(standardDirectiveCache.snapshot('idea_generate',true,step).ruleIds).toContain('GEN-002');
  }
+});
+
+it('keeps producer roles free of source-review response protocols at every discovery generation entry',()=>{
+ standardDirectiveCache.rebuild();
+ for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_refill_selection','idea_card_structure','idea_card_local_repair']){
+  const text=standardDirectiveCache.get('idea_generate',step);
+  for(const word of ['genreChecks','sourceChecks','payoffChecks','replace_from_pool','完整卡独立审核按设置批量执行'])expect(text).not.toContain(word);
+  expect(text).toContain('先由所选分类的核心人物关系、欲望和双方选择决定故事');
+  expect(text).toContain('同一事件的对象、数量、身份、时刻与状态须能同时成立');
+  expect(text).toContain(IDEA_CARD_PROMISE_CLOSURE_POLICY);
+  expect(text).toContain(STORY_PREREQUISITE_POLICY);
+  expect(standardDirectiveCache.snapshot('idea_generate',true,step).ruleIds).toEqual(standardDirectiveCache.snapshot('idea_generate').ruleIds);
+ }
+ const source=standardDirectiveCache.get('idea_generate','idea_premise_source_drift_review');
+ for(const word of ['自动流派','payoffChecks','replace_from_pool','逐项覆盖'])expect(source).toContain(word);
+ const final=standardDirectiveCache.get('idea_generate','idea_presentation_review');
+ for(const policy of [IDEA_REVIEW_EVIDENCE_POLICY,IDEA_PAYOFF_BRIDGE_POLICY,SHORT_STORY_QUALITY_POLICY,READER_ENGAGEMENT_POLICY,PLATFORM_MEASUREMENT_REVIEW_POLICY])expect(final).toContain(policy);
+ for(const word of ['genreChecks','replace_from_pool','完整卡独立审核按设置批量执行'])expect(final).not.toContain(word);
 });

@@ -8,11 +8,7 @@ export const SOURCE_BINDING_EXAMPLE={
 export function materializePremiseSourceBindings(value:any,seed:Record<string,unknown>|undefined):any{
  if(!value||typeof value!=='object'||Array.isArray(value)||value.sourceBindings===undefined)return value;
  if(!seed||String(value.premiseId)!==String(seed.premiseId))throw Error('原池分节引用须绑定真实同ID来源');
- const raw=String(seed.storyCore||''),sections=new Map<string,string>();
- const matches=[...raw.matchAll(/【(处境触发|主动选择|必要条件|反转兑现|分类流派机制)】/g)];
- if(matches.length!==PREMISE_SOURCE_SECTIONS.length||raw.slice(0,matches[0]?.index||0).trim()
-  ||matches.some((row,index)=>row[1]!==PREMISE_SOURCE_SECTIONS[index]))throw Error('原池分节必须完整、有序且唯一，不能猜测来源');
- matches.forEach((row,index)=>sections.set(row[1],raw.slice(row.index!+row[0].length,matches[index+1]?.index).trim()));
+ const sections=new Map(premiseSourceSections(seed).map(row=>[row.name,row.text]));
  const bindings=value.sourceBindings;
  if(!bindings||typeof bindings!=='object'||Array.isArray(bindings))throw Error('sourceBindings须为逐字段原池分节引用');
  const fields=Object.keys(SOURCE_BINDING_EXAMPLE);
@@ -44,4 +40,80 @@ export function projectPremiseSourceChoices(rows:any,pool:readonly Record<string
   materializePremiseSourceBindings(bound,seed); // Same-ID, complete ordered facts.
   return bound;
  });
+}
+
+/** The same ordered source parser owns rendering, references and projection. */
+export function premiseSourceSections(seed:Record<string,unknown>):Array<{section:number;name:string;text:string;clauses:string[]}> {
+ const raw=String(seed.storyCore||''),matches=[...raw.matchAll(/【(处境触发|主动选择|必要条件|反转兑现|分类流派机制)】/g)];
+ if(matches.length!==PREMISE_SOURCE_SECTIONS.length||raw.slice(0,matches[0]?.index||0).trim()
+  ||matches.some((row,index)=>row[1]!==PREMISE_SOURCE_SECTIONS[index]))throw Error('原池分节必须完整、有序且唯一，不能猜测来源');
+ return matches.map((row,index)=>{
+  const text=raw.slice(row.index!+row[0].length,matches[index+1]?.index).trim();
+  // Retain every code unit and punctuation. A range joins only contiguous clauses.
+  const clauses=text.match(/[^，,。；;！？!?\n]+[，,。；;！？!?\n]*|[，,。；;！？!?\n]+/gu)||[];
+  if(!text||clauses.join('')!==text)throw Error('原池分句未能无损定位');
+  return {section:index+1,name:row[1],text,clauses};
+ });
+}
+
+export function indexedPremiseSourcePool<T extends Record<string,unknown>>(pool:readonly T[]):T[] {
+ return pool.map(seed=>{
+  try{return {...seed,storyCore:premiseSourceSections(seed).map(row=>'【'+row.name+'｜分节'+row.section+'】'
+   +row.clauses.map((text,index)=>'['+(index+1)+']'+text).join('')).join('\n')};}
+  catch{return {...seed};} // Legacy unsectioned material retains strict quote validation.
+ });
+}
+
+/** A sourceRef is an address, never an inferred causal relationship. */
+export function resolvePremiseSourceReference(seed:Record<string,unknown>,ref:unknown):string|undefined {
+ if(typeof ref!=='string')return;
+ const match=/^([^:]+):([1-5]):([1-9]\d*)(?:-([1-9]\d*))?$/.exec(ref);
+ if(!match||match[1]!==String(seed.premiseId))return;
+ try{const section=premiseSourceSections(seed)[Number(match[2])-1],start=Number(match[3]),end=Number(match[4]||match[3]);
+  if(end<start||end>section.clauses.length)return;
+  return section.clauses.slice(start-1,end).join('');
+ }catch{return;}
+}
+
+/** Exact server projection proves provenance only. Causality/category/genre and
+ * every later full-card Gate remain independent. No model-owned flags are trusted. */
+export function exactPremiseSourceFields(candidate:Record<string,unknown>,seed:Record<string,unknown>|undefined):ReadonlySet<string> {
+ if(!seed||candidate.premiseId!==seed.premiseId||candidate.storyCore!==seed.storyCore)return new Set();
+ try{const expected=materializePremiseSourceBindings({premiseId:seed.premiseId,sourceBindings:SOURCE_BINDING_EXAMPLE},seed);
+  return new Set(Object.keys(SOURCE_BINDING_EXAMPLE).filter(field=>candidate[field]===expected[field]));
+ }catch{return new Set();}
+}
+
+/** Recover the canonical field for ONE explicitly numbered source span.
+ * Several fixed fields may contain that same source section. These are
+ * projections of one address, not competing evidence or a causal inference.
+ * Changed/legacy fields cannot establish this exact projection proof. */
+export function resolvePremiseSourceAnchor(candidate:Record<string,unknown>,ref:unknown):{field:string;quote:string}|undefined {
+ const quote=resolvePremiseSourceReference(candidate,ref);
+ if(!quote)return;
+ // The codec above has already checked owner, section and contiguous bounds.
+ const section=PREMISE_SOURCE_SECTIONS[Number(String(ref).split(':')[1])-1];
+ const exact=exactPremiseSourceFields(candidate,candidate);
+ const fields=(Object.keys(SOURCE_BINDING_EXAMPLE) as Array<keyof typeof SOURCE_BINDING_EXAMPLE>)
+  .filter(field=>exact.has(field)&&(SOURCE_BINDING_EXAMPLE[field] as readonly string[]).includes(section)
+    &&String(candidate[field]).includes(quote));
+ const field=fields.find(field=>SOURCE_BINDING_EXAMPLE[field].length===1)||fields[0];
+ return field?{field,quote}:undefined;
+}
+
+export function compactRepeatedPremiseText(row:Record<string,unknown>){
+ const first=new Map<string,string>();
+ return Object.fromEntries(Object.entries(row).map(([field,value])=>{
+   if(typeof value!=='string')return [field,value];
+   const previous=first.get(value),reference=previous?{sameTextAs:previous}:undefined;
+   if(reference&&JSON.stringify(reference).length<JSON.stringify(value).length)return [field,reference];
+   if(!previous)first.set(value,field);
+   return [field,value];
+ }));
+}
+
+export function projectedPremisePromptView(item:Record<string,unknown>){
+ const view=compactRepeatedPremiseText(item);
+ for(const field of exactPremiseSourceFields(item,item))view[field]={fromSourceSections:SOURCE_BINDING_EXAMPLE[field as keyof typeof SOURCE_BINDING_EXAMPLE]};
+ return view;
 }

@@ -1334,23 +1334,21 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     return userKey?.baseUrl || this.getFirstEnv(runtimeModel.baseUrlNames) || undefined;
   }
 
-  /** 仅接受显式思考强度配置；单组对照不授权默认降低质量相关计算。 */
+  /** 显式全局配置优先；仅轻量候选生成、初步身份选优和引用纠错使用专属档位，独立质量计算保持原默认。 */
   private resolveReasoningEffort(scenario?: string, stepKey?: string): 'low' | 'medium' | 'high' | undefined {
     const configured = process.env.LLM_REASONING_EFFORT;
     if (configured) return configured === 'low' || configured === 'medium' || configured === 'high' ? configured : undefined;
-    // Fixed-pool identity ranking is a preliminary shortlist, NOT an
-    // independent source/causal/payoff/genre/card verdict. It only names
-    // existing immutable story candidates and their source quotations.
-    // The complete independent high-reasoning Gates still run afterwards.
-    // Limit the measured 35k-token preliminary thinking tail without
-    // disabling thought or changing provider, token/timeout/call ceilings.
-    // A global explicit LLM_REASONING_EFFORT override still wins.
-    if (scenario === 'idea_generate' && (
-      stepKey === 'idea_premise_selection' || stepKey === 'idea_premise_refill_selection'
-    )) return 'medium';
-    // Citation-only correction never changes a story fact; semantic reviewers
-    // still independently assess every corrected causal link.
-    if (scenario === 'idea_generate' && stepKey === 'idea_premise_causal_plan_contract') return 'low';
+    // Preliminary proposals, fixed-pool ranking/reselection and citation-only
+    // corrections never grant a quality verdict. The independent source,
+    // causal, category, genre, overlap and full-card Gates keep their defaults.
+    // DeepSeek maps medium to high; low retains thinking at its lower tier.
+    // Provider, output/call/retry/timeout ceilings and explicit overrides stay.
+    const preliminarySteps=[
+      'idea_premise_pool_generation','idea_premise_pool_refill',
+      'idea_premise_selection','idea_premise_refill_selection',
+      'idea_premise_pool_reselection','idea_premise_causal_plan_contract',
+    ];
+    if(scenario==='idea_generate'&&stepKey&&preliminarySteps.includes(stepKey))return 'low';
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
       const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
       if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;

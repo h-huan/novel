@@ -114,6 +114,11 @@ export class ChainPlanningController {
     }
   }
 
+  @Post('cancel-idea-discovery/:requestId')
+  cancelIdeaDiscovery(@Param('requestId') requestId: string) {
+    return this.chain.cancelIdeaDiscovery(requestId);
+  }
+
   @Post('cancel-creation/:projectId')
   cancelCreation(@Param('projectId') projectId: string) {
     return generationTasks.cancel('creation', projectId);

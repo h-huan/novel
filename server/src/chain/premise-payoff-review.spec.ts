@@ -106,7 +106,7 @@ it.each([false,true])('starts both production preselection reviews and drains th
  expect(started).toEqual(['source_drift','overlap']);expect(limiters[0]).toBe(limiters[1]);
  releases.source_drift();await new Promise(resolve=>setTimeout(resolve,0));expect(done).toBe(false);
  releases.overlap();const value=await result;
- if(fail)expect(value.message).toContain('未生成完整卡');else expect(value.selected).toBe(pair.selected);
+ if(fail)expect(value.message).toContain('未完成请求交付');else expect(value.selected).toBe(pair.selected);
  expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
 });
 it('routes a real gap to preselection and never retains an unqualified item as locked',()=>{

@@ -141,3 +141,18 @@ it('plans optional screening surplus and funded per-premise reviews together wit
   if(actual){expect(actual).toBeGreaterThanOrEqual(demand);expect(actual).toBeLessThanOrEqual(desired);expect(premiseReviewCallFloor(actual,2,0)).toBeLessThanOrEqual(credits);}
  }
 });
+
+it('does not freeze a prepared refill at a deficit that can still grow before the initial Gate ends',async()=>{
+ const {plannedFullCardRefillCount}=await import('./discovery-fulfillment');
+ expect(plannedFullCardRefillCount(2,5,0,true)).toBe(5);
+ expect(plannedFullCardRefillCount(2,5,3)).toBe(3);
+ for(let requested=1;requested<=10;requested++)for(let accepted=0;accepted<requested;accepted++){
+   const remaining=requested-accepted;
+   for(let known=1;known<=remaining;known++){
+     const prepared=plannedFullCardRefillCount(known,requested,accepted,true);
+     for(let laterFailed=0;laterFailed<=remaining-known;laterFailed++)expect(prepared).toBeGreaterThanOrEqual(known+laterFailed);
+     expect(plannedFullCardRefillCount(known,requested,accepted)).toBe(known+Math.ceil(known/2));
+   }
+ }
+ expect(()=>plannedFullCardRefillCount(3,2,0,true)).toThrow();
+});
