@@ -6529,6 +6529,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const settled=new Set([...reviewed,...structuringErrors.map(row=>row.sourcePremiseId)]
           .filter(id=>selectedPremiseIdSet.has(id)));
         const passed=accepted.filter(row=>selectedPremiseIdSet.has(String(row.sourcePremiseId))).length;
+        // Approval callbacks can still refer to an earlier provisional
+        // shortlist while the immutable source selection is settling. They
+        // cannot prove a deficit for the final list. Leave the original
+        // post-Gate refill path in charge until every count is coherent.
+        if(settled.size>selectedPremises.length||passed>settled.size)return;
         const proven=provenFullCardDeficit(requestedCount,selectedPremises.length,passed,settled.size);
         if(proven&&canPrepareKnownShortfall(proven)){
           this.logger.log('idea-discover: 已确定完整卡首轮缺额，提前准备现有唯一补位波次；仍等待首轮身份锁定');
