@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException } from '@nestjs/common';
 import { ChainController } from './chain.controller';
+import { generationTasks } from '../common/generation-cancellation';
 
 function controllerWithAudit(audit: object) {
   const controller = Object.create(ChainController.prototype) as any;
@@ -23,6 +24,18 @@ describe('失败项目重写启动接口', () => {
     expect(controller.projectCreationEventHistory.get('p-1')).toMatchObject([
       { type: 'progress', step: 'recovery', percent: 1, status: 'running' },
     ]);
+  });
+
+  it('direct resume refuses a live create worker without acquiring recovery or changing project state', async () => {
+    const controller = Object.create(ChainController.prototype) as any;
+    controller.generationRecovery = { acquire: vi.fn() };
+    let finish!: () => void;
+    const hold = new Promise<void>(resolve => { finish = resolve; });
+    const task = generationTasks.run('creation', 'p-1', '', async () => { await hold; });
+    try {
+      await expect(controller.resumeFailedGeneration('p-1')).rejects.toBeInstanceOf(ConflictException);
+      expect(controller.generationRecovery.acquire).not.toHaveBeenCalled();
+    } finally { finish(); await task; }
   });
 
   it('正在执行的项目不能重复启动', async () => {
