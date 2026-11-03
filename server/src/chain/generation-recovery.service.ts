@@ -55,6 +55,16 @@ export class GenerationRecoveryService {
     this.runningProjects.delete(projectId);
   }
 
+  /** Even if a task wrapper has settled, an in-flight LLM run still owns its
+   * project context. Never wipe generated facts until both are quiescent. */
+  isCreationBusy(projectId: string): boolean {
+    if (generationTasks.isRunning('creation', projectId)) return true;
+    const active = this.database.getDb().prepare(
+      "SELECT COUNT(*) AS count FROM generation_runs WHERE project_id=? AND status='running'",
+    ).get(projectId) as { count?: number } | undefined;
+    return Number(active?.count || 0) > 0;
+  }
+
   async audit(projectId: string): Promise<GenerationRecoveryAudit> {
     const db = this.database.getDb();
     const project = db.prepare(
@@ -198,7 +208,7 @@ export class GenerationRecoveryService {
     const protectedHumanWork = protectionReasons.length > 0;
     // A failed project can still have in-flight creation calls. Recovery must
     // not erase their source context before the owner task has settled.
-    const running = this.isRunning(projectId) || generationTasks.isRunning('creation', projectId);
+    const running = this.isRunning(projectId) || this.isCreationBusy(projectId);
     const resumableStatus = ['generation_failed', 'creating'].includes(String(project.status));
     const canResume = resumableStatus && !protectedHumanWork && hasConfirmedSource && !running;
 
@@ -233,8 +243,8 @@ export class GenerationRecoveryService {
     if (!['generation_failed', 'creating'].includes(audit.status)) {
       throw new ConflictException('只有创建失败或创建中的项目可以恢复。');
     }
-    if (generationTasks.isRunning('creation', projectId)) {
-      throw new ConflictException('原项目创建任务仍在执行，禁止同时清理和恢复生成资料。');
+    if (this.isCreationBusy(projectId)) {
+      throw new ConflictException('原项目生成调用仍在执行，禁止同时清理和恢复生成资料。');
     }
     if (audit.protectedHumanWork) {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
