@@ -118,6 +118,30 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts one balanced JSON object without swallowing a trailing explanation',async()=>{
+    const world={worldview:{geography:[{name:'地下车站'}],factions:[{name:'维护处'}]}};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'输出如下：\\n'+JSON.stringify(world)+'\\n以上为世界规则。'});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('completed');
+    expect(result.nodeResults[0].output).toEqual(world);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects multiple independent JSON documents instead of choosing one silently',async()=>{
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"factions":[]}}\\n{"worldview":{"factions":[1]}}'});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults[0].error).toContain('未返回合法JSON对象');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects incomplete JSON and does not fabricate missing data',async()=>{
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"geography":['});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('failed');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
   it('does not call a downstream node when a fixed long-outline prerequisite fails', async () => {
     const registry = new ChainTemplateService(service);
     const production = registry.getDetail('long-novel-flexible-outline');
