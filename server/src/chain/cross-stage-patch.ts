@@ -254,13 +254,10 @@ export function crossStageRepairContext(bundle:Record<string,any[]>,findings:str
   const text=findings.join('\n'),quotes=[...text.matchAll(/[“"]([^”"\n]{8,500})[”"]/g)].map(match=>match[1]);
   const mutable=new Set(['characters','organizations','mapPoints','chapters','foreshadowings']);
   const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>{
-    const bracketed=`${key}[${index}]`,dotted=`${key}.${index}`;
-    // Match the *complete* original array index, not an index prefix:
-    // characters.2.profile_json is distinct from characters.20.
-    const cites=(reference:string)=>new RegExp('(^|[^A-Za-z0-9_])'
-      +reference.replace(/[.*+?^${}()|[\\]\\]/g,'\\  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>
-    text.includes(row.id)||text.includes(`${key}[${index}]`)).map(row=>row.id)));')+'(?=[^A-Za-z0-9_]|$)').test(text);
-    return text.includes(row.id)||cites(bracketed)||cites(dotted);
+    const bracketed=key+'['+index+']';
+    // Match a complete dotted array index: characters.2 must not include characters.20.
+    const dotted=new RegExp('(^|[^A-Za-z0-9_])'+key+'\\.'+index+'(?=[^A-Za-z0-9_]|$)');
+    return text.includes(row.id)||text.includes(bracketed)||dotted.test(text);
   }).map(row=>row.id)));
   return Object.fromEntries(Object.entries(bundle).map(([key,rows])=>[key,!mutable.has(key)?rows:
     rows.filter(row=>!referenced.size||referenced.has(row.id)).map(row=>Object.fromEntries(Object.entries(row).map(([field,value])=>{
