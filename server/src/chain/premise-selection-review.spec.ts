@@ -316,7 +316,9 @@ describe('premise selection before identity lock', () => {
       }
       const review=await c.reviewPremiseSelection(current,'原有标准','source_drift',credits);
       expect(requested.flat().sort()).toEqual(['A','B','C','D','E']);
-      expect(requested).toHaveLength(allowed===10?5:2);
+      // The five source judgments fit four live slots in one wave;
+       // the fifth partition would only add a serial call without extra coverage.
+       expect(requested).toHaveLength(allowed===10?4:2);
       expect(credits.remaining).toBe(allowed-requested.length);
       expect(requested.every(batch=>batch.length<=3)).toBe(true);
       expect(review.passed).toBe(true);
