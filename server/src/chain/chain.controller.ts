@@ -35,7 +35,7 @@ import { createReviewLimiter } from './review-limiter';
 import { DiscoveryCardWork, type DiscoveryCardResult } from './discovery-card-work';
 import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
-import { foreshadowEnrichmentSources } from './foreshadow-enrichment-source';
+import { foreshadowEnrichmentSources, foreshadowEnrichmentOutputIssues } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
 import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget } from './premise-source-batches';
 import { withGenerationSignal, generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
@@ -10859,9 +10859,12 @@ ${enrichToneDirective}
 【故事与世界观】${ctxSummary}
 【伏笔原证据、既定回收条件与对应完整章纲（id用于回写）】${JSON.stringify(foreshadowEnrichmentSources(fss,readOrderedChapterOutlines(db,projectId)))}
 以上对应章纲的实际行动、回收方式、结局与代价是本轮扩写边界。情感与分层揭示只能展开同一事件，不改变既定行动、责任、结果方向与代价。故事摘要不能覆盖更具体的章纲结果；资料确有冲突时不自行二选一，保留来源待最终一致性审查。
-为每条伏笔输出对象，必须包含原 id，以及：emotional_impact(情感冲击描述), layered_reveal(分层揭示设计,JSON数组，每项含 revealStage 与 content)。
+为每条伏笔输出对象，必须包含原 id，以及：emotional_impact(情感冲击描述), layered_reveal(分层揭示设计,JSON数组，每项含 revealStage 与 content)。revealStage只能填写简短的阶段标签（如“回收（第4章·投屏）”），不能把事件判断、人物行动、时间因果句塞进阶段名；具体揭示事实必须放在content且逐项继承已保存章纲。
 只输出JSON:{"foreshadowings":[{"id","emotional_impact","layered_reveal"}]}`,
-            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'foreshadowing' },
+            { temperature: 0.6, timeout: LLM_TUNABLES.timeoutMedium(), projectId, scenario: 'foreshadowing',
+              validate: value => foreshadowEnrichmentOutputIssues(value,fss).length === 0,
+              describeValidation: value => foreshadowEnrichmentOutputIssues(value,fss),
+              retryInstruction: '只纠正字段协议与阶段标签，revealStage必须是短标签，既定事件、责任、时序与兑现不得改写或编造；全部既有id各返回一次。' },
           );
           const fsList = Array.isArray(fsResult.data?.foreshadowings) ? fsResult.data.foreshadowings : [];
           if (fsList.length > 0) {
