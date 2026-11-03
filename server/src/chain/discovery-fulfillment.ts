@@ -179,6 +179,12 @@ export function fundedSourceReviewGroups(count:number,batchSize:number,credits:n
  // Never spend the last correction credits merely to make the first audit
  // narrower. An independently rejected premise still needs replacement and
  // a new source/overlap verdict inside the same allowance.
+ // At most one wave of concurrently runnable source partitions. More
+ // partitions than live remote slots merely create a second serial wave,
+ // increase wall time and spend calls that could fund a real correction.
+ // Every actual selected premise remains independently reviewed, with the
+ // same configured per-partition size ceiling and unchanged quality Gates.
+ const oneWaveGroups=Math.max(minimum,Math.min(count,concurrency));
  return preferFineSourceReview(count,batchSize,concurrency,groupingMode)&&credits>=count+correctionFloor
-  ?count:minimum;
+  ?oneWaveGroups:minimum;
 }
