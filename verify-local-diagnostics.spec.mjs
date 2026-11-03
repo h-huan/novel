@@ -1,16 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, discoveryEightMinuteCheck, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryTenMinuteCheck, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 test('discovery performance acceptance uses real request wall-clock time regardless of 5/5 quality success',()=>{
  const base={available:true,startedAt:'2026-10-31T05:15:33.587Z'};
- assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:22:33.587Z'}),
+ assert.deepEqual(discoveryTenMinuteCheck({...base,finishedAt:'2026-10-31T05:22:33.587Z'}),
    {measured:true,wallMs:420000,passed:true});
- assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:23:33.587Z'}),
-   {measured:true,wallMs:480000,passed:false});
- assert.deepEqual(discoveryEightMinuteCheck({...base,finishedAt:'2026-10-31T05:29:20.031Z'}),
+ assert.deepEqual(discoveryTenMinuteCheck({...base,finishedAt:'2026-10-31T05:23:33.587Z'}),
+   {measured:true,wallMs:480000,passed:true});
+ assert.deepEqual(discoveryTenMinuteCheck({...base,finishedAt:'2026-10-31T05:25:33.587Z'}),
+   {measured:true,wallMs:600000,passed:true});
+ assert.deepEqual(discoveryTenMinuteCheck({...base,finishedAt:'2026-10-31T05:25:33.588Z'}),
+   {measured:true,wallMs:600001,passed:false});
+ assert.deepEqual(discoveryTenMinuteCheck({...base,finishedAt:'2026-10-31T05:29:20.031Z'}),
    {measured:true,wallMs:826444,passed:false});
- assert.equal(discoveryEightMinuteCheck({available:true,startedAt:null,finishedAt:null}).measured,false);
+ assert.equal(discoveryTenMinuteCheck({available:true,startedAt:null,finishedAt:null}).measured,false);
 });
 
 test('full production acceptance refuses missing, incomplete and contradictory audits without weakening Gates', () => {
@@ -27,7 +31,7 @@ test('full production acceptance refuses missing, incomplete and contradictory a
  assert.ok(discoveryProductionAcceptanceIssues({...good,qualified:3}).includes('latest_idea_discovery_quantity_mismatch'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,requested:null}).includes('latest_idea_discovery_quantity_unverified'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:null}).includes('latest_idea_discovery_latency_unverified'));
- assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.000Z'}).includes('latest_idea_discovery_over_8_minutes'));
+ assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:10:00.001Z'}).includes('latest_idea_discovery_over_10_minutes'));
  const dynamic={...good,requested:2,returned:2,qualified:2,totalIdeas:2,shortfall:0};
  assert.deepEqual(discoveryProductionAcceptanceIssues(dynamic),[]);
 });
