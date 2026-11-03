@@ -17,6 +17,9 @@ export function assertGenerationActive(): void {
 export class GenerationTasks {
   private readonly active = new Map<string, AbortController>();
   private key(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId = '') { return JSON.stringify([scope, projectId, chapterId]); }
+  isRunning(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId = ''): boolean {
+    return this.active.has(this.key(scope, projectId, chapterId));
+  }
   async run<T>(scope: 'chapter' | 'creation' | 'discovery', projectId: string, chapterId: string, work: () => Promise<T>): Promise<T> {
     const key = this.key(scope, projectId, chapterId);
     if (this.active.has(key)) throw new ConflictException('该任务仍在执行或停止中，请稍后再试');
