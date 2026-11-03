@@ -135,6 +135,25 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(characters[2].relationships).toContain('每日到值房');
     expect(chapters[3].content).toContain('隔一天来一回');
   });
+  it('resolves equivalent dotted indexes for all mutable collection types without changing unrelated entities', () => {
+    const bundle={
+      characters:[{id:'person-0',name:'甲'},{id:'person-1',name:'乙'}],
+      organizations:[{id:'org-0',name:'甲方'},{id:'org-1',name:'乙方'}],
+      mapPoints:[{id:'place-0',name:'前门'},{id:'place-1',name:'后门'}],
+      foreshadowings:[{id:'hint-0',content:'真实伏笔'},{id:'hint-1',content:'另一个伏笔'}],
+    };
+    const findings=['organizations.1.name有冲突','mapPoints.0.name有冲突','foreshadowings.0.content有冲突'];
+    const batches=crossStageRepairRequests(bundle,findings);
+    expect(batches).toHaveLength(3);
+    expect(batches.map(item=>item.targetIds.join(',')).sort()).toEqual(['hint-0','org-1','place-0']);
+    expect(batches.every(item=>!item.targetIds.includes('person-1'))).toBe(true);
+    // Unlocatable evidence must still fall back to the full mutable scope,
+    // rather than inventing an out-of-range field owner or ignoring the Gate.
+    const unmatched=crossStageRepairRequests(bundle,['characters.12.abilities有冲突']);
+    expect(unmatched).toHaveLength(1);
+    expect(unmatched[0].targetIds).toContain('person-0');
+    expect(unmatched[0].targetIds).toContain('person-1');
+  });
   it('opens the actual previous knowledge producer for a stateBefore repair instead of forcing downstream dilution', () => {
     const bundle={world:[{id:'world',rules:'既有世界能力不变'}],chapters:[
       {id:'one',chapterIndex:1,content:'建立危机。'},
