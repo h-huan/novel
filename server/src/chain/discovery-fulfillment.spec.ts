@@ -99,7 +99,12 @@ it('limits costly preselection reselection to real user delivery deficits plus b
  expect(preselectionRecoveryTarget(5,3)).toEqual({mandatory:2,hedge:2,total:4});
  expect(preselectionRecoveryTarget(5,4)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(5,5)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(preselectionRecoveryTarget(5,5,8)).toEqual({mandatory:0,hedge:1,total:1});
+ expect(preselectionRecoveryTarget(5,6,8)).toEqual({mandatory:0,hedge:1,total:1});
+ expect(preselectionRecoveryTarget(5,8,8)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(preselectionRecoveryTarget(5,4,8)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(5,7)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(()=>preselectionRecoveryTarget(5,5,4)).toThrow('预选交付容量参数无效');
  expect(preselectionRecoveryTarget(1,0)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(10,3)).toEqual({mandatory:7,hedge:2,total:9});
  expect(()=>preselectionRecoveryTarget(5,-1)).toThrow();
