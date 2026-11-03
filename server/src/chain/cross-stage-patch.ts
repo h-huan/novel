@@ -207,7 +207,12 @@ export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:re
       }
     }
   }
-  if(!positions.length||positions.some(position=>!position.anchorIds.length))return anchors;
+  // A reviewer may cite exact indexed character JSON fields without a chapter
+  // source-unit ID. Do not expand that precise repair to every unrelated
+  // character merely because no source-boundary position was emitted.
+  // An unresolved source-unit position still requires the full safe fallback.
+  if(positions.some(position=>!position.anchorIds.length))return anchors;
+  if(!positions.length&&!citedFields.size)return anchors;
   const ids=new Set(positions.flatMap(position=>position.anchorIds));
   const kinds=new Set(targets.filter(target=>positions.some(position=>position.sourceUnit===target.id)).flatMap(target=>sourceBoundaryRiskKinds(target.content)));
   const related=targets.filter(target=>sourceBoundaryRiskKinds(target.content).some(kind=>kinds.has(kind)));
@@ -248,8 +253,15 @@ export function crossStageRepairDependencyView(bundle:Record<string,any[]>,targe
 export function crossStageRepairContext(bundle:Record<string,any[]>,findings:string[]) {
   const text=findings.join('\n'),quotes=[...text.matchAll(/[“"]([^”"\n]{8,500})[”"]/g)].map(match=>match[1]);
   const mutable=new Set(['characters','organizations','mapPoints','chapters','foreshadowings']);
-  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>
-    text.includes(row.id)||text.includes(`${key}[${index}]`)).map(row=>row.id)));
+  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>{
+    const bracketed=`${key}[${index}]`,dotted=`${key}.${index}`;
+    // Match the *complete* original array index, not an index prefix:
+    // characters.2.profile_json is distinct from characters.20.
+    const cites=(reference:string)=>new RegExp('(^|[^A-Za-z0-9_])'
+      +reference.replace(/[.*+?^${}()|[\\]\\]/g,'\\  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>
+    text.includes(row.id)||text.includes(`${key}[${index}]`)).map(row=>row.id)));')+'(?=[^A-Za-z0-9_]|$)').test(text);
+    return text.includes(row.id)||cites(bracketed)||cites(dotted);
+  }).map(row=>row.id)));
   return Object.fromEntries(Object.entries(bundle).map(([key,rows])=>[key,!mutable.has(key)?rows:
     rows.filter(row=>!referenced.size||referenced.has(row.id)).map(row=>Object.fromEntries(Object.entries(row).map(([field,value])=>{
       if(typeof value!=='string'||['id','title','name'].includes(field))return [field,value];
