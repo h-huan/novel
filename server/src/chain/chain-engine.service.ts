@@ -305,7 +305,13 @@ export class ChainEngineService {
    */
   private resolvePath(context: ExecutionContext, path: string): unknown {
     const parts = path.split('.');
-    let current: unknown = context.variables;
+    // Input mappings and template rendering must see the SAME prior accepted
+    // node outputs. Previously chain_output.* resolved from context.variables,
+    // where it was never stored, so mapped skeleton/volume dependencies were
+    // silently undefined even though templates could render them directly.
+    let current: unknown = parts[0] === 'chain_output'
+      ? { chain_output: context.nodeOutputs }
+      : context.variables;
 
     for (const part of parts) {
       if (current === null || current === undefined) {
