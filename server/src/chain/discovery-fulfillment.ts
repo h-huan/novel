@@ -1,3 +1,12 @@
+/** An early refill can use the EXISTING wave only after settled final reviews
+ * prove that the remaining first-wave slots cannot meet the request. */
+export function provenFullCardDeficit(requested:number,selected:number,accepted:number,settled:number):number {
+ if(![requested,selected,accepted,settled].every(Number.isSafeInteger)
+   ||requested<1||selected<0||accepted<0||settled<accepted||settled>selected)
+  throw Error('已确定完整卡缺额的请求数量或状态无效');
+ return Math.max(0,requested-accepted-(selected-settled));
+}
+
 /** Lend initial preselection only its share of the EXISTING review calls.
  * Keep enough credits for a potential final-card deficit. Both stages still
  * use independent semantic/source/overlap Gates; credits are never cloned.
