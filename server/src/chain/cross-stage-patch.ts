@@ -196,7 +196,7 @@ export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:re
       if(!anchors.some(anchor=>anchor.entityId===row.id))continue;
       for(const field of Object.keys(row)){
         const dotted=collection+'.'+index+'.'+field;
-        const bracketed=collection+'['+index+'].' +field;
+        const bracketed = collection + '[' + index + '].' + field;
         const mentioned=(path:string)=>findings.some(finding=>{
           const offset=finding.indexOf(path);
           if(offset<0)return false;
