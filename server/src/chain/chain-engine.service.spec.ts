@@ -101,6 +101,23 @@ describe('ChainEngineService', () => {
     }
   });
 
+  it('passes accepted upstream skeleton into the next node input mapping',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-init-foundation');
+    const skeleton={coreSetting:{title:'现有世界'},opening:'已有起因'};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
+      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({world:'继承已有世界规则'})});
+    const render=(service as any).promptRegistry.render as ReturnType<typeof vi.fn>;
+    const result=await service.execute(chain,{story_setting:'锁定题材',targetWords:20000,genre:'现实'});
+    expect(result.status).toBe('completed');
+    expect(result.nodeResults).toHaveLength(2);
+    const downstream=render.mock.calls.find(call=>call[0]==='long-novel-init-worldview');
+    expect(downstream).toBeDefined();
+    expect(downstream![1].skeleton).toEqual(skeleton);
+    expect(downstream![1].chain_output.node_1_skeleton).toEqual(skeleton);
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
   it('does not call a downstream node when a fixed long-outline prerequisite fails', async () => {
     const registry = new ChainTemplateService(service);
     const production = registry.getDetail('long-novel-flexible-outline');
