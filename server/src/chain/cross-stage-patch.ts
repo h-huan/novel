@@ -263,7 +263,15 @@ export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:st
       const matches=entities.filter(entity=>typeof entity.id==='string'&&entity.id.toLowerCase().startsWith(token.toLowerCase()));
       return matches.length===1?[matches[0].id]:[];
     });
+    // The independent reviewer cites indexed JSON as characters.2.relationships
+    // as well as characters[2]. Match the precise index (not characters.20).
+    const citesDottedEntity=(reference:string):boolean=>{
+      const dotted=reference.replace(/\[(\d+)\]$/,'.$1');
+      return dotted!==reference && new RegExp('(^|[^A-Za-z0-9_])'
+        +dotted.replaceAll('.','\\.')+'(?=[^A-Za-z0-9_]|$)').test(finding);
+    };
     const targetIds=entities.filter(entity=>finding.includes(entity.id)||finding.includes(entity.reference)
+      ||citesDottedEntity(entity.reference)
       ||entity.namedReferences.some(ref=>finding.includes(ref))||prefixIds.includes(entity.id)
       ||(entity.planField==='endingDirection'&&/world(?:\.constraints)?\.endingDirection|world\[\d+\]\.constraints\.endingDirection/.test(finding))
       ||(entity.planField==='ending'&&/worldProfiles?(?:\[\d+\])?\.ending\b/.test(finding))).map(entity=>entity.id);
