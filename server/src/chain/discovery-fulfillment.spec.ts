@@ -145,6 +145,11 @@ it('plans optional screening surplus and funded per-premise reviews together wit
  expect(firstGroups+1+premiseReviewCallFloor(4,2,0)+refill).toBe(12);
  expect(fundedSourceReviewGroups(5,2,5,7,0)).toBe(3);
  expect(fundedSourceReviewGroups(5,2,9,7,0)).toBe(5);
+ expect(fundedSourceReviewGroups(5,3,9,4,0)).toBe(4); // one wave, no 5th serial call
+ expect(fundedSourceReviewGroups(5,3,9,3,0)).toBe(2); // unfunded fine grouping stays bounded
+ expect(fundedSourceReviewGroups(8,2,13,5,0)).toBe(5); // eight full premises, five source groups
+ expect(fundedSourceReviewGroups(5,3,9,4,1)).toBe(2); // manual grouping mode unchanged
+
  expect(plannedPreselectionCount(5,8,12,3,0,7)).toBe(8);
  expect(plannedPreselectionCount(5,8,12,2,0,2)).toBe(8);
  expect(fundedSourceReviewGroups(8,2,7,2,0)).toBe(4);
