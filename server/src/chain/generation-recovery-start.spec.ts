@@ -29,7 +29,7 @@ describe('失败项目重写启动接口', () => {
 
   it('direct resume refuses a live create worker without acquiring recovery or changing project state', async () => {
     const controller = Object.create(ChainController.prototype) as any;
-    controller.generationRecovery = { acquire: vi.fn() };
+    controller.generationRecovery = { acquire: vi.fn(), isCreationBusy: vi.fn(() => true) };
     let finish!: () => void;
     const hold = new Promise<void>(resolve => { finish = resolve; });
     const task = generationTasks.run('creation', 'p-1', '', async () => { await hold; });
