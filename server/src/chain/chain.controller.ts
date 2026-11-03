@@ -11007,16 +11007,32 @@ ${enrichToneDirective}
       }
       let statusPersistenceError: string | undefined;
       try {
-        const result = db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=?")
+        // An explicit recovery can begin from an active, previously accepted
+        // project. After restoring its snapshot, never downgrade that intact
+        // active project solely because the attempted rebuild failed.
+        const result = db.prepare("UPDATE projects SET status='generation_failed',updated_at=? WHERE id=? AND status IN ('creating','generation_failed')")
           .run(new Date().toISOString(), projectId) as { changes?: number };
         if (Number(result?.changes ?? 0) === 0) {
           const row = db.prepare('SELECT status FROM projects WHERE id=?').get(projectId) as { status?: string } | undefined;
           if (!row) statusPersistenceError = '项目记录不存在，失败状态未写入';
-          else if (row.status !== 'generation_failed') statusPersistenceError = '项目状态仍为 ' + String(row.status || '未知');
+          else if (row.status !== 'generation_failed' && row.status !== 'active')
+            statusPersistenceError = '项目状态仍为 ' + String(row.status || '未知');
         }
       } catch (statusError) {
         statusPersistenceError = statusError instanceof Error ? statusError.message : String(statusError);
         this.logger.error(`恢复生成失败状态写入失败 project=${projectId}: ${statusPersistenceError}`);
+      }
+      // Recovery errors must be attributable in the existing creation-stage
+      // ledger, including when the original snapshot was restored. Otherwise
+      // a failed project may show zero failed runs and no actionable cause.
+      try {
+        recordCreationStageFailure(this.generationMetrics, projectId, 'recovery',
+          'generation_execution', String(error?.message || error),
+          { restoredSnapshot: Boolean(recoverySnapshot),
+            ...(statusPersistenceError ? { statusPersistenceError } : {}) });
+      } catch (recordError) {
+        this.logger.error('恢复失败原因落库失败 project=' + projectId + ': '
+          + (recordError instanceof Error ? recordError.message : String(recordError)));
       }
       if (error instanceof HttpException) {
         if (statusPersistenceError) {
