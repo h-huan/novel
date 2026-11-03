@@ -1,5 +1,16 @@
 import {it,expect} from 'vitest';
-import {missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {provenFullCardDeficit,missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+
+it('only proves an early full-card shortfall from settled, not pending, cards',()=>{
+ expect(provenFullCardDeficit(5,6,1,4)).toBe(2);
+ expect(provenFullCardDeficit(5,6,3,4)).toBe(0);
+ expect(provenFullCardDeficit(5,6,3,6)).toBe(2);
+ for(let requested=1;requested<=8;requested++)for(let chosen=0;chosen<=10;chosen++)
+  for(let settled=0;settled<=chosen;settled++)for(let passed=0;passed<=settled;passed++)
+   expect(provenFullCardDeficit(requested,chosen,passed,settled)).toBe(
+    Math.max(0,requested-passed-(chosen-settled)));
+ expect(()=>provenFullCardDeficit(5,6,3,2)).toThrow();
+});
 
 it('keeps final-card refill review credits without cloning or overspending the original allowance',()=>{
  const budget={remaining:12};
