@@ -264,10 +264,10 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
  // that the repaired chapter is semantically consistent.
  const containsQuote=(rows:Map<string,string>,quote:string)=>!!quote&&[...rows.values()].some(value=>value.includes(quote));
  const conflictFragments=(text:string):string[]=>{
-  const patterns=[/“([^”]{2,180})”/g,/「([^」]{2,180})」/g,/『([^』]{2,180})』/g,/‘([^’]{2,120})’/g,/"([^"]{2,180})"/g];
+  const patterns=[/“([^”]{1,180})”/g,/「([^」]{1,180})」/g,/『([^』]{1,180})』/g,/‘([^’]{1,120})’/g,/"([^"]{1,180})"/g];
   const found:string[]=[];
   for(const pattern of patterns)for(const match of text.matchAll(pattern)){
-   const fragment=String(match[1]||'').trim();if(fragment.length>=4)found.push(fragment);
+   const fragment=String(match[1]||'').trim();if(fragment)found.push(fragment);
   }
   return [...new Set(found)];
  };
@@ -293,7 +293,9 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   const quote1= row.quote1.trim(),quote2=row.quote2.trim();
   if(!quote1||!quote2)continue;
   const conflict=String(row.conflict||'');
-  const evidenceFragments=conflictFragments(conflict).filter(fragment=>quote1.includes(fragment)||quote2.includes(fragment));
+  const evidenceFragments=conflictFragments(conflict).filter(fragment=>
+   (quote1.includes(fragment)||quote2.includes(fragment))
+   && (fragment.length>=4 || quote1.split(fragment).length+quote2.split(fragment).length===3));
   const primaryConflict=conflict.split(/[；;]/,1)[0];
   const primaryFragments=conflictFragments(primaryConflict)
    .filter(fragment=>evidenceFragments.includes(fragment)&&[...old.values()].some(value=>value.includes(fragment)));
@@ -305,7 +307,10 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   if(targetFragments.length){
    const directlyChanged=targetFragments.some(fragment=>[...old.entries()].some(([path,before])=>{
     const updated=current.get(path);
-    return updated!==undefined&&updated!==before&&changeTouchesFragment(before,updated,fragment);
+    // Two unrelated edits can surround an untouched assertion in a broad diff.
+    // A quoted conflict span must actually change; unchanged text is not a repair.
+    return updated!==undefined&&updated!==before&&!updated.includes(fragment)
+      &&changeTouchesFragment(before,updated,fragment);
    }));
    if(!directlyChanged)issues.push('事实补丁没有直接修改冲突描述中的原始断言“'+targetFragments.slice(0,3).join('／')+'”；只改同一字段的其它文字不能视为修复。');
   }

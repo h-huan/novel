@@ -310,3 +310,20 @@ it('admits a missing event inserted into the cited narrative without rewriting a
  expect(checked.actionFailure).toBe(error);expect(checked.defects).toContain('新增段落不能证明既定结果');
  expect(chapter.content).not.toContain('床位费');
 });
+
+it('retains a uniquely located three-character conflict and rejects unrelated changes surrounding it',()=>{
+ const prior='档案留在箱底，一直没有移动。';
+ const chapter={content:'院外的灯亮了。我从箱盖上取出档案。院后的灯灭了。'};
+ const defect=JSON.stringify({location1:'前章.content',quote1:prior,location2:'本章.content',quote2:chapter.content,conflict:'前章明确“档案留在箱底”；本章却写从“箱盖上”取出，同一批档案的位置未衔接。'});
+ const unrelated={content:chapter.content.replace('院外的灯亮了','院外有人点灯').replace('院后的灯灭了','院后有人熄灯')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[defect]).join(' ')).toContain('没有直接修改冲突描述中的原始断言');
+ expect(outlineFactPatchSynchronizationIssues(chapter,{content:chapter.content.replace('箱盖上','箱底')},[defect])).toEqual([]);
+ expect(chapter.content).toContain('箱盖上');
+});
+
+it('does not treat two separated edits as a change to the unchanged cited assertion between them',()=>{
+ const chapter={content:'前面的灯亮了。档案放在靠窗木架上。后面的门关了。'};
+ const defect=JSON.stringify({location1:'前章.content',quote1:'档案封存在地下柜中。',location2:'本章.content',quote2:chapter.content,conflict:'前章写“档案封存在地下柜中”；本章却写“档案放在靠窗木架上”，同一档案位置未衔接。'});
+ const patch={content:chapter.content.replace('前面的灯亮了','前面的灯刚亮').replace('后面的门关了','后面的门刚关')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,patch,[defect]).join(' ')).toContain('没有直接修改冲突描述中的原始断言');
+});
