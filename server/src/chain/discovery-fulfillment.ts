@@ -11,15 +11,22 @@ export function reserveFinalRefillReviewCapacity(
   throw Error('预选与补足审核额度无效');
  const reserve=parent.remaining>=initialReviewFloor+requiredRefillFloor
    ?requiredRefillFloor:0;
+ let debited=0;
  return {
   get remaining(){return parent.remaining-reserve;},
   set remaining(value:number){
-   if(!Number.isInteger(value)||value<0)throw Error('预选审核额度不能透支');
-   parent.remaining+=value-this.remaining;
+   const available=this.remaining;
+   if(!Number.isSafeInteger(value)||value<0||value>available)
+     throw Error('预选审核额度不能透支或重置');
+   const used=available-value;
+   parent.remaining-=used;
+   debited+=used;
   },
   refundReservedCalls(amount:number){
-   if(!Number.isInteger(amount)||amount<0)throw Error('审核归还额度无效');
+   if(!Number.isSafeInteger(amount)||amount<0||amount>debited)
+     throw Error('审核归还额度无效或超过已使用额度');
    parent.remaining+=amount;
+   debited-=amount;
   },
  };
 }
