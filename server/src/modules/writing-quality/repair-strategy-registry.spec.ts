@@ -52,3 +52,13 @@ it('gives the model the exact executor budget for this draft', () => {
   expect(prompt).toContain('较大值计费');
   expect(prompt).toContain('相邻空行');
 });
+
+it('routes canonical advancement defects and their blocking companions through the same structural executor',async()=>{
+ const {GenerationMetricsService}=await import('../generation-metrics/generation-metrics.service');
+ const service=Object.create(GenerationMetricsService.prototype) as any;
+ const issues=[{ruleId:'QLT-003',severity:'blocking',status:'open'},{ruleId:'QLT-013',severity:'high',status:'open'}] as any;
+ expect(defaultRepairStrategy(['QLT-013'])).toBe('scene_structure_patch');
+ expect(service.selectRepairStrategy('p',issues)).toBe('scene_structure_patch');
+ service.databaseService={getDb:()=>({prepare:(sql:string)=>({get:()=>sql.includes('generation_runs')?{model:'model',prompt_version:'v'}:{type:'long_novel',settings:'{}'},all:()=>[{strategy_id:'unique_local_replacement',attempts:10,accepted:10,rollbacks:0,damage:0,tokens:100,latencyMs:100}]})})};
+ expect(service.selectRepairStrategy('p',issues,'run')).toBe('scene_structure_patch');
+});

@@ -121,7 +121,9 @@ export function ideaPayoffBridgeIssues(value: any, cards: readonly any[]): strin
     if (bridge.status === 'supported' && (!narrative(condition) || condition?.field === 'ending'
       || condition?.id === result?.id || condition?.quote === result?.quote))
       issues.push(prefix + '.conditionEvidenceRef须引用结果断言之外的既有成立条件，不能用结局自证');
-    if (bridge.status === 'gap' && bridge.conditionEvidenceRef !== undefined && !narrative(condition))
+    if (bridge.status === 'gap' && bridge.conditionEvidenceRef != null
+      && !(typeof bridge.conditionEvidenceRef === 'string' && !bridge.conditionEvidenceRef.trim())
+      && !narrative(condition))
       issues.push(prefix + '.conditionEvidenceRef不能引用其它卡或虚构字段');
     if (row.payoffCredible !== (bridge.status === 'supported'))
       issues.push(prefix + '结论须与payoffCredible一致，缺少必要条件时必须拒绝兑现');

@@ -182,3 +182,12 @@ it('restores uniquely nested reader goals without changing weak verdicts or acce
  const conflict=structuredClone(payload);conflict.reviews[0].issues=['另一份阻断结论'];
  expect(()=>targetIdeaReviews(conflict,[cards[0]],[])).toThrow('内外的issues冲突');
 });
+
+it.each(['', '  ', null])('keeps an evidenced GAP rejected without charging protocol repair for an empty condition reference %j',ref=>{
+ const row={position:1,payoffCredible:false,payoffBridge:{status:'gap',actionEvidenceRef:'C1.description',resultEvidenceRef:'C1.ending',conditionEvidenceRef:ref,reason:'已有行动无法证明目标结果所需条件，故事缺口必须保留'}};
+ const before=structuredClone(row);
+ expect(ideaPayoffBridgeIssues({reviews:[row]},cards)).toEqual([]);
+ expect(row).toEqual(before);
+ expect(ideaPayoffBridgeIssues({reviews:[{...row,payoffCredible:true,payoffBridge:{...row.payoffBridge,status:'supported'}}]},cards).length).toBeGreaterThan(0);
+ for(const invalid of ['C2.setting','C1.invented',0,false,{}])expect(ideaPayoffBridgeIssues({reviews:[{...row,payoffBridge:{...row.payoffBridge,conditionEvidenceRef:invalid}}]},cards).length).toBeGreaterThan(0);
+});

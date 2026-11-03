@@ -368,8 +368,7 @@ export class GenerationMetricsService implements OnModuleInit {
     // fallback executor see the whole open issue cluster so it can choose the
     // structural repair that is capable of fixing every occurrence together.
     const structuralCompanions = issues.filter(i => i.status === 'open'
-      && (i.ruleId.includes('structure') || i.ruleId.includes('pacing')
-        || i.ruleId.includes('timeline.repetition') || i.ruleId.startsWith('ai_trace.')));
+      && defaultRepairStrategy([i.ruleId]) === 'scene_structure_patch');
     const focus = blocking.length
       ? [...blocking, ...structuralCompanions.filter(i => !blocking.includes(i))]
       : severe.length ? severe : issues.filter(i => i.status === 'open');
@@ -386,7 +385,8 @@ export class GenerationMetricsService implements OnModuleInit {
     // 实测 unique_local_replacement / platform_metric_patch 在多个规则轴上 0% 接受率，
     // 却因为候选池里只剩它们而持续被选中，累计白烧数千秒与数百万 token。
     // 全部候选都不合格时返回确定性默认策略，而不是继续挑一个已知无效的策略。
-    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r));
+    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r)
+      && (fallback !== 'scene_structure_patch' || r.strategy_id === 'scene_structure_patch'));
     eligible.sort((a,b) => repairStrategyUtility(b) - repairStrategyUtility(a) || a.strategy_id.localeCompare(b.strategy_id));
     return eligible[0]?.strategy_id || fallback;
   }
