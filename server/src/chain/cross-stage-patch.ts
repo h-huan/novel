@@ -183,8 +183,30 @@ export function crossStageRepairDiagnosticPositions(anchors:RepairAnchor[],targe
   });
   return positions;
 }
-export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:readonly {id:string;chapterId:string;content:string}[],findings:readonly string[]) {
+export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:readonly {id:string;chapterId:string;content:string}[],findings:readonly string[],originalBundle?:Record<string,any[]>) {
   const positions=crossStageRepairDiagnosticPositions(anchors,targets,findings);
+  // Source-boundary units cover only a subset of the cross-stage findings.
+  // When their coordinates are known, don't hide a different, explicitly
+  // cited mutable field (e.g. characters.2.relationships and profile_json)
+  // from the SAME existing repair call. The group has already been scoped
+  // by crossStageRepairRequests; never infer a target from a loose quote.
+  const citedFields=new Set<string>();
+  if(originalBundle)for(const collection of ['characters','organizations','mapPoints','chapters','foreshadowings']){
+    for(const [index,row] of (originalBundle[collection]||[]).entries()){
+      if(!anchors.some(anchor=>anchor.entityId===row.id))continue;
+      for(const field of Object.keys(row)){
+        const dotted=collection+'.'+index+'.'+field;
+        const bracketed=collection+'['+index+'].' +field;
+        const mentioned=(path:string)=>findings.some(finding=>{
+          const offset=finding.indexOf(path);
+          if(offset<0)return false;
+          const previous=finding[offset-1]||'',following=finding[offset+path.length]||'';
+          return !/[A-Za-z0-9_]/.test(previous)&&!/[A-Za-z0-9_]/.test(following);
+        });
+        if(mentioned(dotted)||mentioned(bracketed))citedFields.add(row.id+':'+field);
+      }
+    }
+  }
   if(!positions.length||positions.some(position=>!position.anchorIds.length))return anchors;
   const ids=new Set(positions.flatMap(position=>position.anchorIds));
   const kinds=new Set(targets.filter(target=>positions.some(position=>position.sourceUnit===target.id)).flatMap(target=>sourceBoundaryRiskKinds(target.content)));
@@ -192,7 +214,8 @@ export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:re
   for(const position of crossStageRepairDiagnosticPositions(anchors,related,related.map(target=>target.id)))for(const id of position.anchorIds)ids.add(id);
   // All affected chapter action chains stay available for causal replacement,
   // not merely the faulty conclusion or one copied projection.
-  return anchors.filter(anchor=>ids.has(anchor.id)||(anchor.entityType==='chapter'&&anchor.field==='content')
+  return anchors.filter(anchor=>ids.has(anchor.id)||citedFields.has(anchor.entityId+':'+anchor.field)
+    ||(anchor.entityType==='chapter'&&anchor.field==='content')
     || isWorldPlanPatchTarget(anchor.entityType));
 }
 
