@@ -10826,7 +10826,7 @@ ${enrichToneDirective}
           this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 97, message: '大纲深度字段已存在，跳过', status: 'done' });
           return;
         }
-        const chapters = db.prepare(`SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`).all(projectId) as any[];
+        const chapters = db.prepare(`SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='') ORDER BY "order"`).all(projectId) as any[];
         if (chapters.length > 0) {
           const BATCH = 3; // 每章要补10个深度字段，批量过大易触发输出长度截断；3章/批更稳（real-llm 另有同模型扩容兜底）
           let done = 0;
