@@ -10710,6 +10710,10 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
 
     this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 88, message: '读取冻结世界观，补全组织/地点/大纲/伏笔的派生资料...', status: 'running' });
 
+    // Resume/enrichment is incremental: each query below targets ONLY rows
+    // whose derived field is still missing. Re-sending complete records wastes
+    // the same model budget and risks overwriting already accepted facts.
+    // All missing rows retain their existing generation and Canon validation.
     // ====== 角色深度资料 -> character_extended_profiles ======
     // 角色 13 字段档案已在主流程任务A生成（含 aliasTitle/faction/catchphrase/fears 等补齐字段），
     // 不再逐角色重复调用一次完整生成，避免重复执行步骤。
@@ -10730,7 +10734,7 @@ ${crossStageRepairPlanDirective(repairObligations,repairContextText).split('在�
           this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 94, message: '组织深度资料已存在，跳过', status: 'done' });
           return;
         }
-        const orgs = db.prepare(`SELECT id,name,type,description FROM organizations WHERE project_id=?`).all(projectId) as any[];
+        const orgs = db.prepare(`SELECT id,name,type,description FROM organizations WHERE project_id=? AND (leader IS NULL OR leader='')`).all(projectId) as any[];
         if (orgs.length > 0) {
           const orgResult = await this.llmCallWithRetry<any>(
             '组织势力深度资料补全',
@@ -10777,7 +10781,7 @@ ${enrichToneDirective}
           this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 95, message: '地点深度资料已存在，跳过', status: 'done' });
           return;
         }
-        const maps = db.prepare(`SELECT id,name,type,description FROM map_points WHERE project_id=?`).all(projectId) as any[];
+        const maps = db.prepare(`SELECT id,name,type,description FROM map_points WHERE project_id=? AND (climate IS NULL OR climate='')`).all(projectId) as any[];
         if (maps.length > 0) {
           const mapResult = await this.llmCallWithRetry<any>(
             '地点深度资料补全',
@@ -10875,7 +10879,7 @@ ${enrichToneDirective}
           this.emitProjectProgress(projectId, { type: 'progress', step: 'enrich', percent: 98, message: '伏笔深度资料已存在，跳过', status: 'done' });
           return;
         }
-        const fss = db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=?`).all(projectId) as any[];
+        const fss = db.prepare(`SELECT id,content,buried_chapter_index,planned_recovery_chapter_index,evidence_text,recovery_condition,payoff_description FROM foreshadowings WHERE project_id=? AND (emotional_impact IS NULL OR emotional_impact='')`).all(projectId) as any[];
         if (fss.length > 0) {
           const fsResult = await this.llmCallWithRetry<any>(
             '伏笔深度资料补全',
