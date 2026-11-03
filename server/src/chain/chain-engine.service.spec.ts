@@ -120,7 +120,7 @@ describe('ChainEngineService', () => {
 
   it('accepts one balanced JSON object without swallowing a trailing explanation',async()=>{
     const world={worldview:{geography:[{name:'地下车站'}],factions:[{name:'维护处'}]}};
-    generate.mockResolvedValueOnce({...mockLLMOutput,content:'输出如下：\\n'+JSON.stringify(world)+'\\n以上为世界规则。'});
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'输出如下：\n'+JSON.stringify(world)+'\n以上为世界规则。'});
     const result=await service.execute(testChain,{});
     expect(result.status).toBe('completed');
     expect(result.nodeResults[0].output).toEqual(world);
@@ -128,7 +128,7 @@ describe('ChainEngineService', () => {
   });
 
   it('rejects multiple independent JSON documents instead of choosing one silently',async()=>{
-    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"factions":[]}}\\n{"worldview":{"factions":[1]}}'});
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"factions":[]}}\n{"worldview":{"factions":[1]}}'});
     const result=await service.execute(testChain,{});
     expect(result.status).toBe('failed');
     expect(result.nodeResults[0].error).toContain('未返回合法JSON对象');
