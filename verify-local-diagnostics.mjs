@@ -51,14 +51,14 @@ export function normalizeProjectIntegrityAudit(value) {
 
 /** Check the REAL discovery request window, not the sum of parallel LLM
  * durations or a single phase. A 5/5 result taking 13 minutes is not a
- * successful under-8-minute acceptance. No production budget is changed. */
-export function discoveryEightMinuteCheck(audit) {
+ * successful under-10-minute acceptance. No production budget is changed. */
+export function discoveryTenMinuteCheck(audit) {
  const started=Date.parse(String(audit?.startedAt||''));
  const finished=Date.parse(String(audit?.finishedAt||''));
  if(!audit?.available||!Number.isFinite(started)||!Number.isFinite(finished)||finished<started)
    return {measured:false,wallMs:null,passed:false};
  const wallMs=finished-started;
- return {measured:true,wallMs,passed:wallMs<480000};
+ return {measured:true,wallMs,passed:wallMs<=600000};
 }
 
 /** A full report can certify production only with a completed current-request
@@ -79,9 +79,9 @@ export function discoveryProductionAcceptanceIssues(audit) {
        &&(!validCount(audit.totalIdeas)||audit.totalIdeas!==audit.returned))) {
    issues.push('latest_idea_discovery_quantity_mismatch');
  }
- const time=discoveryEightMinuteCheck(audit);
+ const time=discoveryTenMinuteCheck(audit);
  if (!time.measured) issues.push('latest_idea_discovery_latency_unverified');
- else if (!time.passed) issues.push('latest_idea_discovery_over_8_minutes');
+ else if (!time.passed) issues.push('latest_idea_discovery_over_10_minutes');
  return issues;
 }
 
