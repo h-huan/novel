@@ -102,6 +102,39 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(unknown[0].findings).toContain('未定位的真实错误');
     expect(bundle.chapters).toHaveLength(3);
   });
+  it('binds dotted review indexes to the exact chapter and both character relationship projections', () => {
+    const original='每日到值房照陈默口述抄写';
+    const chapters=Array.from({length:5},(_,i)=>({id:'chapter-'+i,chapterIndex:i+1,
+      content:i===3?'裴砚隔一天来一回，抄了三个月。':'其它章节事实。'}));
+    const characters=Array.from({length:21},(_,i)=>({id:'character-'+i,name:'人物'+i,
+      relationships:JSON.stringify([{relation:original}]),
+      profile_json:JSON.stringify({relationships:[{relation:original}]})}));
+    const bundle={chapters,characters};
+    const finding=JSON.stringify({canonicalSource:'chapters.3.content',
+      conflictingSource:'characters.2.relationships.0.relation；characters.2.profile_json.relationships.0.relation',
+      evidence:'章节写隔日，关系重复字段仍为每日'});
+    const requests=crossStageRepairRequests(bundle,[finding]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].targetIds).toEqual(expect.arrayContaining(['chapter-3','character-2']));
+    expect(requests[0].targetIds).toHaveLength(2);
+    expect(requests[0].targetIds).not.toContain('character-20');
+    expect(requests[0].context.characters.map(row=>row.id)).toEqual(['character-2']);
+    const anchors=crossStageRepairAnchors(requests[0].context,requests[0].targetIds);
+    const relation=anchors.find(item=>item.entityId==='character-2'&&item.field==='relationships'
+      &&item.path?.join('.')==='0.relation');
+    const profile=anchors.find(item=>item.entityId==='character-2'&&item.field==='profile_json'
+      &&item.path?.join('.')==='relationships.0.relation');
+    expect(relation).toBeDefined();expect(profile).toBeDefined();
+    const result=materializeCrossStageRepairEdits({edits:[
+      {anchorId:relation!.id,replacement:'隔一天到值房照陈默口述抄写'},
+      {anchorId:profile!.id,replacement:'隔一天到值房照陈默口述抄写'},
+    ]},anchors,bundle);
+    expect(result.patches).toHaveLength(2);
+    expect(result.patches.map(item=>item.field).sort()).toEqual(['profile_json','relationships']);
+    expect(result.patches.every(item=>item.replacement.includes('隔一天到值房'))).toBe(true);
+    expect(characters[2].relationships).toContain('每日到值房');
+    expect(chapters[3].content).toContain('隔一天来一回');
+  });
   it('opens the actual previous knowledge producer for a stateBefore repair instead of forcing downstream dilution', () => {
     const bundle={world:[{id:'world',rules:'既有世界能力不变'}],chapters:[
       {id:'one',chapterIndex:1,content:'建立危机。'},
