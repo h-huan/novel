@@ -276,7 +276,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     scenarios: ALL_SCENES, consumers: ['prompt', 'deterministic_gate', 'semantic_gate', 'repair', 'persistence', 'test'], dependencies: ['AUTH-002', 'CTX-004'],
     summary: '时间、数量、次数、倒计时、年龄、库存、位置、物品状态等只有在确认是同一结构化事实且可安全计算时才能确定性阻断；自由文本猜测同一事实只能升级语义审查。',
     evidencePolicy: '确定性检查必须拿到稳定 identity、事实种类、数值/单位、来源与关系；仅靠题材关键词、单一正则或“全篇只有一个数字”不足以证明同一事实。',
-    details: [OUTLINE_STATE_ACCUMULATION_POLICY, '完整候选按实际将保存的字段核查，通过前不得写入章节框架；审查纠错只改审查输出，不得修改输入事实。'],
+    details: [OUTLINE_STATE_ACCUMULATION_POLICY, '完整候选按实际将保存的字段核查，通过前不得写入章节框架；审查纠错只改审查输出，不得修改输入事实。', '跨模块审查返回的characters.2.relationships或chapters.3.content等点号数组引用，与characters[2]、chapters[3]按服务器真实数组身份等价解析，必须精确匹配索引边界，不能把2误定位为20；无可靠定位仍按原全范围审查而不伪造身份。同一事实若在relationships和profile_json等多个实际保存的派生字段内重复，最小修订必须允许同时覆盖这些依赖，保留已确认主线事实，候选独立复查通过后才允许事务写库。'],
     implementationRefs: ['server/src/chain/outline-fact-ledger.ts', 'server/src/chain/chain.controller.ts', 'server/src/chain/source-fact-consistency.ts', 'server/src/chain/source-countdown-consistency.ts'],
     testRefs: ['server/src/chain/outline-fact-ledger.spec.ts', 'server/src/chain/chain.controller.fact-ledger.spec.ts'],
     directives: { review: '能结构化且可复算的冲突必须指出 identity、两侧数值/状态与来源；自由文本可能冲突只作为语义评审证据。', repair: '事实源冲突按 Canon 优先级或最小影响修复，不让正文自行二选一。' },
