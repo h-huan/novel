@@ -143,5 +143,22 @@ it('requires each comma-separated outcome while preserving original addresses, q
  const exit='如果收到原件，才可办理；副本仍未提交。';
  const inventory=causalExitResultAnchors(causalEvidenceAnchors(JSON.stringify([{exitState:exit}]),{}),exit);
  expect(inventory.map(row=>row.text).join('')).toBe(exit);
- expect(inventory.map(row=>row.text)).toContain('如果收到原件，');
+ expect(inventory.map(row=>row.text)).toContain('如果收到原件，才可办理；');
+});
+
+it('keeps conditional prerequisites attached while still inventorying unrelated outcomes',()=>{
+ const examples=[
+  {text:'如果核验完成，才可移交原件，复印件仍未签收。',expected:['如果核验完成，才可移交原件，','复印件仍未签收。']},
+  {text:'只有手续齐全，才能办理，原记录仍在库中。',expected:['只有手续齐全，才能办理，','原记录仍在库中。']},
+  {text:'只有一个人到场，另两人离开。',expected:['只有一个人到场，','另两人离开。']},
+  {text:'若干人到场，另一组完成清点。',expected:['若干人到场，','另一组完成清点。']},
+  {text:'一旦审查通过，就交还物件，仍不代表获得全部权利。',expected:['一旦审查通过，就交还物件，','仍不代表获得全部权利。']},
+ ];
+ for(const {text,expected} of examples){
+  const anchors=causalEvidenceAnchors(JSON.stringify([{exitState:text}]),{});
+  const parts=causalExitResultAnchors(anchors,text).map(row=>row.text);
+  expect(parts).toEqual(expected);
+  expect(parts.join('')).toBe(text);
+  expect(anchors.some(row=>row.source==='body'&&row.text===text)).toBe(true);
+ }
 });
