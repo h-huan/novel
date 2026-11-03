@@ -249,6 +249,34 @@ export class ChainEngineService {
         buckets: { review_incomplete: [`上游节点${node.id}未返回合法JSON对象，禁止将原文当作已完成结构继续下游`] },
       }), raw);
     }
+    // Validate the exact shape demanded by the existing fixed templates at
+    // the producing node, BEFORE the dependent LLM request is dispatched.
+    // An object with the wrong keys was previously marked "success", so a
+    // long-running downstream node consumed undefined volumes/world facts.
+    const outputIssues:string[]=[];
+    if(chain.id==='long-novel-init-foundation'&&node.id==='node_2_worldview'){
+      const world=(parsedOutput as any).worldview;
+      if(!world||typeof world!=='object'||Array.isArray(world))outputIssues.push('worldview必须是对象');
+      else {
+        if(!Array.isArray(world.geography)||!world.geography.length)outputIssues.push('worldview.geography缺少实际地点');
+        if(!Array.isArray(world.factions)||!world.factions.length)outputIssues.push('worldview.factions缺少实际势力');
+      }
+    }
+    if(chain.id==='long-novel-flexible-outline'&&node.id==='node_2_volumes'){
+      const volumes=(parsedOutput as any).volumes;
+      if(!Array.isArray(volumes)||!volumes.length)outputIssues.push('volumes必须为非空分卷数组');
+      else for(const [index,volume] of volumes.entries()){
+        if(!volume||typeof volume!=='object'
+          ||!Number.isInteger(Number(volume.estimatedChapters))||Number(volume.estimatedChapters)<=0
+          ||!String(volume.chapterCountReason||'').trim()
+          ||!String(volume.title||'').trim()||!String(volume.outline||'').trim())
+          outputIssues.push('第'+(index+1)+'卷缺少有效章数、章数依据、标题或卷纲');
+      }
+    }
+    if(outputIssues.length)throw new GateRejectionError(classifyGateFailure({
+      evaluationStatus:'not_evaluated',topic:'quality_gate',gateStatus:'not_evaluated',
+      buckets:{review_incomplete:outputIssues.map(issue=>node.id+'结构输出未完成：'+issue)},
+    }),response.content);
     if (node.chainId === 'long-novel-flexible-outline' && node.id === 'node_1_analysis') {
       const issues = describeChapterResponsibilityPlan(parsedOutput, context.variables['user_input'] && (context.variables['user_input'] as any).chapterLimit);
       if (issues.length) throw new GateRejectionError(classifyGateFailure({
