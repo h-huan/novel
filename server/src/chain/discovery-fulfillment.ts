@@ -122,11 +122,16 @@ export function minimumReselectionReviewCalls(
  * a delivery deficit. Only actual missing delivery slots are mandatory.
  * A small model-reviewed hedge remains for full-card rejection, without
  * filling every failed optional screening slot through serial reselection. */
-export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number):{mandatory:number;hedge:number;total:number}{
- if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0)
+export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number,screeningTarget=deliveryCount):{mandatory:number;hedge:number;total:number}{
+ if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0
+   ||!Number.isInteger(screeningTarget)||screeningTarget<deliveryCount)
    throw Error('预选交付容量参数无效');
  const mandatory=Math.max(0,deliveryCount-retainedApproved);
- const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
+ // One optional source-vetted survivor avoids a slow post-final-card refill
+ // when the initial shortlist had proven rejections. The caller must still
+ // fund reselection and every independent review from the original allowance.
+ const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4)))
+   :retainedApproved<screeningTarget?1:0;
  return {mandatory,hedge,total:mandatory+hedge};
 }
 
