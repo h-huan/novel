@@ -38,6 +38,7 @@ describe('GenerationRecoveryService', () => {
       CREATE TABLE timelines (id TEXT PRIMARY KEY,project_id TEXT);
       CREATE TABLE timeline_events (id TEXT PRIMARY KEY,timeline_id TEXT);
       CREATE TABLE version_history (id TEXT PRIMARY KEY,entity_id TEXT,created_by TEXT);
+      CREATE TABLE generation_runs (id TEXT PRIMARY KEY,project_id TEXT,status TEXT);
     `);
     vectors = {
       [VectorIndexService.COLLECTIONS.CHARACTERS]: [],
@@ -81,13 +82,26 @@ describe('GenerationRecoveryService', () => {
       const audit = await service.audit('p1');
       expect(audit.running).toBe(true);
       expect(audit.canResume).toBe(false);
-      await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('原项目创建任务仍在执行');
+      await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('原项目生成调用仍在执行');
       expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p1') as any).status).toBe('generation_failed');
       expect((db.prepare('SELECT COUNT(*) count FROM characters WHERE project_id=?').get('p1') as any).count).toBe(1);
     } finally { finish(); await task; }
     const after = await service.audit('p1');
     expect(after.running).toBe(false);
     expect(after.canResume).toBe(true);
+  });
+
+  it('rejects unsafe recovery while database model calls remain running after a task wrapper settles', async () => {
+    db.prepare("INSERT INTO characters VALUES ('source-character','p1')").run();
+    db.prepare("INSERT INTO generation_runs VALUES ('model-run','p1','running')").run();
+    expect(generationTasks.isRunning('creation', 'p1')).toBe(false);
+    const audit = await service.audit('p1');
+    expect(audit.running).toBe(true);
+    expect(audit.canResume).toBe(false);
+    await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('原项目生成调用仍在执行');
+    expect((db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id='p1'").get() as any).count).toBe(1);
+    db.prepare("UPDATE generation_runs SET status='cancelled' WHERE id='model-run'").run();
+    expect((await service.audit('p1')).canResume).toBe(true);
   });
 
   it('blocks cleanup when a chapter contains body text without falsely classifying its author', async () => {
