@@ -929,6 +929,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const call = ++physicalCallSequence;
       const physicalStartedAt = Date.now();
       const identity = {
+        projectId: request.metrics?.projectId ?? currentCreationProjectId() ?? null,
+        runId: request.metrics?.runId ?? null,
+        model: modelName,
         discoveryRequestId: request.metrics?.discoveryRequestId ?? null,
         stepKey: request.metrics?.stepKey ?? null,
         attempt: request.metrics?.attempt ?? 0,
