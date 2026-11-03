@@ -128,3 +128,20 @@ it('retains and repairs decisive outcomes beyond the former six-row sample ceili
  expect(repaired.transitions.slice(0, 6)).toEqual(original.transitions.slice(0, 6));
  expect(validateCausalAudit(repaired, content, {})).toMatchObject({ verified: true, issues: [] });
 });
+
+it('requires each comma-separated outcome while preserving original addresses, quoted lists and conditional context',()=>{
+ const outcome='撤议被否，散时无言，原件没再拿出来';
+ const chapters=[{scenes:[{outcome}],characterActions:[{result:'他没有再争，也未失去名声。'}],characterStates:[{stateAfter:'她说“甲，乙”，并留下三份副本（红，蓝，白）'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{}),results=causalChapterResultAnchors(anchors,0);
+ const scene=results.filter(row=>row.path==='0.scenes.0.outcome');
+ expect(scene.map(row=>row.text)).toEqual(['撤议被否，','散时无言，','原件没再拿出来']);
+ expect(scene.map(row=>row.text).join('')).toBe(outcome);
+ expect(anchors.find(row=>row.id==='body:v1')?.text).toBe(outcome);
+ expect(results.filter(row=>row.path==='0.characterActions.0.result').map(row=>row.text)).toEqual(['他没有再争，','也未失去名声。']);
+ expect(results.filter(row=>row.path==='0.characterStates.0.stateAfter').map(row=>row.text)).toEqual(['她说“甲，乙”，','并留下三份副本（红，蓝，白）']);
+ expect(results.every(row=>body.includes(row.text))).toBe(true);
+ const exit='如果收到原件，才可办理；副本仍未提交。';
+ const inventory=causalExitResultAnchors(causalEvidenceAnchors(JSON.stringify([{exitState:exit}]),{}),exit);
+ expect(inventory.map(row=>row.text).join('')).toBe(exit);
+ expect(inventory.map(row=>row.text)).toContain('如果收到原件，');
+});

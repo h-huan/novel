@@ -9,6 +9,34 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   };
 }
 
+const causalResultPath = /(?:^|\.)(?:exitState|scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|highlights\.\d+\.point|characterStates\.\d+\.stateAfter|foreshadowingRecover\.\d+\.(?:method|payoff))$/;
+
+/** Addresses only: keep punctuation and the complete source, including conditional context. */
+function resultAssertionParts(text: string): string[] {
+  const pairs: Record<string,string> = {'“':'”','‘':'’','「':'」','『':'』','（':'）','(':')','[':']'};
+  const stack: string[] = [], parts: string[] = [];
+  let start=0;
+  for(let index=0;index<text.length;index++){
+    const char=text[index];
+    if(char===stack.at(-1)){stack.pop();continue;}
+    if(char==='"'){stack.push('"');continue;}
+    if(pairs[char]){stack.push(pairs[char]);continue;}
+    if(!stack.length && (char==='，'||char===',' && !(/\d/.test(text[index-1]||'')&&/\d/.test(text[index+1]||'')))){
+      parts.push(text.slice(start,index+1));start=index+1;
+    }
+  }
+  if(start<text.length)parts.push(text.slice(start));
+  return parts;
+}
+function completeResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>, parent: {id:string}) {
+  const clauses=anchors.filter(anchor=>anchor.id.startsWith(parent.id+':c')&&!anchor.id.includes(':s'));
+  return (clauses.length?clauses:anchors.filter(anchor=>anchor.id===parent.id)).flatMap(clause=>{
+    const parts=anchors.filter(anchor=>anchor.id.startsWith(clause.id+':s'));
+    return parts.length?parts:[clause];
+  });
+}
+
+
 export function causalEvidenceAnchors(content: string, sources: Record<string,string>): Array<{id:string;source:string;text:string;path?:string}> {
   return Object.entries({body:content,...sources}).flatMap(([source,text])=> {
     const raw = String(text || '');
@@ -37,7 +65,13 @@ export function causalEvidenceAnchors(content: string, sources: Record<string,st
         id: `${value.id}:c${index + 1}`, source, text, path: value.path,
       })) : [];
     });
-    return [...paragraphs, ...values, ...clauses];
+    const clauseParents=new Set(clauses.map(clause=>clause.id.replace(/:c\d+$/,'')));
+    const assertions=[...values.filter(value=>!clauseParents.has(value.id)),...clauses].flatMap(value=>{
+      if(!causalResultPath.test(value.path||''))return [];
+      const parts=resultAssertionParts(value.text);
+      return parts.length>1?parts.map((text,index)=>({id:value.id+':s'+(index+1),source,text,path:value.path})):[];
+    });
+    return [...paragraphs, ...values, ...clauses, ...assertions];
   });
 }
 
@@ -54,8 +88,7 @@ export function causalExitResultAnchors(anchors: ReturnType<typeof causalEvidenc
   const encoded = JSON.stringify(exitState).slice(1, -1);
   const parent = anchors.find(anchor => anchor.source === 'body' && anchor.text === encoded);
   if (!parent) return [];
-  const clauses = anchors.filter(anchor => anchor.id.startsWith(parent.id + ':c'));
-  return clauses.length ? clauses : [parent];
+  return completeResultAnchors(anchors,parent);
 }
 
 /** The server owns the complete result inventory, including scene outcomes and
@@ -63,12 +96,9 @@ export function causalExitResultAnchors(anchors: ReturnType<typeof causalEvidenc
 export function causalChapterResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>, chapterIndex: number) {
   const prefix = chapterIndex + '.';
   const resultPath = /^(?:scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|highlights\.\d+\.point|characterStates\.\d+\.stateAfter|foreshadowingRecover\.\d+\.(?:method|payoff))$/;
-  const parents = anchors.filter(anchor => anchor.source === 'body' && !anchor.id.includes(':c')
+  const parents = anchors.filter(anchor => anchor.source === 'body' && /:v\d+$/.test(anchor.id)
     && anchor.path?.startsWith(prefix) && resultPath.test(anchor.path.slice(prefix.length)));
-  return parents.flatMap(parent => {
-    const clauses = anchors.filter(anchor => anchor.id.startsWith(parent.id + ':c'));
-    return clauses.length ? clauses : [parent];
-  });
+  return parents.flatMap(parent => completeResultAnchors(anchors,parent));
 }
 
 /** IDs resolve to exact source paragraphs; no fuzzy quote correction or invented bridge. */
