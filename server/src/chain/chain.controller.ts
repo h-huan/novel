@@ -4980,13 +4980,15 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           throw new Error(`创作字典缺少${field}候选，无法自动组合题材；请先在字典管理中补齐。`);
         }
       }
-      const submissionRequired = platformSubmissionDimensions(dto.platform, dto.storyType, dto.storyCategory, dto.targetAudience).includes('genre');
-      const submissionPlacement = resolveSubmissionCategory(dto.platform, dto.storyCategory, dto.storyType, audienceChannelHint(dto.targetAudience));
-      const submissionOptions = submissionPlacement.status === 'resolved'
-        ? (platformCategoryWritingProfile(dto.platform, submissionPlacement.value.channel, submissionPlacement.value.platformGroup, dto.storyType)?.topTags || []).map(tag => tag.name)
-        : [];
-      if (submissionRequired && !dto.submissionTags.length && !submissionOptions.length) {
-        throw new Error('此平台分类要求作品标签，但尚无可核验候选；请填写平台后台实际标签后再发现题材。');
+      // The pool may span multiple categories. One default-category sample
+      // cannot validate or stand in for other locked categories' required tags.
+      // Check every possible category BEFORE spending the first model call.
+      const submissionByCategory=discoveryCategories.map(category=>({category,...submissionForCategory(category)}));
+      const anySubmissionRequired=submissionByCategory.some(item=>item.required);
+      if (!dto.submissionTags.length) {
+        const missingSamples=submissionByCategory.filter(item=>item.required&&!item.options.length).map(item=>item.category);
+        if(missingSamples.length)throw new Error('以下分类要求作品标签但没有可核验候选：'
+          +missingSamples.join('、')+'；请先填写平台后台实际标签后再发现题材。');
       }
       const configuredTargetWords = String(dto.targetWords || '').trim()
         ? parsePositiveTargetWords(dto.targetWords)
@@ -5038,7 +5040,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       if (!dto.pov) exampleIdea.pov = '从视角字典选择1项';
       exampleIdea.storyCategory = dto.storyCategory;
       exampleIdea.plotTags = dto.plotTags.length ? dto.plotTags : ['从情节取向字典选择最少必要项，1项也可'];
-      exampleIdea.submissionTags = dto.submissionTags.length ? dto.submissionTags : (submissionRequired ? ['从本分类标签候选选择1-2项'] : []);
+      exampleIdea.submissionTags = dto.submissionTags.length ? dto.submissionTags : (anySubmissionRequired ? ['按本卡锁定分类的已核验候选选择1-2项；非必填分类用空数组'] : []);
       const outputSchemaWithAuto = JSON.stringify(outputExample);
       const autoSelectionRules = [
         ['storyTone', dto.storyTone, autoOptions.storyTone],
