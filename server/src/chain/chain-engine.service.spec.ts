@@ -142,6 +142,34 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
+  it('stops a malformed long-novel world at its producer, without marking it as a completed foundation',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-init-foundation');
+    const skeleton={coreSetting:{title:'桥下的账'},skeletonVolumes:[{estimatedChapters:8,chapterCountReason:'八个独立阶段'}]};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
+      .mockResolvedValueOnce({...mockLLMOutput,content:'{"wrongWorld":{"geography":[]}}'});
+    const result=await service.execute(chain,{story_setting:'锁定主线',targetWords:20000});
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(2);
+    expect(result.nodeResults[1].status).toBe('failed');
+    expect(result.nodeResults[1].error).toContain('worldview必须是对象');
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an incomplete volume count before sending it into long-novel chapter outlining',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-flexible-outline');
+    const volNode=chain.nodes.find(node=>node.id==='node_2_volumes')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认故事'}},
+      nodeOutputs:{node_1_analysis:{chapterResponsibilities:[]}},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,
+      content:'{"volumes":[{"title":"第一卷","estimatedChapters":0,"chapterCountReason":"","outline":"事件"}]}'});
+    const result=await service.executeNode(volNode,context,chain);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('第1卷缺少有效章数');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
   it('does not call a downstream node when a fixed long-outline prerequisite fails', async () => {
     const registry = new ChainTemplateService(service);
     const production = registry.getDetail('long-novel-flexible-outline');
