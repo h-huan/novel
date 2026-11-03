@@ -10255,7 +10255,7 @@ ${crossStageReviewDirective()}${crossStagePromiseDirective(canonicalCreativeBrie
       const proposalWarnings: string[] = [];
       for (const request of crossStageRepairRequests(generatedBundle,contradictions)) {
       const repairAnchors=crossStageRepairAnchors(request.context,request.targetIds);
-      const visibleRepairAnchors=crossStageRepairFocusedAnchors(repairAnchors,sourceBoundaryTargets,request.findings);
+      const visibleRepairAnchors=crossStageRepairFocusedAnchors(repairAnchors,sourceBoundaryTargets,request.findings,generatedBundle);
       const diagnosticPositions=crossStageRepairDiagnosticPositions(repairAnchors,sourceBoundaryTargets,request.findings);
       const repairContextText=JSON.stringify(Object.fromEntries(Object.entries(request.context).filter(([key])=>["world","worldProfiles"].includes(key))));
       const repairObligations=crossStageRepairObligations(canonicalCreativeBrief,request.findings,generatedBundle.chapters,request.targetIds);
