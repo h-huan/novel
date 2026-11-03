@@ -66,6 +66,24 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(edits.patches.map(p=>p.field).sort()).toEqual(['profile_json','relationships']);
     expect(bundle.characters[2].profile_json).toContain(old);
   });
+  it('focuses exact dotted character fields even when no chapter source unit was emitted',()=>{
+    const original='每日到值房照原口述抄写';
+    const bundle={characters:Array.from({length:21},(_,index)=>({
+      id:'character-'+index,name:'人物'+index,
+      relationships:JSON.stringify([{relation:original}]),
+      profile_json:JSON.stringify({relationships:[{relation:original}]}),
+      notes:'无需修改的其它资料',
+    }))};
+    const findings=['characters.2.relationships.0.relation 与 characters.2.profile_json.relationships.0.relation 频次冲突'];
+    const anchors=crossStageRepairAnchors(bundle,['character-2']);
+    const focused=crossStageRepairFocusedAnchors(anchors,[],findings,bundle);
+    expect(focused.map(anchor=>anchor.field).sort()).toEqual(['profile_json','relationships']);
+    const view=crossStageRepairContext(bundle,findings);
+    expect(view.characters.map(character=>character.id)).toEqual(['character-2']);
+    expect(view.characters[0].relationships).toContain(original);
+    const unrelated=crossStageRepairContext(bundle,['characters.20.profile_json 另有问题']);
+    expect(unrelated.characters.map(character=>character.id)).toEqual(['character-20']);
+  });
   it('includes a named actors differently worded mechanism projection without routing unrelated characters or rule examples', () => {
     const bundle={world:[{id:'world',rules:'规则示例：推出唯一通道'}],chapters:[{id:'c',content:'陈甲比较记录后锁定唯一时间窗口。',scenes:JSON.stringify({characterActions:[{character:'陈甲',action:'比较记录',result:'锁定唯一时间窗口'}]})}],characters:[
       {id:'a',name:'陈甲',profile_json:JSON.stringify({skills:['凭职业经验反推出楼里唯一的无记录窗口']})},
