@@ -196,7 +196,7 @@ it('aggregates five rejected preselection positions once, then retains independe
 
 });
 
-it('does not spend a reselection call on optional screening slots once five delivery candidates passed the same Gates',async()=>{
+it('does not spend an optional hedge when reselection allowance is unavailable',async()=>{
    const ids='ABCDEFGHIJK'.split('');
    const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
      selectedPremises:ids.slice(0,8).map(premise)},8,15);
@@ -211,13 +211,43 @@ it('does not spend a reselection call on optional screening slots once five deli
    });
    controller.llmCallWithRetry=vi.fn(async()=>{throw Error('delivery already covered; no paid reselection allowed')});
    const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],
-     {reviews:{remaining:12},reselection:{remaining:3}},5);
+     {reviews:{remaining:12},reselection:{remaining:0}},5);
    expect(result.selected.map((x:any)=>x.premiseId)).toEqual(['A','B','C','D','E']);
    expect(result.selectionAudit.reselectionAttempted).toBe(false);
    expect(result.selectionAudit.finalReview.passed).toBe(true);
    expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
  });
+
+it('funds one early independently reviewed hedge after three screened candidates fail',async()=>{
+ const ids='ABCDEFGHIJK'.split('');
+ const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
+   selectedPremises:ids.slice(0,8).map(premise)},8,15);
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={log:vi.fn(),warn:vi.fn()};
+ controller.reviewPremiseSelection=vi.fn(async(current:any,_standard:string,mode:string)=>{
+   if(mode==='overlap')return {passed:true,issues:[]};
+   return materializePremiseSourceReview({sourceChecks:premiseSourceComparisonCatalog(current).map(row=>({
+     ref:row.ref,status:['F','G','H'].includes(row.premiseId)&&row.field==='payoff'?'drift':'preserved',
+     reason:'核对该题材原池与展开中行动及必要条件后形成实际判定',
+   }))},current);
+ });
+ controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+   expect(prompt).toContain('replacements恰好1项');
+   const data={replacements:[{replacesPremiseId:'F',premise:premise('I')}]};
+   expect(options.validate(data)).toBe(true);
+   return {data};
+ });
+ const shared={reviews:{remaining:12},reselection:{remaining:3}};
+ const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],shared,5);
+ expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I']);
+ expect(result.selectionAudit.reselectionAttempted).toBe(true);
+ expect(result.selectionAudit.finalReview.passed).toBe(true);
+ expect(shared.reselection.remaining).toBeLessThanOrEqual(3);
+ expect(shared.reviews.remaining).toBeLessThanOrEqual(12);
+ expect(input.selected.map((row:any)=>row.premiseId)).toEqual('ABCDEFGH'.split(''));
+});
 
 it('does not call an overlap model for a singleton request because no pair exists',async()=>{
   const input=normalizePremiseSelectionPayload({pool:[premise('A')],
