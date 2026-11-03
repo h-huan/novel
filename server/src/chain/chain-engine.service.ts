@@ -336,31 +336,59 @@ export class ChainEngineService {
    * 尝试解析 JSON 字符串
    */
   private tryParseJSON(text: string): unknown {
-    // 尝试提取 JSON 块
-    const jsonMatch = text.match(/\{[\s\S]*\}/) || text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]);
-      } catch {
-        // Only recover missing escapes on existing quotes. No fields, values,
-        // delimiters or truncated strings may be supplied by a repair library.
-        try {
-          const original = jsonMatch[0];
-          const repaired = jsonrepair(original);
-          let index = 0;
-          for (let cursor = 0; cursor < repaired.length; cursor++) {
-            if (repaired[cursor] === original[index]) index++;
-            else if (!(repaired[cursor] === '\\' && original[index] === '"' && repaired[cursor + 1] === '"')) throw new Error('非引号转义修复');
-          }
-          if (index !== original.length) throw new Error('修复改变原文');
-          const value = JSON.parse(repaired);
-          this.logger.warn('结构化输出仅补齐字符串中既有引号的转义，未改动原文字符、字段或数值');
-          return value;
-        } catch { /* Keep malformed output for diagnostics and stop fixed production chains. */ }
+    // Fixed production nodes require ONE complete object. A greedy search
+    // from the first "{" to the last "}" incorrectly merges a JSON object
+    // with a subsequent explanation/code example and rejects valid work.
+    // Conversely, silently taking the first of TWO objects can discard real
+    // model output. Parse only a single balanced document, with optional
+    // whitespace, prose wrapper or one Markdown JSON fence.
+    const raw=String(text||'').trim();
+    const fenced=/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i.exec(raw);
+    const input=(fenced?fenced[1]:raw).trim();
+    let start=-1,depth=0,inString=false,escaped=false,end=-1;
+    for(let i=0;i<input.length;i++){
+      const ch=input[i];
+      if(start<0){
+        if(ch==='{') {start=i;depth=1;}
+        continue;
+      }
+      if(inString){
+        if(escaped)escaped=false;
+        else if(ch==='\\')escaped=true;
+        else if(ch==='"')inString=false;
+        continue;
+      }
+      if(ch==='"'){inString=true;continue;}
+      if(ch==='{')depth++;
+      else if(ch==='}') {
+        depth--;
+        if(depth===0){end=i+1;break;}
       }
     }
-    return text;
+    if(start<0||end<0)return text;
+    const leading=input.slice(0,start).trim();
+    const trailing=input.slice(end).trim();
+    // No second object or array after the recovered one. Do not guess which
+    // half was intended, or accept a truncated response.
+    if(/[{}\[\]]/.test(leading+trailing))return text;
+    const original=input.slice(start,end);
+    try{return JSON.parse(original);}catch{
+      // Accept ONLY an existing quote whose missing escape can be restored;
+      // jsonrepair must not add keys, values, delimiters or missing endings.
+      try{
+        const repaired=jsonrepair(original);
+        let index=0;
+        for(let cursor=0;cursor<repaired.length;cursor++){
+          if(repaired[cursor]===original[index])index++;
+          else if(!(repaired[cursor]==='\\'&&original[index]==='"'&&repaired[cursor+1]==='"'))
+            throw Error('非引号转义修复');
+        }
+        if(index!==original.length)throw Error('修复改变原文');
+        const parsed=JSON.parse(repaired);
+        this.logger.warn('结构化输出仅补齐字符串中既有引号的转义，未改动原文字符、字段或数值');
+        return parsed;
+      }catch{return text;}
+    }
   }
-
 
 }
