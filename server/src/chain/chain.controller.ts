@@ -6997,7 +6997,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // actual delivery deficit is mandatory. A bounded surplus guards final
     // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length);
+    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length,requestedCount);
     const neededReplacementSlots=recoveryTarget.mandatory;
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
@@ -7067,7 +7067,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
-        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+        // One optional survivor can be screened before final-card rejection
+        // forces a serial late refill. Reuse the original source/reselection
+        // allowances; never consume the protected final-refill reserve.
+        const canFundScreeningHedge = missingSlots===0 && recoverySlots.length>0
+          && freshPoolCount>0 && !!shared && shared.reselection.remaining>0
+          && shared.reviews.remaining>=minimumReselectionReviewCalls(
+            initial.selected.length,true,recoverySlots.length,
+            recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode);
+        if ((missingSlots === 0 && !canFundScreeningHedge) || !enoughOriginalCandidates || !enoughSharedBudget) {
           const capacityMet=missingSlots===0;
           this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
             +(capacityMet?' 个已独立复核题材，已满足本次成卡容量；不为可选冗余继续换选。':' 个已独立复核题材；原池候选或共享预算不足，保留真实缺额。'));
