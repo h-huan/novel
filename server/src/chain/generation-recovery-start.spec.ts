@@ -47,7 +47,7 @@ describe('失败项目重写启动接口', () => {
       JSON.stringify({creativeConstitution:{confirmedStory:{title:'已确认题材'}}}),'active',new Date().toISOString());
     const c = Object.create(ChainController.prototype) as any;
     const recovery = {
-      acquire:vi.fn(),release:vi.fn(),captureSnapshot:vi.fn(async()=>({projectId:'p-active',status:'active'})),
+      acquire:vi.fn(),release:vi.fn(),isCreationBusy:vi.fn(() => false),captureSnapshot:vi.fn(async()=>({projectId:'p-active',status:'active'})),
       clearForExplicitSourceRebuild:vi.fn(async()=>{ throw Error('rebuild-rejected'); }),
       restoreSnapshot:vi.fn(async()=>{db.prepare("UPDATE projects SET status='active' WHERE id='p-active'").run();}),
     };
