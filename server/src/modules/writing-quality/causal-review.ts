@@ -15,14 +15,24 @@ const causalResultPath = /(?:^|\.)(?:exitState|scenes\.\d+\.outcome|characterAct
 function resultAssertionParts(text: string): string[] {
   const pairs: Record<string,string> = {'“':'”','‘':'’','「':'」','『':'』','（':'）','(':')','[':']'};
   const stack: string[] = [], parts: string[] = [];
-  let start=0;
+  let start=0, attachedCondition=false;
   for(let index=0;index<text.length;index++){
     const char=text[index];
     if(char===stack.at(-1)){stack.pop();continue;}
     if(char==='"'){stack.push('"');continue;}
     if(pairs[char]){stack.push(pairs[char]);continue;}
     if(!stack.length && (char==='，'||char===',' && !(/\d/.test(text[index-1]||'')&&/\d/.test(text[index+1]||'')))){
-      parts.push(text.slice(start,index+1));start=index+1;
+      const left=text.slice(start,index).trimStart();
+      const right=text.slice(index+1).trimStart();
+      // A conditional antecedent is not an independent achieved outcome.
+      // Join it to its consequence before subdividing any later results;
+      // the original complete source and all other outcome addresses remain.
+      const unambiguousCondition=/^(?:如果|假如|倘若|只要|一旦|除非|若(?!干)|当.{1,24}时|在.{1,24}(?:时|后))/.test(left);
+      const onlyCondition=/^只有/.test(left) && /^(?:才|方|就|便|则|可以|可|会|将|应|必须|不能|不得)/.test(right);
+      if(!attachedCondition && (unambiguousCondition||onlyCondition)){
+        attachedCondition=true;continue;
+      }
+      parts.push(text.slice(start,index+1));start=index+1;attachedCondition=false;
     }
   }
   if(start<text.length)parts.push(text.slice(start));
