@@ -10957,8 +10957,8 @@ ${enrichToneDirective}
   async resumeFailedGeneration(@Param('projectId') projectId: string, explicitSourceRebuild = false) {
     // The recovery lock protects only other recoveries. The original create
     // worker owns a separate task lock; never clear its live source context.
-    if (generationTasks.isRunning('creation', projectId))
-      throw new ConflictException('原项目创建任务仍在执行，请等待其结束后再恢复。');
+    if (this.generationRecovery.isCreationBusy(projectId))
+      throw new ConflictException('原项目生成调用仍在执行，请等待其结束后再恢复。');
     this.generationRecovery.acquire(projectId);
     const db = this.db.getDb();
     let recoverySnapshot: Awaited<ReturnType<GenerationRecoveryService['captureSnapshot']>> | null = null;
