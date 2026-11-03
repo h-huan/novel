@@ -579,7 +579,7 @@ export const SYSTEM_WORKFLOW_RULES: readonly SystemWorkflowRule[] = [
     id: 'WF-005', name: '部分成功保留与断点恢复', category: 'workflow', level: 'P0', status: 'active', blocking: true,
     scenarios: ['idea_generate', 'outline', 'writing'], consumers: ['persistence', 'test'], dependencies: ['AUTH-002', 'WF-004'],
     summary: '批量流程单项失败不得清空已通过项；恢复必须从同一持久化权威读取，不能从旧 Prompt/临时缓存重新解释故事。',
-    details: ['灵感发现必须恰好交付用户请求的合格题材数才能success=true。缺量时success=false/status=incomplete，保留qualifiedIdeas与完整审计作为诊断候选，ideas不作完成批次交付；前端完整批次数量合同仍拒收缺量与超额；qualifiedIdeas中已经逐卡通过的卡可以独立展示、恢复与选择，但必须显示实际通过数、请求数和未完成状态，不把部分可用误报为整批完成。完整卡与原请求必须持久化，恢复不得重复模型调用。不得用弱题材补数，未通过候选不得展示为合格卡。'],
+    details: ['灵感发现必须恰好交付用户请求的合格题材数才能success=true。缺量时success=false/status=incomplete，保留qualifiedIdeas与完整审计作为诊断候选，ideas不作完成批次交付；前端完整批次数量合同仍拒收缺量与超额；qualifiedIdeas中已经逐卡通过的卡可以独立展示、恢复与选择，但必须显示实际通过数、请求数和未完成状态，不把部分可用误报为整批完成。完整卡与原请求必须持久化，恢复不得重复模型调用。小说创建及恢复必须检查同项目仍在运行的创建任务和模型调用记录；在途调用尚未结束时不得清理、覆盖原始生成资料。已回滚恢复失败不得将原本已激活的项目误标为失败，失败原因使用原有持久化运行账本记录。不得用弱题材补数，未通过候选不得展示为合格卡。'],
     implementationRefs: ['server/src/chain/idea-discovery-contract.ts', 'server/src/chain/chain.controller.ts'],
   }),
   rule({
