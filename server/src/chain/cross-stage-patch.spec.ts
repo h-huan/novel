@@ -35,6 +35,37 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(crossStageRepairDiagnosticPositions(anchors,targets,findings)[0].anchorIds).toEqual([anchors.find(a=>a.path?.[0]==='hook')!.id]);
     expect(crossStageRepairFocusedAnchors(anchors,[{id:'c-B-unknown-0',chapterId:'c',content:'无法定位'}],['c-B-unknown-0'])).toEqual(anchors);
   });
+  it('keeps directly cited relationship and profile projections when a chapter source unit narrows other repair anchors',()=>{
+    const old='每日到值房照陈默口述抄写';
+    const bundle={
+      chapters:Array.from({length:4},(_,i)=>({id:'chapter-'+i,chapterIndex:i+1,
+        content:i===3?'裴砚隔一天来一回，抄了三个月。':'无关的章节内容。'})),
+      characters:Array.from({length:21},(_,i)=>({id:'character-'+i,name:'人物'+i,
+        relationships:JSON.stringify([{relation:old}]),
+        profile_json:JSON.stringify({relationships:[{relation:old}]}),
+        notes:'其它人物资料字段不该因源定位而扩大'})),
+    };
+    const finding='chapter-3-B-content-0 事实频次不一致：chapters.3.content（S837）隔一天来一回；'
+      +'characters.2.relationships.0.relation（S170）及characters.2.profile_json.relationships.0.relation（S188）每日到值房';
+    const request=crossStageRepairRequests(bundle,[finding])[0];
+    expect(request.targetIds).toEqual(['chapter-3','character-2']);
+    const anchors=crossStageRepairAnchors(request.context,request.targetIds);
+    const sourceTargets=[{id:'chapter-3-B-content-0',chapterId:'chapter-3',content:'裴砚隔一天来一回，抄了三个月。'}];
+    const focused=crossStageRepairFocusedAnchors(anchors,sourceTargets,request.findings,bundle);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='relationships'&&a.path?.join('.')==='0.relation')).toBe(true);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='profile_json'&&a.path?.join('.')==='relationships.0.relation')).toBe(true);
+    expect(focused.some(a=>a.entityId==='chapter-3'&&a.field==='content')).toBe(true);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='notes')).toBe(false);
+    expect(focused.some(a=>a.entityId==='character-20')).toBe(false);
+    const relational=focused.find(a=>a.entityId==='character-2'&&a.field==='relationships')!;
+    const profile=focused.find(a=>a.entityId==='character-2'&&a.field==='profile_json')!;
+    const edits=materializeCrossStageRepairEdits({edits:[
+      {anchorId:relational.id,replacement:'隔一天到值房照陈默口述抄写'},
+      {anchorId:profile.id,replacement:'隔一天到值房照陈默口述抄写'},
+    ]},anchors,request.context);
+    expect(edits.patches.map(p=>p.field).sort()).toEqual(['profile_json','relationships']);
+    expect(bundle.characters[2].profile_json).toContain(old);
+  });
   it('includes a named actors differently worded mechanism projection without routing unrelated characters or rule examples', () => {
     const bundle={world:[{id:'world',rules:'规则示例：推出唯一通道'}],chapters:[{id:'c',content:'陈甲比较记录后锁定唯一时间窗口。',scenes:JSON.stringify({characterActions:[{character:'陈甲',action:'比较记录',result:'锁定唯一时间窗口'}]})}],characters:[
       {id:'a',name:'陈甲',profile_json:JSON.stringify({skills:['凭职业经验反推出楼里唯一的无记录窗口']})},
