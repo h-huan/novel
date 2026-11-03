@@ -15,6 +15,13 @@ it('keeps final-card refill review credits without cloning or overspending the o
  expect(noReserve.remaining).toBe(3);
  noReserve.remaining-=2;expect(tight.remaining).toBe(1);
  expect(()=>{initial.remaining=-1;}).toThrow();
+ expect(()=>{initial.remaining=initial.remaining+1;}).toThrow('不能透支或重置');
+ expect(()=>{initial.remaining=Number.NaN;}).toThrow('不能透支或重置');
+ expect(()=>initial.refundReservedCalls(999)).toThrow('超过已使用额度');
+ expect(budget.remaining).toBe(6);
+ const empty={remaining:4},idle=reserveFinalRefillReviewCapacity(empty,2,1);
+ expect(()=>idle.refundReservedCalls(1)).toThrow('超过已使用额度');
+ expect(empty.remaining).toBe(4);
  expect(()=>reserveFinalRefillReviewCapacity({remaining:-1},1,2)).toThrow();
 });
 
