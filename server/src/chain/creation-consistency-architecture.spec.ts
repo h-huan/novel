@@ -90,6 +90,14 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
   });
 
+  it('enriches only chapters with missing derived depth to prevent repeated expensive batches', () => {
+    expect(controllerSource).toContain(
+      `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='') ORDER BY "order"`
+    );
+    expect(controllerSource).not.toContain(
+      `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`
+    );
+  });
   it('uses one mandatory final short-outline fact audit without legacy unreachable recheck', () => {
     const finalAudit = indexOrFail(controllerSource, 'await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,');
     const persistedOutline = controllerSource.indexOf("db.exec('BEGIN IMMEDIATE')", finalAudit);
