@@ -5,7 +5,7 @@ import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } fro
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
-import { missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
+import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -6125,6 +6125,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const initialStoppedSurplusReviewPremiseIds:string[]=[];
       const collected=new Set<string>(),reviewed=new Set<string>();
       const reviewing=new Set<Promise<void>>(),reviewWaiters=new Set<()=>void>();
+      // Armed once the source-selected pool exists; early reviews may finish first.
+      let scheduleProvenRefill=()=>{};
       let reviewFailure:unknown;
       let abortInitialReview=false;
       const notifyReview=()=>{for(const done of reviewWaiters)done();reviewWaiters.clear();};
@@ -6155,6 +6157,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         work:DiscoveryCardWork<Record<string,unknown>,Record<string,unknown>>,attempt:'initial'|'repair'='initial')=>{
         const task=work.runReview(budget=>accept(batch,attempt,budget,work.preparationBudget)).then(()=>{
           for(const card of batch)reviewed.add(String(card.sourcePremiseId));
+          if(attempt==='initial')scheduleProvenRefill();
         },error=>{
           if(work.stoppedForFulfillment&&accepted.length>=requestedCount)
             {if(attempt==='initial')initialStoppedSurplusReviewPremiseIds.push(...batch.map(card=>String(card.sourcePremiseId)));}
@@ -6518,6 +6521,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           &&affordableFullCardRefillCount(pendingCapacity,presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode)>=pendingCapacity
           &&affordableReviewedPremiseCount(pendingCapacity,sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,pendingCapacity)>=pendingCapacity;
       };
+      scheduleProvenRefill=()=>{
+        if(refillPreparation)return;
+        // Only completed final reviews and known generation failures retire
+        // an initial delivery slot. Never count pending source/card tasks as
+        // rejections; the initial identity check still owns final dispatch.
+        const settled=new Set([...reviewed,...structuringErrors.map(row=>row.sourcePremiseId)]
+          .filter(id=>selectedPremiseIdSet.has(id)));
+        const passed=accepted.filter(row=>selectedPremiseIdSet.has(String(row.sourcePremiseId))).length;
+        const proven=provenFullCardDeficit(requestedCount,selectedPremises.length,passed,settled.size);
+        if(proven&&canPrepareKnownShortfall(proven)){
+          this.logger.log('idea-discover: 已确定完整卡首轮缺额，提前准备现有唯一补位波次；仍等待首轮身份锁定');
+          refillPreparation=prepareRefill(proven,true);
+        }
+      };
+      // Reconcile reviews which already settled during the source-selection
+      // wave. This never creates a second refill or increases call credits.
+      scheduleProvenRefill();
       const completeInitialCards=async()=>{
         try{
           if(reviewFailure!==undefined)throw reviewFailure;
@@ -6560,7 +6580,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       };
       try{
         const initialCompletion=completeInitialCards();
-        if(canPrepareKnownShortfall(preselectionShortfall)){
+        if(!refillPreparation&&canPrepareKnownShortfall(preselectionShortfall)){
           this.logger.log('idea-discover: 已知前置缺额 '+preselectionShortfall+'，同一补位波次提前选优与来源准备；完整卡等待首轮身份核对');
           refillPreparation=prepareRefill(preselectionShortfall,true);
         }
