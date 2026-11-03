@@ -106,7 +106,7 @@ describe('ChainEngineService', () => {
     const chain=registry.getDetail('long-novel-init-foundation');
     const skeleton={coreSetting:{title:'现有世界'},opening:'已有起因'};
     generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
-      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({world:'继承已有世界规则'})});
+      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城'}],factions:[{name:'维护班组'}]}})});
     const render=(service as any).promptRegistry.render as ReturnType<typeof vi.fn>;
     const result=await service.execute(chain,{story_setting:'锁定题材',targetWords:20000,genre:'现实'});
     expect(result.status).toBe('completed');
