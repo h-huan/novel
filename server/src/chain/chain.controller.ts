@@ -5052,11 +5052,6 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           ? `${field} 必须原样为 ${JSON.stringify(field === 'pov' ? chosen[0] : chosen)}`
           : `${field} 未预选；每个题材从字典 ${JSON.stringify(options)} 中选择${field === 'pov' ? '恰好1项字符串' : '1项或必要的多项数组'}，为当前已选题材选择最契合的组合，不得为了追求差异改写题材`;
       }).join('；');
-      const submissionRule = dto.submissionTags.length
-        ? `submissionTags 必须原样为 ${JSON.stringify(dto.submissionTags)}`
-        : submissionRequired
-          ? `每个题材的 submissionTags 从本分类公开作品标签样本 ${JSON.stringify(submissionOptions)} 中选择1-2项；样本不是平台后台完整清单`
-          : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
       // Project the EXISTING execution requirements before generating candidates.
       // Empty discovery choices are not project defaults and remain unspecified.
       const chosenDimensions=new Set([
@@ -5106,6 +5101,14 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           + JSON.stringify(scopePremiseSelectionCategoryStandards(categoryStandards,applicableCategories))
           + '\n每项的核心冲突、双方关系、主动行动、升级、兑现和代价必须由所选分类的核心机制驱动。感情分类尤其不能只用职业翻案或查案作为主线、最后安排一次恋爱点缀；重要关系的双向选择、推进与结果必须承担实质剧情。分类不能靠结尾点题或改标签补救。'
           + '\n各题材须按已注入GEN-002保留全部必要条件：结果范围、证据取得与证明范围、权限和实际决定、人物动机、数量及时间状态都须能由已写事实推出。普通直接因果不强加手续；原池不足时重新构思，不能由选优改标签或完整卡凭空补造。';
+        const submissionChoices = [...new Map(applicableCategories.map(item => {
+          const category=String(item.storyCategory);
+          return [category,{storyCategoryId:item.storyCategoryId,category,...submissionForCategory(category)}] as const;
+        })).values()];
+        const submissionRule = dto.submissionTags.length
+          ? `submissionTags 必须原样为 ${JSON.stringify(dto.submissionTags)}`
+          : '【各分类投稿标签：与接收校验同源】'+JSON.stringify(submissionChoices)
+            +'；按本候选锁定的storyCategoryId选择本行options中的1-2项；required=false时返回[]。不得借用其它分类标签；样本不是平台后台完整清单。';
         const premiseSchema = {
           pool: [{
             premiseId: 'P1',
@@ -5117,7 +5120,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         };
         const automaticChoiceFields=Object.entries(autoOptions).filter(([field])=>field==='pov'?!dto.pov:!(dto[field as 'storyTone'|'writingStyle'|'webNovelGenre'|'plotTags']||[]).length);
         for(const [field] of automaticChoiceFields)Object.assign(premiseSchema.pool[0],{[field]:field==='pov'?'从本次字典选择恰好一项':['从本次字典选择最少必要项']});
-        if(!dto.submissionTags.length&&submissionRequired)Object.assign(premiseSchema.pool[0],{submissionTags:['从本分类已核验投稿标签候选选择']});
+        if(!dto.submissionTags.length&&submissionChoices.some(item=>item.required))Object.assign(premiseSchema.pool[0],{submissionTags:['从本分类已核验投稿标签候选选择']});
         const promptPhase = phase;
         const batchIndex = options.batchIndex ?? 0;
         const batchCount = options.batchCount ?? 1;

@@ -2594,3 +2594,31 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
   expect(result.error).toContain('independent-review-sentinel');
  }finally{cap.mockRestore();}
 });
+
+it('provides category-specific submission samples for every locked discovery pool slot',async()=>{
+ const {resolveSubmissionCategory,platformCategoryWritingProfile,platformSubmissionDimensions}=await import('../../shared/src');
+ const categories=['男频·西方奇幻','女频·现言脑洞'];
+ const prompts:string[]=[];
+ const c=Object.create(ChainController.prototype) as any;
+ c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};
+ c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
+ c.realLLM={assertScenarioModelConfigured:vi.fn(),generate:vi.fn(async(request:any)=>{prompts.push(request.prompt);return {content:'{"pool":[]}'};})};
+ await c.runIdeaDiscovery({storyType:'long_novel',platform:'fanqie',storyCategory:categories[0],discoveryCategoryOptions:categories,
+  storyTone:['紧张'],writingStyle:['写实'],webNovelGenre:['穿越脑洞'],plotTags:['成长'],submissionTags:[],pov:'第一人称',customPlatformNote:'',genreFitNote:''},1);
+ expect(prompts.length).toBeGreaterThanOrEqual(2);
+ for(const prompt of prompts){
+  const marker='【各分类投稿标签：与接收校验同源】';
+  const tail=prompt.slice(prompt.indexOf(marker)+marker.length);
+  expect(prompt).toContain(marker);
+  const catalog=JSON.parse(tail.slice(0,tail.indexOf('；按本候选')));
+  expect(catalog.map((row:any)=>row.category).sort()).toEqual([...categories].sort());
+  for(const row of catalog){
+   const placement=resolveSubmissionCategory('fanqie',row.category,'long_novel');
+   expect(placement.status).toBe('resolved');if(placement.status!=='resolved')throw Error('fixture category not resolved');
+   const expected=platformCategoryWritingProfile('fanqie',placement.value.channel,placement.value.platformGroup,'long_novel')?.topTags.map(tag=>tag.name)||[];
+   expect(row.options).toEqual(expected);
+   expect(row.required).toBe(platformSubmissionDimensions('fanqie','long_novel',row.category).includes('genre'));
+  }
+  expect(catalog[0].options).not.toEqual(catalog[1].options);
+ }
+});
