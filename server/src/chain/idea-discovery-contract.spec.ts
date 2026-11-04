@@ -1,5 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
-import { premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, freezePremiseCreationChoices } from './idea-discovery-contract';
+import { premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -897,5 +897,32 @@ describe('bounded pool JSON partial transport recovery never invents weak candid
  it('handles escaped quotes, nested objects and arrays inside independently closed original entries',()=>{
   const row={...card('B1-P1'),extra:{quote:'她说"不行"，接着行动',facts:['拥有凭证','看见拒绝']}};
   expect(recoverClosedPremisePoolObjects('{"pool":['+JSON.stringify(row)+',{"premiseId":"B1-P2"')).toEqual([row]);
+ });
+});
+
+describe('shared premise transport and preallocated slot validation',()=>{
+ it('decodes a valid fenced batch and preserves the existing prerequisite block',()=>{
+  const row={premiseId:'B1-P1',workingTitle:'独立行动骨架'};
+  const fence=String.fromCharCode(96).repeat(3);
+  const encoded=fence+'json\n'+JSON.stringify({pool:[row]})+'\n'+fence;
+  expect(decodePremisePoolTransport(encoded,'原池').value.pool).toEqual([row]);
+  expect(decodePremisePoolTransport(JSON.stringify({blocked:true,reason:'分类缺失'}),'原池').value.blocked).toBe(true);
+ });
+ it('retains completed sibling entries when a new refill entry corrupts the JSON',()=>{
+  const row={premiseId:'B1-P1',workingTitle:'已完成'};
+  const corrupt='{"pool":['+JSON.stringify(row)+',{"premiseId":'+String.fromCharCode(0);
+  const output=decodePremisePoolTransport(corrupt,'补位');
+  expect(output.value.pool).toEqual([row]);
+  expect(output.partiallyRecovered).toBe(true);
+ });
+ it('rejects missing, fabricated, reused and wrong-category seed IDs in either path',()=>{
+  const slots=[{premiseId:'B1-P1',storyCategoryId:'K1'},{premiseId:'B1-P2',storyCategoryId:'K2'}];
+  const claimed=new Set<string>();
+  expect(claimLockedPremiseSlot({premiseId:'P1',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K2'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P3',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K1'},slots,claimed)).toBe(true);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P2',storyCategoryId:'K2'},slots,claimed)).toBe(true);
  });
 });
