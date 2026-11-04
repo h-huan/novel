@@ -199,7 +199,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5225,12 +5225,17 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
         const poolBatchSizes = Array.from({ length: poolBatchCount }, (_, index) => baseBatchSize + (index < extraBatchCount ? 1 : 0));
-        const parseResponse = (content: unknown, label: string): any => {
+        const parseResponse = (content: unknown, label: string): {value:any;partiallyRecovered:boolean} => {
           const normalized = String(content || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '');
           try {
-            return JSON.parse(jsonrepair(normalized || '{}'));
+            return {value:JSON.parse(jsonrepair(normalized || '{}')),partiallyRecovered:false};
           } catch {
-            throw new Error(label + '未返回合法JSON；没有创建完整题材卡。');
+            // No new model call: recover only fully CLOSED JSON objects already
+            // present in the original array, never fabricate a cut-off entry.
+            // Original quality, naming, category and causal checks still run.
+            const complete=recoverClosedPremisePoolObjects(normalized);
+            if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
+            throw new Error(label + '未返回合法JSON，且没有可独立解析的完整候选条目。');
           }
         };
         const prerequisiteError = (parsed: any) => {
@@ -5257,15 +5262,16 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               responseFormat: 'json_object',
               metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
             });
-            parsed = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
+            const decoded = parseResponse(response.content, '候选池第' + (batchIndex + 1) + '批');
+            parsed=decoded.value;
             if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
               rawReturned = 0;
-              return { batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed };
+              return { batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: decoded.partiallyRecovered, durationMs: Date.now() - batchStartedAt, blocked: parsed };
             }
             if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
             rawReturned = parsed.pool.length;
             return { batchIndex, requested: batchSize, candidates: parsed.pool, rawReturned,
-              screened: screenPremisePoolBatch(parsed.pool), parseFailed: false, durationMs: Date.now() - batchStartedAt };
+              screened: screenPremisePoolBatch(parsed.pool), parseFailed: decoded.partiallyRecovered, durationMs: Date.now() - batchStartedAt };
           } catch (error) {
             return {
               batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: rawReturned === null,
@@ -5427,12 +5433,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               responseFormat: 'json_object',
               metrics: { stepKey: 'idea_premise_pool_generation', attempt: batchIndex },
             });
-            const parsed = parseResponse(response.content, '候选池补足批次');
+            const decoded = parseResponse(response.content, '候选池补足批次');
+            const parsed=decoded.value;
             if (parsed && (parsed.blocked === true || parsed.status === 'blocked')) {
               rawReturned = 0;
               supplementResult = {
                 batchIndex, requested: poolSupplementRequested, candidates: [], rawReturned,
-                parseFailed: false, durationMs: Date.now() - batchStartedAt, blocked: parsed,
+                parseFailed: decoded.partiallyRecovered, durationMs: Date.now() - batchStartedAt, blocked: parsed,
               };
             } else {
               if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池补足批次未返回pool数组。');
@@ -5440,7 +5447,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               supplementResult = {
                 batchIndex, requested: poolSupplementRequested, candidates: parsed.pool, rawReturned,
                 screened: screenPremisePoolBatch(parsed.pool),
-                parseFailed: false, durationMs: Date.now() - batchStartedAt,
+                parseFailed: decoded.partiallyRecovered, durationMs: Date.now() - batchStartedAt,
               };
             }
           } catch (error) {
