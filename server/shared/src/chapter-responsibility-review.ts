@@ -167,6 +167,7 @@ export interface ChapterResponsibilityAuditPromptInput {
   includeSharedPolicies?: boolean;
   plan: unknown;
   entryExitContract?: boolean;
+  evidenceMode?: 'quotes'|'anchors';
 }
 
 /** 边界审查提示词：判据、判定纪律与「通过与冲突两种形状」的输出契约必须完整注入。 */
@@ -176,12 +177,12 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
     `【待审查章节分工】${JSON.stringify(input.plan)}`,
-    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章核对：关键结果依赖什么，具体怎样取得，该章是否仍有效，前章退出状态有没有撤销它。名称重复或写在prerequisites里不等于已经取得；受规则约束的进出、位置变化和终局反制也不能只列目标而省略成立路径。普通自主行动及自身直接结果不强加额外程序。除原consistent/contradictions外，返回conditionChecks，每章恰好一项：{"chapter":1,"taskEvidence":"本章responsibility逐字原文","exitStateEvidence":"本章exitState逐字原文；reason必须核对实际行动能否经已有条件产生这一完整结果，不仅核对任务可启动","status":"supported|gap|not_required","bridgeSource":"body","bridgeEvidence":"本章或前章计划中实际取得路径的逐字依据，不引用exitState结果断言或未来章行动；普通自主动作可用not_required，gap可空","reason":"具体条件如何取得、跨章是否失效；not_required说明为何是普通自主行动"}。gap必须对应同章contradictions，supported必须给实际桥接证据；不能只返回consistent:true跳过核对。' : '',
+    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章判断整个exitState是否真能由实际行动、已取得且仍有效的条件产生。prerequisites只是待满足的条件名称，不能充当取得证明；普通自主行动无外部许可依赖时用not_required并说明。涉及他人决定、权限、移交和责任归属必须有原计划的实际桥接；缺少则报告gap及有依据的具体冲突，不得靠结果自证。consistent=true也必须逐章输出conditionChecks。字段JSON形状以本次末尾唯一的协议示例为准，不混用逐字引用与编号引用。' : '',
     "逐章按下列判据检查：",
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
     "若某任务冲突，必须返回可直接替换章节责任的 fix，而不是只批评。",
-    chapterResponsibilityAuditOutputContract(input.entryExitContract===true),
+    chapterResponsibilityAuditOutputContract(input.entryExitContract===true,input.evidenceMode||'quotes'),
   ].join("\n");
 }
 
