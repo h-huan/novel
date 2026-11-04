@@ -93,6 +93,7 @@ function makePremiseReviewFixture(prompt: string) {
         reason: '行动、必要条件与兑现结果在本题材因果计划中逐项对应。',
         links: causalCatalog.filter(link => String(link.ref).startsWith(prefix)).map(link => ({
           ref: link.ref, status: 'supported',
+          decisionCheck: {status: 'not_required', reason: '本验收样本只描述已建立的直接行动和叙事承诺，没有新的机构决定'},
           reason: '本环节的行动与必要条件均已在同一题材字段中建立并支撑结果。',
         })),
       };
