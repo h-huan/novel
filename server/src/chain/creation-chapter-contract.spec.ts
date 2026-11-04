@@ -88,6 +88,13 @@ describe('same chapter audit envelope for both creator paths',()=>{
   expect(finalContract).toContain('conditionChecks必须每章一项');
   expect(finalContract).toContain('gap必须对应contradictions');
  });
+ it('keeps ID based framework checks on one server-owned evidence transport',()=>{
+  const prompt=buildChapterResponsibilityAuditPrompt({...input,entryExitContract:true,evidenceMode:'anchors'});
+  expect(prompt).toContain('"taskAnchorId":"chapter:c1:task"');
+  expect(prompt).toContain('"bridgeAnchorIds":["chapter:c1:task"]');
+  expect(prompt).not.toContain('"bridgeSource":"body"');
+  expect(prompt).toContain('conditionChecks必须每章一项');
+ });
  it('keeps generic review callers on the existing ordinary verdict without extra condition fields',()=>{
   const ordinary=chapterResponsibilityAuditOutputContract(false);
   expect(ordinary).toContain('{"consistent":true,"contradictions":[]}');
