@@ -2,7 +2,7 @@ import {describe,expect,it,vi} from 'vitest';
 import {creationChapterContracts,creationResponsibilityPlan} from './creation-chapter-contract';
 import {buildNarrativeBeatPlan} from './adaptive-narrative';
 import {ChainController} from './chain.controller';
-import {findChapterOutline} from './chapter-outline-coordinate';
+import {findChapterOutline,creationTimelineFallbackChapters} from './chapter-outline-coordinate';
 const plan=()=>({chapterResponsibilities:[{chapter:1,title:'进入',function:'opening',responsibility:'住户取出旧钥匙并开门，让主角进入',prerequisites:['住户持有仍有效的旧钥匙并在场'],timeline:'当夜，钥匙尚未被收回',exitState:'主角进入屋内，尚未找到文件'},{chapter:2,title:'取得',function:'climax',responsibility:'主角在屋内找到并取得文件',prerequisites:['已进入屋内且屋内文件尚在'],timeline:'进入以后、清场以前',exitState:'主角持有文件'}]});
 describe('source contract regression',()=>{
 it('complete chapter contracts survive normalization, beat projection, saved JSON and prose context',()=>{
@@ -45,6 +45,11 @@ it('never assigns a neighbouring outline when a persisted chapter binding has br
    all:()=>[],
  })};
  expect(findChapterOutline(manualDraftWithoutOutline as any,'project',1)).toBeUndefined();
+ const deletedOutline={prepare:(sql:string)=>({
+   get:()=>sql.includes('JOIN outlines')?undefined:{id:'chapter-2',outline_id:'deleted'},
+   all:()=>[],
+ })};
+ expect(()=>findChapterOutline(deletedOutline as any,'project',2)).toThrow('章纲绑定失效');
  const beforeAnyChapter={prepare:(sql:string)=>({
    get:()=>undefined,
    all:()=>[{id:'first-outline'},{id:'second-outline'}],
@@ -56,5 +61,15 @@ it('never assigns a neighbouring outline when a persisted chapter binding has br
  })};
  expect(findChapterOutline(correctlyLinked as any,'project',2)).toEqual({id:'linked-outline'});
 });
+
+ it('keeps global timeline chapter indices when a new volume restarts local order',()=>{
+  const rows=[{title:'卷一首章',content:'开端',order:0},{title:'卷一次章',content:'推进',order:1},{title:'卷二首章',content:'承接',order:0}];
+  const db={prepare:(sql:string)=>({all:(id:string)=>{expect(id).toBe('project');expect(sql).toContain('COALESCE(p."order",0)');return rows;}})};
+  expect(creationTimelineFallbackChapters(db as any,'project')).toEqual([
+   {title:'卷一首章',content:'开端',description:'开端',chapterReference:1},
+   {title:'卷一次章',content:'推进',description:'推进',chapterReference:2},
+   {title:'卷二首章',content:'承接',description:'承接',chapterReference:3},
+  ]);
+ });
 
 });

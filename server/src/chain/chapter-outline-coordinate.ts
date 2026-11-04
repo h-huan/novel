@@ -20,6 +20,16 @@ export function readOrderedChapterOutlines(db: ChapterDb, projectId: string): an
     ORDER BY COALESCE(p."order",0), o."order", o.id`).all(projectId);
 }
 
+/** Single global chapter numbering for persisted creation timeline fallback. */
+export function creationTimelineFallbackChapters(db: ChapterDb, projectId: string): Array<{
+  title: string; content: string; description: string; chapterReference: number;
+}> {
+  return readOrderedChapterOutlines(db, projectId).map((row, index) => ({
+    title: String(row.title || ''), content: String(row.content || ''),
+    description: String(row.content || ''), chapterReference: index + 1,
+  }));
+}
+
 /** A persisted chapter binding is authoritative. No zero/one-origin guessing. */
 export function findChapterOutline(db: ChapterDb, projectId: string, chapterIndex: number, chapterId?: string): any {
   if (!Number.isSafeInteger(chapterIndex) || chapterIndex < 1) return undefined;
@@ -35,9 +45,9 @@ export function findChapterOutline(db: ChapterDb, projectId: string, chapterInde
   const existingChapter = db.prepare('SELECT id,outline_id FROM chapters WHERE project_id=? AND chapter_index=? LIMIT 1')
     .get(projectId, chapterIndex);
   const orderedOutlines = readOrderedChapterOutlines(db, projectId);
-  // Manual draft/context inspection may legitimately precede any outline.
-  // Do not turn "no outline exists" into a 500 for that read-only workflow.
-  if (orderedOutlines.length === 0) return undefined;
+  // Deleted outlines must not turn an existing non-null binding into an outline-free draft.
+  if (existingChapter?.outline_id) throw new Error('第' + chapterIndex + '章的已有正文记录与章纲绑定失效，禁止按章节排序借用另一章章纲');
+  if (orderedOutlines.length === 0) return undefined; // legitimate unbound manual draft
   if (existingChapter) throw new Error('第' + chapterIndex + '章的已有正文记录与章纲绑定失效，禁止按章节排序借用另一章章纲');
   return orderedOutlines[chapterIndex - 1];
 }

@@ -84,6 +84,13 @@ describe('frozen chapter identity wins over provider envelope order',()=>{
   expect(unwrapExpectedChapterEnvelope({...chapter(),chapterNumber:2},3,'盘下食堂')).toBeNull();
   expect(unwrapExpectedChapterEnvelope({chapter:[{...chapter(),chapterNumber:2}]},3,'盘下食堂')).toBeNull();
  });
+ it('rejects the wrong frozen chapter title even without an explicit number',()=>{
+  const wrong={...chapter(),title:'前一章',content:'前一章事件'};
+  expect(unwrapExpectedChapterEnvelope(wrong,3,'盘下食堂')).toBeNull();
+  expect(unwrapExpectedChapterEnvelope({chapters:[wrong]},3,'盘下食堂')).toBeNull();
+  expect(unwrapExpectedChapterEnvelope({...wrong,chapterNumber:3},3,'盘下食堂')).toBeNull();
+  expect(unwrapExpectedChapterEnvelope({chapters:[wrong,chapter()]},3,'盘下食堂')).toEqual(chapter());
+ });
  it('does not pay for another generated chapter when repeated envelopes contain identical data',()=>{
   const item={...chapter(),chapterNumber:3};
   expect(unwrapExpectedChapterEnvelope({chapter:[item,structuredClone(item)]},3,item.title)).toEqual(item);

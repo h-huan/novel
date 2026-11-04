@@ -151,7 +151,7 @@ import {
 } from './outline-consistency';
 import { maskForeshadowAnswers } from './foreshadow-mask';
 import { canonicalBriefForAudit, storyHierarchyForAudit, applyCrossStageFieldPatch, describeCrossStagePatchValidation, describeWorldPlanReviewValidation, isWorldPlanPatchTarget, CROSS_STAGE_PATCH_TABLE_MAP, isImmutableWorldPatchTarget, selectMinimumImpactCrossStagePatches, crossStageRepairRequests, crossStageRepairAnchors, materializeCrossStageRepairEdits, crossStageRepairAnchorView, crossStageRepairDependencyView } from './cross-stage-patch';
-import { findChapterOutline, readOrderedChapterOutlines, chapterOutlineStorySource, storySourceFields, projectOutlineDepthFields } from './chapter-outline-coordinate';
+import { findChapterOutline, readOrderedChapterOutlines, creationTimelineFallbackChapters, chapterOutlineStorySource, storySourceFields, projectOutlineDepthFields } from './chapter-outline-coordinate';
 import { hasCurrentProfile } from '../modules/character/character-profile';
 import { chapterLengthReviewBatches, chapterLengthReviewEvidenceErrors, chapterLengthEvidenceAnchors, materializeChapterLengthEvidenceCorrection, chapterLengthConflictProofErrors, mergeChapterLengthEvidenceCorrection, chapterLengthReviewFindings, applyChapterLengthReviewRepairs, chapterLengthReviewInput, validateChapterLengthReview, applyChapterLengthInsertions, chapterLengthInsertionChoices, chapterLengthDigitalTimeValues, CHAPTER_LENGTH_INSERTION_LIMIT, CHAPTER_LENGTH_INSERTION_STATE_CONTRACT } from './chapter-length-expansion';
 import { chapterNumberFromOrder } from '../../shared/src';
@@ -9737,13 +9737,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       // ====== 步骤6：创建默认时间线 ======
       if (!hasTimeline || !hasTimelineEvents) {
         try {
-          const chapterRows = db.prepare(`SELECT "order", title, content FROM outlines WHERE project_id = ? AND level = 'chapter' ORDER BY "order" ASC`).all(projectId) as any[];
-          const eventCount = insertTimelineWithEvents([], chapterRows.map(row => ({
-            title: row.title,
-            content: row.content,
-            description: row.content,
-            chapterReference: Number(row.order) + 1,
-          })));
+          const eventCount = insertTimelineWithEvents([], creationTimelineFallbackChapters(db, projectId));
           emit('timeline', 98, `时间线事件已创建 ${eventCount} 条`, eventCount > 0 ? 'done' : 'failed');
           this.logger.log(`create-project-async: 时间线事件已创建 project=${projectId}, events=${eventCount}`);
         } catch (e: any) {

@@ -30,16 +30,18 @@ export function unwrapExpectedChapterEnvelope(value:unknown,chapterNumber:number
   const num=Number(raw);return Number.isSafeInteger(num)?num:NaN;
  };
  const root=record(value)?value:null;
+ const titleMatches=(item:Record<string,any>)=>!expectedTitle.trim()
+   ||(typeof item.title==='string'&&item.title.trim()===expectedTitle.trim());
  const shape=(item:Record<string,any>)=>['content','coreContent','summary','plot','scenes','characterActions']
     .some(key=>Object.prototype.hasOwnProperty.call(item,key));
  if(root&&shape(root)){
   const id=explicitNumber(root);
-  return id!==null&&id!==chapterNumber?null:root;
+  return (id!==null&&id!==chapterNumber)||!titleMatches(root)?null:root;
  }
  const payload=root?.chapter??root?.chapters??value;
  const raw=Array.isArray(payload)?payload:[payload];
  const candidates=raw.filter(record).map(item=>unwrapSingleChapterEnvelope(item)).filter(record);
- const valid=candidates.filter(item=>{const id=explicitNumber(item);return id===null||id===chapterNumber;});
+ const valid=candidates.filter(item=>{const id=explicitNumber(item);return (id===null||id===chapterNumber)&&titleMatches(item);});
  if(valid.length===1)return valid[0];
  if(valid.length<2)return null;
  const numbered=valid.filter(item=>explicitNumber(item)===chapterNumber);
