@@ -9,9 +9,14 @@ export function materializeChapterConditionSources(value:any,plan:readonly any[]
   if(!row||typeof row!=='object'||!Number.isInteger(row.chapter)||row.chapter<1||row.chapter>plan.length)return row;
   const source=plan[row.chapter-1];
   return {...row,
-   ...(row.taskEvidence===undefined && row.taskAnchorId===`chapter:c${row.chapter}:task`
+   // A chapter number uniquely binds the immutable task and exit fields:
+   // their text is a source projection, NOT a separate model judgment.
+   // A wrong supplied quote or an invalid supplied anchor remains an error.
+   ...(row.taskEvidence===undefined
+      &&(row.taskAnchorId===undefined||row.taskAnchorId===`chapter:c${row.chapter}:task`)
      ?{taskEvidence:source.responsibility}:{}),
-   ...(row.exitStateEvidence===undefined&&row.exitStateAnchorId===`chapter:c${row.chapter}:exit`
+   ...(row.exitStateEvidence===undefined
+      &&(row.exitStateAnchorId===undefined||row.exitStateAnchorId===`chapter:c${row.chapter}:exit`)
      ?{exitStateEvidence:source.exitState}:{})};
  })};
 }
