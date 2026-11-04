@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -255,4 +255,37 @@ it('only sends failed causal rows to the existing repair call and keeps all pres
   {repairs:[{index:40,...row}]});
  expect(patched.transitions).toHaveLength(41);
  expect(patched.transitions.slice(0,40)).toEqual(original.transitions.slice(0,40));
+});
+
+it('recovers only unique literal result address within its own chapter, retaining an exact action quotation',()=>{
+ const chapter={chapterNumber:2,content:'职员当面接收该份材料。',scenes:[{outcome:'职员确认收到该份材料。'}]};
+ const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+ const inventory=causalChapterResultReviewGroups(anchors,0).review;
+ expect(inventory).toHaveLength(1);
+ const raw={status:'evaluated',reason:'已核对当面交接与实际收件两个动作',transitions:[{
+  chapterNumber:2,actionEvidence:chapter.content,resultEvidence:chapter.scenes[0].outcome,
+  bridgeAnchorId:anchors.find(row=>row.path==='0.content')!.id,
+  status:'supported',reason:'当面递交与确认收件属于同一个可验证的完成过程',
+ }]};
+ const result=bindUniqueCausalResultAnchors(raw,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors);
+ expect(result.transitions[0].resultAnchorId).toBe(inventory[0].id);
+ const materialized=materializeCausalAuditAnchors(result,body,{});
+ expect(materialized.transitions[0].actionEvidence).toBe(chapter.content);
+ expect(validateCausalAudit(materialized,body,{})).toMatchObject({verified:true,issues:[]});
+ const invented={...raw,transitions:[{...raw.transitions[0],resultAnchorId:'body:v999'}]};
+ expect(bindUniqueCausalResultAnchors(invented,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors)
+  .transitions[0].resultAnchorId).toBe('body:v999');
+ expect(validateCausalAudit(materializeCausalAuditAnchors(invented,body,{}),body,{}).verified).toBe(false);
+ const wrongChapter={...raw,transitions:[{...raw.transitions[0],chapterNumber:3}]};
+ expect(bindUniqueCausalResultAnchors(wrongChapter,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors)
+  .transitions[0].resultAnchorId).toBeUndefined();
+});
+it('distinguishes missing action quote, result quote and bridge while keeping existing targeted-repair indices',()=>{
+ const text='她提交资料。对方收到资料。';
+ const row={actionEvidence:'没有发生过的行动',resultEvidence:'对方收到资料。',bridgeEvidence:'',status:'supported',reason:'声称资料已经接收，但未给出可信步骤'};
+ const checked=validateCausalAudit({status:'evaluated',reason:'审查缺口',transitions:[row]},text,{});
+ expect(checked.verified).toBe(false);
+ expect(checked.errors.join('；')).toContain('actionEvidence不是正文连续原文');
+ expect(checked.errors.join('；')).toContain('supported缺少有效成立条件原文');
+ expect(causalAuditRepairTargets({transitions:[row]},checked.errors)).toEqual([0]);
 });
