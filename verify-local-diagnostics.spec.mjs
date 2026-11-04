@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, discoveryWallClockCheck, discoveryWallBudgetMs, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryWallClockCheck, discoveryWallBudgetMs, discoveryAuditIsHistorical, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 test('discovery performance acceptance uses the canonical eight-minute request deadline regardless of 5/5 quality success',()=>{
  assert.equal(discoveryWallBudgetMs(), 8*60*1000);
@@ -36,6 +36,15 @@ test('full production acceptance refuses missing, incomplete and contradictory a
  assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:10:00.001Z'}).includes('latest_idea_discovery_over_wall_budget'));
  const dynamic={...good,requested:2,returned:2,qualified:2,totalIdeas:2,shortfall:0};
  assert.deepEqual(discoveryProductionAcceptanceIssues(dynamic),[]);
+});
+
+test('old backend revisions always mark saved discovery as historical, including later successful audits',()=>{
+ const audit={finishedAt:'2026-11-04T06:18:15.045Z'};
+ const old={backendIdentity:{loadedLocalRevision:'mismatch',processStartedAt:'2026-11-04T04:25:52.708Z'}};
+ assert.equal(discoveryAuditIsHistorical(old,audit),true);
+ assert.equal(discoveryAuditIsHistorical({backendIdentity:{loadedLocalRevision:'match',processStartedAt:'2026-11-04T04:25:52.708Z'}},audit),false);
+ assert.equal(discoveryAuditIsHistorical({backendIdentity:{loadedLocalRevision:'match',processStartedAt:'2026-11-04T07:00:00.000Z'}},audit),true);
+ assert.equal(discoveryAuditIsHistorical({preflight:{evidenceScope:'historical_only'}},audit),true);
 });
 
 test('normalizes the nested saved idea-discovery audit and partial-card counts', () => {

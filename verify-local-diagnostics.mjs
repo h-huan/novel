@@ -99,6 +99,15 @@ export function discoveryProductionAcceptanceIssues(audit) {
  return issues;
 }
 
+/** A successful old-backend request is historical evidence when the verified
+ * server revision differs, even if its wall time is later than process start. */
+export function discoveryAuditIsHistorical(runtime,audit) {
+ return runtime?.preflight?.evidenceScope==='historical_only'
+   || runtime?.backendIdentity?.loadedLocalRevision==='mismatch'
+   || Boolean(runtime?.backendIdentity?.processStartedAt&&audit?.finishedAt
+     && Date.parse(String(audit.finishedAt))<Date.parse(String(runtime.backendIdentity.processStartedAt)));
+}
+
 export function normalizeIdeaDiscoveryAudit(value) {
   const root = isRecord(value?.data) ? value.data : (isRecord(value) ? value : {});
   const envelope = isRecord(root.audit) ? root.audit : root;

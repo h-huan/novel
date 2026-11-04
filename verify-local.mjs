@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { normalizeIdeaDiscoveryAudit, redactDiagnosticText, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryAuditIsHistorical, redactDiagnosticText, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const reportPath = path.join(root, 'verification', 'latest.json');
@@ -48,9 +48,7 @@ function triageThreeIssues(report) {
   const audit = normalizeIdeaDiscoveryAudit(runtime.ideaDiscovery || {});
   const trace = runtime.discoveryCallTrace || {};
   const activity = summarizeIdeaActivityEvidence(runtime.ideaActivity);
-  const latestAuditIsHistorical = report?.runtime?.currentRevisionEvidence?.ideaDiscovery==='historical_only'
-    || Boolean(runtime.backendIdentity?.processStartedAt&&audit.finishedAt&&
-      Date.parse(audit.finishedAt)<Date.parse(runtime.backendIdentity.processStartedAt));
+  const latestAuditIsHistorical = discoveryAuditIsHistorical(runtime,audit);
   const metricsAvailable = trace.source?.ok === true;
   const phases = Array.isArray(trace.phaseBreakdown) ? trace.phaseBreakdown : [];
   const projectMap = runtime.projects && typeof runtime.projects === 'object' ? runtime.projects : {};
