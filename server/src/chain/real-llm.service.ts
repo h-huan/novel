@@ -325,7 +325,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           creativeBrief: brief, shortStoryCard: run.constitution!.confirmedStory, worldContinuityDirective: '\n【冻结世界与已确认来源】' + sources,
           plan, includeSharedPolicies: false, entryExitContract: true, evidenceMode: 'anchors' })
           + '\n【逐字证据地址】' + JSON.stringify(anchors)
-          + '\n不要手抄或拼接引文。conditionChecks使用taskAnchorId（必须chapter:c本章号:task）与bridgeAnchorIds数组替代taskEvidence/bridgeEvidence/bridgeSource；supported须至少一项body地址写出当前规划中实际取得、恢复或自主执行该条件的动作，另可引用世界规则证明机制允许。世界允许某种授权不等于人物已经取得；prerequisites仅重复资源名称不能证明取得，过去取得也不能证明已过期或被撤销后仍有效。找不到当前有效取得动作时保留gap，不能以世界描述代替。contradictions同样使用taskAnchorId及ruleAnchorIds（project_context中的规则原文地址）替代task/ruleEvidence，其它字段保留。系统按编号提取原文，未知编号仍判未完成。'
+          + '\n不要手抄或拼接引文。conditionChecks使用taskAnchorId（必须chapter:c本章号:task）与bridgeAnchorIds数组替代taskEvidence/bridgeEvidence/bridgeSource；本次只核对尚未展开正文的框架规划，不要求未来正文已经发生；supported须至少一项body地址指向本章明确安排可执行的条件取得动作，或前章已规划执行且在本章仍有效的动作。另可引用世界规则证明机制允许，但世界允许某种授权不等于人物按规划能取得；prerequisites仅重复资源名称不证明取得，已规划取得后过期或被撤销也不能继续使用。找不到当前有效取得动作时保留gap，不能以世界描述代替。contradictions同样使用taskAnchorId及ruleAnchorIds（project_context中的规则原文地址）替代task/ruleEvidence，其它字段保留。系统按编号提取原文，未知编号仍判未完成。'
           + (protocolAttempt ? '\n【一次引用协议纠错】原评审：' + failedResponse + '\n校验错误：' + protocolError
             + '\n只补齐缺项或纠正逐字证据地址。原有consistent、问题成员、章号、判据、冲突、保留目标、fix和已给出的条件状态及理由必须保留，不重新评判、不增删问题。supported仅引用世界规则仍不完整，必须另外选择当前计划内实际取得条件的body地址；无真实地址则不能宣称纠错通过。返回完整原评审JSON。' : ''), responseFormat: 'json_object', temperature: 0,
         maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS, metrics: { ...request.metrics, stepKey: 'framework_responsibility_preflight' } });
