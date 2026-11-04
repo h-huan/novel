@@ -5,7 +5,11 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   const targets=causalAuditRepairTargets(audit,errors);
   return {
     systemPrompt: (targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。选择原文段落编号，系统提取原文，禁止重写引文。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
-    prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(audit)}\n校验错误：${errors.join('；')}\n可选原文段落：${JSON.stringify(causalEvidenceAnchorOptions(content,sources))}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。返回JSON:{"repairs":[{"index":"点名编号", "actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字实际依据"}]}。` : '只输出JSON:{"causalAudit":{"status":"evaluated|not_applicable","reason":"至少8字说明","transitions":[{"actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件所在编号；gap可为空","status":"supported|gap|planned","reason":"至少8字说明"}]}}。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+    prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(targets.length&&Array.isArray((audit as any)?.transitions)
+      ?{status:(audit as any).status,reason:(audit as any).reason,
+        retainedValidatedRows:(audit as any).transitions.length-targets.length,
+        fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
+      :audit)}\n校验错误：${errors.join('；')}\n可选原文段落：${JSON.stringify(causalEvidenceAnchorOptions(content,sources))}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。返回JSON:{"repairs":[{"index":"点名编号", "actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字实际依据"}]}。` : '只输出JSON:{"causalAudit":{"status":"evaluated|not_applicable","reason":"至少8字说明","transitions":[{"actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件所在编号；gap可为空","status":"supported|gap|planned","reason":"至少8字说明"}]}}。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
@@ -114,6 +118,54 @@ export function causalChapterResultAnchors(anchors: ReturnType<typeof causalEvid
   const parents = anchors.filter(anchor => anchor.source === 'body' && /:v\d+$/.test(anchor.id)
     && anchor.path?.startsWith(prefix) && resultPath.test(anchor.path.slice(prefix.length)));
   return parents.flatMap(parent => completeResultAnchors(anchors,parent));
+}
+
+/** Review identical result assertions once inside the SAME chapter, then
+ * project the evidenced verdict to every exact source field. Unlike fuzzy
+ * story similarity this cannot merge different wording, time, numbers or
+ * negation. Preserve duplicate assertions within a single field: repeated
+ * events in that field can have different timelines. Other factual
+ * consistency checks still inspect every original field independently. */
+export function causalChapterResultReviewGroups(
+ anchors:ReturnType<typeof causalEvidenceAnchors>,chapterIndex:number,
+):{review:ReturnType<typeof causalChapterResultAnchors>;aliasesByReview:Record<string,string[]>}{
+ const all=causalChapterResultAnchors(anchors,chapterIndex);
+ const review:typeof all=[],aliasesByReview:Record<string,string[]>={};
+ const representativeByText=new Map<string,typeof all[number]>();
+ for(const row of all){
+  const prior=representativeByText.get(row.text);
+  if(prior && prior.path!==row.path){
+   (aliasesByReview[prior.id]??=[]).push(row.id);
+  }else{
+   review.push(row);
+   if(!prior)representativeByText.set(row.text,row);
+  }
+ }
+ return {review,aliasesByReview};
+}
+
+/** Project a complete independent judgment to only identical literal claims.
+ * The server re-validates every expanded quote; a missing reviewed identity,
+ * missing source address or differing content is an error, never a pass. */
+export function expandCausalReviewedResultAliases(value:any,aliasesByReview:Record<string,string[]>,
+ content:string,sources:Record<string,string>){
+ if(!value||!Array.isArray(value.transitions))return value;
+ const anchors=new Map(causalEvidenceAnchors(content,sources).map(anchor=>[anchor.id,anchor]));
+ const seen=new Set(value.transitions.map((row:any)=>String(row.resultAnchorId||'')));
+ const extra:any[]=[];
+ for(const row of value.transitions){
+  const representative=anchors.get(String(row.resultAnchorId||''));
+  const aliases=aliasesByReview[String(row.resultAnchorId||'')]||[];
+  for(const id of aliases){
+   const target=anchors.get(id);
+   if(!representative||!target||representative.source!=='body'||target.source!=='body'
+     ||representative.text!==target.text)throw new Error('因果审核的同文结果别名地址不一致');
+   if(seen.has(id))throw new Error('因果审核的同文结果被重复核对或引用');
+   seen.add(id);
+   extra.push({...row,resultAnchorId:id,resultEvidence:target.text});
+  }
+ }
+ return {...value,transitions:[...value.transitions,...extra]};
 }
 
 /** IDs resolve to exact source paragraphs; no fuzzy quote correction or invented bridge. */
