@@ -312,3 +312,29 @@ it('stress: 60 chapter result projections require 20 distinct semantic checks, b
  expect(checked.issues).toHaveLength(60);
  expect(checked.issues.every(row=>row.issueType==='causality_gap')).toBe(true);
 });
+
+it('retains independently reviewed identical outcome aliases instead of aborting the entire outline',()=>{
+ const chapter={chapterNumber:1,scenes:[{outcome:'承办人记录了当面提交的申请。'}],
+  characterActions:[{result:'承办人记录了当面提交的申请。'}]};
+ const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+ const grouped=causalChapterResultReviewGroups(anchors,0);
+ expect(grouped.review).toHaveLength(1);
+ const lead=grouped.review[0],alias=grouped.aliasesByReview[lead.id][0];
+ const audit=materializeCausalAuditAnchors({status:'evaluated',reason:'分别核对相同结果字段的实际行动及必要条件',
+  transitions:[
+   {chapterNumber:1,actionAnchorId:lead.id,resultAnchorId:lead.id,bridgeAnchorId:'',
+    status:'gap',reason:'尚未证明承办人实际收到申请原件'},
+   {chapterNumber:1,actionAnchorId:alias,resultAnchorId:alias,bridgeAnchorId:'',
+    status:'gap',reason:'独立复核的同一提交结果仍缺实际签收条件'}
+  ]},body,{});
+ const expanded=expandCausalReviewedResultAliases(audit,grouped.aliasesByReview,body,{});
+ expect(expanded.transitions).toHaveLength(2);
+ expect(expanded.transitions[1].reason).toContain('独立复核');
+ const checked=validateCausalAudit(expanded,body,{});
+ expect(checked.verified).toBe(true);
+ expect(checked.issues).toHaveLength(2); // genuine defects still block saving
+ expect(checked.issues.every((row:any)=>row.issueType==='causality_gap')).toBe(true);
+ const duplicate={...audit,transitions:[...audit.transitions,audit.transitions[1]]};
+ expect(()=>expandCausalReviewedResultAliases(duplicate,grouped.aliasesByReview,body,{}))
+  .toThrow('同一结果地址存在多条互斥审查');
+});
