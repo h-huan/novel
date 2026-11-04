@@ -30,8 +30,27 @@ export const CHAPTER_RESPONSIBILITY_JUDGMENT_RULES: string = CHAPTER_RESPONSIBIL
 export const CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE = responsibilityRule.contracts!.scopeDiscipline;
 
 /** 审查器的输出契约：必须同时给出通过与冲突两种形状，否则模型会被"只演示失败形状"的示例带偏。 */
-export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT =
-  '只输出JSON对象：全部可在已确认规则内执行时返回 {"consistent":true,"contradictions":[]}；确有冲突时返回 {"consistent":false,"contradictions":[{"chapter":1,"criterion":"CR-1","task":"存在冲突的任务原文","conflict":"违反了哪条判据与哪条已确认规则，以及为何无法执行","ruleEvidence":"被违反的判据编号与【已确认世界规则/执行标准】原文逐字引用","retain":"必须保留的故事目标","fix":"不新增任何能力、且可直接执行的替代任务"}]}。criterion 必须是上列判据编号之一，ruleEvidence 必须是逐字引用；给不出逐字证据的疑虑不得写成冲突。';
+/** The short/long creation entry/exit review uses the same verdict as other
+ * chapter checks, but MUST include conditionChecks even when consistent=true.
+ * This is a transport contract, not a weaker semantic quality gate. */
+export function chapterResponsibilityAuditOutputContract(entryExitContract=false):string{
+ const condition=(status:'supported'|'gap')=>entryExitContract?{conditionChecks:[{
+   chapter:1,taskEvidence:'本章responsibility逐字原文',exitStateEvidence:'本章exitState逐字原文',
+   status,bridgeSource:'body',
+   bridgeEvidence:status==='gap'?'':'本章或前章真实发生的行动与条件来源逐字原文',
+   reason:'核对实际条件如何取得、是否仍有效以及整个出口结果是否成立',
+ }]}:{};
+ const conflict={chapter:1,criterion:'CR-1',task:'存在冲突的任务原文',
+   conflict:'违反了哪条判据与哪条已确认规则，以及为何无法执行',
+   ruleEvidence:'被违反的判据编号与【已确认世界规则/执行标准】原文逐字引用',
+   retain:'必须保留的故事目标',fix:'不新增任何能力、且可直接执行的替代任务'};
+ return '只输出JSON对象：全部可在已确认规则内执行时返回 '
+   +JSON.stringify({consistent:true,contradictions:[],...condition('supported')})
+   +'；确有冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
+   +'。criterion必须是上列判据编号之一，ruleEvidence必须是逐字引用；给不出逐字证据的疑虑不得写成冲突。'
+   +(entryExitContract?' conditionChecks必须每章一项，不限于示例第一章；真实情况选择supported、gap、not_required。gap必须对应contradictions，supported必须有已发生的非结果自证行动原文。':'');
+}
+export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT=chapterResponsibilityAuditOutputContract();
 
 /** 修复器的修订边界：与判据同源，避免修复提示里再抄一份走样表述。 */
 export const CHAPTER_RESPONSIBILITY_REPAIR_BOUNDARIES = responsibilityRule.contracts!.repairBoundary;
@@ -134,7 +153,7 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
     "若某任务冲突，必须返回可直接替换章节责任的 fix，而不是只批评。",
-    CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT,
+    chapterResponsibilityAuditOutputContract(input.entryExitContract===true),
   ].join("\n");
 }
 
