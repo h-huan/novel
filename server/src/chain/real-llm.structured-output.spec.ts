@@ -366,6 +366,32 @@ describe('upstream responsibility preflight', () => {
   });
 });
 
+describe('full field coverage from unique literal chapter outcome reviews',()=>{
+ it('checks one independent occurrence and verifies every exact result-field alias without another model call',async()=>{
+  const chapter={chapterNumber:3,chapterFunction:'climax',
+   content:'她把登记单交给银行职员，银行职员当面签收。',
+   scenes:[{outcome:'银行收到签名的登记单。'}],
+   characterActions:[{action:'她把登记单交给银行职员，银行职员当面签收。',result:'银行收到签名的登记单。'}]};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const action=anchors.find(row=>row.path==='0.content'&&row.text===chapter.content)!;
+  const sceneResult=causalChapterResultAnchors(anchors,0).find(row=>row.path==='0.scenes.0.outcome')!;
+  const actionResult=causalChapterResultAnchors(anchors,0).find(row=>row.path==='0.characterActions.0.result')!;
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+   status:'evaluated',reason:'职员在现场完成了交接登记并签收原件',
+   transitions:[{chapterNumber:3,actionAnchorId:action.id,resultAnchorId:sceneResult.id,
+    bridgeAnchorId:action.id,status:'supported',reason:'当面递交且由银行职员签收直接完成了收件结果'}]}})});
+  (service as any).generateInternal=generate;
+  const review=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+    JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(review).toMatchObject({verified:true,issues:[]});
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(review.audit.transitions.map((row:any)=>row.resultAnchorId).sort()).toEqual([sceneResult.id,actionResult.id].sort());
+  expect(generate.mock.calls[0][0].prompt).toContain(sceneResult.id);
+  expect(generate.mock.calls[0][0].prompt).not.toContain('\\\"resultAnchorIds\\\":[\\\"'+sceneResult.id+'\\\",\\\"'+actionResult.id+'\\\"]');
+ });
+});
+
 describe('decisive planning action proof', () => {
   it('在交给小说修复前补齐场景漏查项，保留首轮已举证缺口，不另开模型循环', async () => {
     const chapter = {chapterNumber:4,chapterFunction:'climax',content:'他把编号写在本子上。',scenes:[{outcome:'老人手里有了记录。'},{outcome:'证人没有离开。'}],characterActions:[{action:'他把编号写在本子上。',result:'记录登记完成。'}]};
