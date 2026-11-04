@@ -323,7 +323,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const response = await this.generateInternal({ ...request, scenario: 'review',
         prompt: buildChapterResponsibilityAuditPrompt({ executionStandard,
           creativeBrief: brief, shortStoryCard: run.constitution!.confirmedStory, worldContinuityDirective: '\n【冻结世界与已确认来源】' + sources,
-          plan, includeSharedPolicies: false, entryExitContract: true })
+          plan, includeSharedPolicies: false, entryExitContract: true, evidenceMode: 'anchors' })
           + '\n【逐字证据地址】' + JSON.stringify(anchors)
           + '\n不要手抄或拼接引文。conditionChecks使用taskAnchorId（必须chapter:c本章号:task）与bridgeAnchorIds数组替代taskEvidence/bridgeEvidence/bridgeSource；supported须至少一项body地址写出当前规划中实际取得、恢复或自主执行该条件的动作，另可引用世界规则证明机制允许。世界允许某种授权不等于人物已经取得；prerequisites仅重复资源名称不能证明取得，过去取得也不能证明已过期或被撤销后仍有效。找不到当前有效取得动作时保留gap，不能以世界描述代替。contradictions同样使用taskAnchorId及ruleAnchorIds（project_context中的规则原文地址）替代task/ruleEvidence，其它字段保留。系统按编号提取原文，未知编号仍判未完成。'
           + (protocolAttempt ? '\n【一次引用协议纠错】原评审：' + failedResponse + '\n校验错误：' + protocolError
