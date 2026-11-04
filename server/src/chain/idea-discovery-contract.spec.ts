@@ -734,6 +734,9 @@ describe('candidate seed structural evidence prevents downstream rescue',()=>{
   const end='【反转兑现】主管的决定被原始材料推翻，职员却因此失去了原有工作。【分类流派机制】被低估的普通人依靠多年积累的职业技能揭破欺骗并承担代价。';
   expect(premiseSeedFactIssues(front+'【必要条件】有证据。'+end)).toContain('【必要条件】缺少足以进入选优的实际事件或因果条件');
   expect(premiseSeedFactIssues(front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end)).toEqual([]);
+  const valid=front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end;
+  expect(premiseSeedFactIssues(valid.replace('【必要条件】','【必要条件】已完成材料查验但尚未取得认可。'+'【必要条件】'))).not.toEqual([]);
+  expect(premiseSeedFactIssues('前缀无来源内容'+valid)).not.toEqual([]);
  });
 });
 

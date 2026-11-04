@@ -1,6 +1,6 @@
 import { projectedPremisePromptView, compactRepeatedPremiseText } from './premise-source-bindings';
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
-import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE} from './premise-source-bindings';
+import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE,premiseSourceSections} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
@@ -120,17 +120,16 @@ export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
 export const PREMISE_SEED_FACT_LABELS = PREMISE_SOURCE_SECTIONS;
 export function premiseSeedFactIssues(storyCore: unknown): string[] {
   const raw = typeof storyCore === 'string' ? storyCore.trim() : '';
-  const labels = PREMISE_SEED_FACT_LABELS.map(label => '【' + label + '】');
-  const positions = labels.map(label => raw.indexOf(label));
-  if (positions.some(position => position < 0)
-    || positions.some((position,index) => index>0 && position<=positions[index-1]))
-    return ['候选骨架缺少有序的处境触发、主动选择、必要条件、反转兑现、分类流派机制'];
+  // Use the SAME lossless five-section parser as indexedPremiseSourcePool.
+  // Counting first occurrences alone accepted repeated/misordered headers;
+  // the later sourceRef codec rejected them only after a paid selection call.
+  let sections: ReturnType<typeof premiseSourceSections>;
+  try { sections = premiseSourceSections({storyCore:raw}); }
+  catch { return ['候选骨架缺少有序且唯一的处境触发、主动选择、必要条件、反转兑现、分类流派机制']; }
   const issues: string[] = [];
-  for (let i=0;i<labels.length;i++) {
-    const section = raw.slice(positions[i]+labels[i].length,
-      i+1<labels.length?positions[i+1]:undefined).trim();
-    if (section.replace(/[，。；：、！!？?\s]/g,'').length < 12)
-      issues.push(labels[i]+'缺少足以进入选优的实际事件或因果条件');
+  for (const section of sections) {
+    if (section.text.replace(/[，。；：、！!？?\s]/g,'').length < 12)
+      issues.push('【'+section.name+'】缺少足以进入选优的实际事件或因果条件');
   }
   return issues;
 }

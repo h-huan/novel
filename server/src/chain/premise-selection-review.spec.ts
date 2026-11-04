@@ -368,6 +368,46 @@ describe('premise selection before identity lock', () => {
  expect(finalReview.genreChecks?.map(row=>row.evidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
 });
 
+it('retains independently verifiable positions from one aggregate reselection when other causal citations are malformed', async () => {
+  const plan=(id:string)=>[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+    conditions:[{field:'escalation',quote:premise(id).escalation}],
+    result:{field:'payoff',quote:premise(id).payoff}}];
+  const original=normalizePremiseSelectionPayload({
+    pool:['A','B','C','D','E','F','G','H','I'].map(premise),
+    selectedPremises:['A','B','C','D','E'].map(id=>({...premise(id),causalPlan:plan(id)})),
+  },5,9);
+  const rejected:PremiseSelectionReview={passed:false,issues:['B','C','D','E'].map(premiseId=>
+    ({...failure.issues[0],premiseId}))};
+  const c=Object.create(ChainController.prototype) as any;
+  c.logger={warn:vi.fn(),log:vi.fn()};
+  c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce({passed:true,issues:[]})
+    .mockResolvedValueOnce(rejected)
+    .mockImplementation(async(current:any)=>{
+      expect(current.selected.map((item:any)=>item.premiseId)).toEqual(['A','F','G']);
+      return {passed:true,issues:[]};
+    });
+  c.llmCallWithRetry=vi.fn(async(_label:string,_prompt:string,options:any)=>{
+    const replacements=['F','G','H','I'].map((newId,index)=>({
+      replacesPremiseId:['B','C','D','E'][index],
+      premise:{...premise(newId),causalPlan:index<2?plan(newId):[{
+        action:{field:'activeChoice',quote:'原故事没有的虚构动作'},
+        conditions:[],result:{field:'payoff',quote:premise(newId).payoff},
+      }]},
+    }));
+    expect(options.validate({replacements})).toBe(false);
+    return {data:null,validationIssues:['部分causalPlan引用不存在，已经使用原预算内的纠错']};
+  });
+  const result=await c.reconcilePremiseSelection(original,5,9,['悬疑'],'');
+  expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','F','G']);
+  expect(result.selectionAudit).toMatchObject({
+    partial:true,unresolvedPremiseIds:['D','E'],reselectionAttempted:true,
+  });
+  expect(result.selectionAudit.finalReview.passed).toBe(true);
+  expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+  expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+  expect(c.logger.warn.mock.calls.join(' ')).toContain('保留 2/4 个结构验证合格的位置');
+});
+
 it('does not enter another provider attempt after the last physical call returns invalid comparison JSON', async () => {
     const c=Object.create(ChainController.prototype) as any;
     c.logger={warn:vi.fn(),error:vi.fn()};

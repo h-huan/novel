@@ -7262,7 +7262,44 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // its author/platform requirement merely because it was not selected.
       const scopedReselectionStandard=scopePremiseReviewCategoryStandards(
         standard,[...selected.selected,...selectablePool]);
+      let bestValidatedSlots: Map<string,Record<string,unknown>>|undefined;
+      const recordValidatedSlots=(value:unknown)=>{
+        const rows=(value as any)?.replacements;
+        if(!Array.isArray(rows)||rows.length!==scopedSlots.length)return;
+        const required=new Set(scopedSlots.map(slot=>String(slot.replacesPremiseId)));
+        const slotIds=rows.map((row:any)=>String(row?.replacesPremiseId||''));
+        if(slotIds.some(id=>!required.has(id))||new Set(slotIds).size!==required.size)return;
+        const identities=rows.map((row:any)=>String(row?.premise?.premiseId||''));
+        const duplicates=new Set(identities.filter((id,index)=>id && identities.indexOf(id)!==index));
+        const valid=new Map<string,Record<string,unknown>>();
+        for(const slot of scopedSlots){
+          const id=String(slot.replacesPremiseId);
+          const source=selected.selected.find(row=>String(row.premiseId)===id);
+          const response=rows.find((row:any)=>String(row?.replacesPremiseId)===id);
+          const candidateId=String(response?.premise?.premiseId||'');
+          if(!source||!candidateId||!availableIds.includes(candidateId)||duplicates.has(candidateId)
+            ||slot.mode==='replace_from_pool'&&candidateId===id)continue;
+          try {
+            // The existing strict normalizer owns source identity, frozen
+            // category/choices and literal citation binding. A one-item view
+            // does not make the semantic story good or alter independent Gate.
+            const scoped={...selected,selected:[source]};
+            const reviewed={passed:false,issues:slot.issues} as PremiseSelectionReview;
+            const normalized=normalizeTargetedPremiseReselection(
+              {replacements:[response]},scoped,reviewed,1,poolTarget,categories,1);
+            assertPremiseCausalPlans(normalized);
+            if(String(normalized.selected[0]?.premiseId)!==candidateId)continue;
+            valid.set(id,normalized.selected[0]);
+          } catch { /* Invalid citation/identity stays isolated; never guessed. */ }
+        }
+        // A global failure with every individually valid slot may be a REAL
+        // cross-card contract violation, not a salvageable malformed citation.
+        if(valid.size>0&&valid.size<scopedSlots.length
+          &&(!bestValidatedSlots||valid.size>bestValidatedSlots.size))
+          bestValidatedSlots=valid;
+      };
       const normalize=(value:unknown)=>{
+        recordValidatedSlots(value);
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,Math.min(requestedCount,selected.selected.length));
@@ -7294,6 +7331,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             describeValidation:value=>{try{normalize(value);return [];}catch(error){return [String((error as Error).message)];}},
             retryInstruction:'按点名的协议问题补正：causalPlan错误只补齐计划或纠正指向现有字段的原文锚点，不重写故事来迎合引用。不得重写已通过项、伪造原池身份或填造必要条件。'}));
         if(!result.data){
+          // One malformed replacement must not erase OTHER slots from the
+          // same paid aggregate response. The original helper has already
+          // spent its permitted correction; no new provider call is made.
+          // Validated positions still undergo changed-source/payoff/overlap
+          // review below, while unresolved positions are removed before it.
+          if(bestValidatedSlots?.size){
+            const validSlots=bestValidatedSlots;
+            selected={...selected,selected:selected.selected.map(item=>
+              validSlots.get(String(item.premiseId))||item)};
+            for(const id of validSlots.keys())completedSlots.add(id);
+            const failed=scopedSlots.map(slot=>String(slot.replacesPremiseId))
+              .filter(id=>!validSlots.has(id));
+            reselectionStopReason='汇总重选部分因果索引无效，已保留逐项严格通过的替换；剩余位置隔离：'+failed.join('、');
+            this.logger?.warn('锁定前汇总重选局部引用失败：保留 '+validSlots.size+'/'+scopedSlots.length
+              +' 个结构验证合格的位置，'+failed.join('、')
+              +' 不得进入独立审核或完整卡；有效项仍须经过独立来源、兑现、分类、流派及同构复核');
+            return false;
+          }
           const issues=(result.validationIssues?.length?result.validationIssues
             :result.warnings?.length?result.warnings:['未得到有效的原池重选JSON']).map(String).slice(0,8);
           // The helper already used its bounded structured correction. Without
