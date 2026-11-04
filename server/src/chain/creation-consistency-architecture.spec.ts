@@ -92,7 +92,7 @@ describe('creation consistency architecture invariants', () => {
 
   it('enriches only chapters with missing derived depth to prevent repeated expensive batches', () => {
     expect(controllerSource).toContain(
-      `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='') ORDER BY "order"`
+      `SELECT * FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='') ORDER BY "order"`
     );
     expect(controllerSource).not.toContain(
       `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`
