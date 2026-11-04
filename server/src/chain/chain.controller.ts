@@ -208,7 +208,7 @@ import { causalEvidenceAnchors, applyCausalAuditRepair, causalAuditRepairPrompt,
 import { chapterReviewRetryContent, chapterReviewRetrySource, chapterReviewRetryTimePlan } from './chapter-review-retry';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { prohibitedFictionNames, normalizeGeneratedFictionNames } from '../../shared/src/fiction-naming';
-import { chapterDetailStructureIssues, chapterDetailJsonExample, unwrapSingleChapterEnvelope } from './chapter-detail-contract';
+import { chapterDetailStructureIssues, chapterDetailJsonExample, unwrapExpectedChapterEnvelope } from './chapter-detail-contract';
 
 /** 当前生成链路所属项目（沿 await 链自动继承）；llmCallWithRetry 埋点缺省 projectId 时从此兜底 */
 const projectMetricsContext = new AsyncLocalStorage<string | null>();
@@ -8979,38 +8979,10 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         // 叙事节拍来自每章真实职责。章节位置只定义开篇/终章边界，不再按固定章数制造爽点弧。
         const chapterResponsibilityPlan = buildNarrativeBeatPlan(creationResponsibilityPlan(chapterTitles));
 
-        const unwrapChapter = (value: any, chapterLabel?: string, silent = false): Record<string, any> | null => {
-          const label = chapterLabel ? `第${chapterLabel}章 ` : '';
-          if (Array.isArray(value)) {
-            const objects = value.filter(item => item && typeof item === 'object');
-            if (objects.length >= 1) {
-              // 仅在"真实采纳"时告警（silent=false 由 llmCallWithRetry 的 validate 调用，避免每次重试重复刷屏）
-              if (objects.length > 1 && !silent) warnings.push(`${label}LLM 返回了 ${objects.length} 个 JSON 对象，已自动取第一个作为本章纲`);
-              return objects[0];
-            }
-            return null;
-          }
-          if (value?.chapter && typeof value.chapter === 'object') {
-            if (Array.isArray(value.chapter)) {
-              const objects = value.chapter.filter((item: any) => item && typeof item === 'object');
-              if (objects.length >= 1) {
-                if (objects.length > 1) warnings.push(`${label}LLM 在 chapter 字段内返回了 ${objects.length} 个对象，已自动取第一个`);
-                return objects[0];
-              }
-            } else {
-              return value.chapter;
-            }
-          }
-          if (Array.isArray(value?.chapters)) {
-            const objects = value.chapters.filter((item: any) => item && typeof item === 'object');
-            if (objects.length >= 1) {
-              if (objects.length > 1 && !silent) warnings.push(`${label}LLM 在 chapters 字段内返回了 ${objects.length} 个对象，已自动取第一个作为本章纲`);
-              return objects[0];
-            }
-          }
-          const normalized=unwrapSingleChapterEnvelope(value);
-          return normalized && typeof normalized==='object'&&!Array.isArray(normalized)
-            ?normalized as Record<string,any>:null;
+        const unwrapChapter = (value: unknown, chapterNumber: number, frozenTitle: string): Record<string, any> | null => {
+          const normalized = unwrapExpectedChapterEnvelope(value, chapterNumber, frozenTitle);
+          return normalized && typeof normalized === 'object' && !Array.isArray(normalized)
+            ? normalized as Record<string, any> : null;
         };
 
         for (const [chapterIndex, expectedChapter] of chapterTitles.entries()) {
@@ -9084,8 +9056,8 @@ ${(() => {
             {
               temperature: 0.8, timeout: LLM_TUNABLES.timeoutContent(), scenario: 'outline',
               projectId, chapterIndex: order + 1, stepKey: 'creation_chapter_detail',
-              validate: value => assessChapter(unwrapChapter(value, order + 1, true)).length === 0,
-              describeValidation: value => assessChapter(unwrapChapter(value, order + 1, true)),
+              validate: value => assessChapter(unwrapChapter(value, order + 1, expectedChapter.title)).length === 0,
+              describeValidation: value => assessChapter(unwrapChapter(value, order + 1, expectedChapter.title)),
               // The same model's existing second attempt must receive the
               // CURRENT chapter interval, a complete JSON shape and actionable
               // field errors. Echoing a malformed raw object verbatim (up to
@@ -9094,7 +9066,7 @@ ${(() => {
               // unchanged quality policies all remain in chapterPrompt.
               validationRetryPrompt: previousRaw => {
                 const parsed=this.safeExtractJson<any>(previousRaw,null);
-                const prior=unwrapChapter(parsed,order+1,true);
+                const prior=unwrapChapter(parsed,order+1,expectedChapter.title);
                 const issues=assessChapter(prior);
                 const hasUsefulDraft=prior && typeof prior.content==='string'
                   && prior.content.trim().length>0
@@ -9116,7 +9088,7 @@ ${(() => {
           );
           warnings.push(...chapterResult.warnings);
           if (chapterResult.runId) shortOutlineSourceRunIds.add(String(chapterResult.runId));
-          let chData = unwrapChapter(chapterResult.data, order + 1);
+          let chData = unwrapChapter(chapterResult.data, order + 1, expectedChapter.title);
           // WF-002: the shared caller already made the bounded schema correction.
           // Preserve its actual field errors; do not relabel rejection as malformed JSON
           // or stack another structural-repair/rebuild generation over the same failure.
