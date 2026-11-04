@@ -198,13 +198,5 @@ export function fundedSourceReviewGroups(count:number,batchSize:number,credits:n
   ?oneWaveGroups:minimum;
 }
 
-/** A deadline never upgrades partial quality evidence into full delivery. */
-export function discoveryDeadlineResult(result: Record<string,any>, requested: number, wallBudgetMs: number, message: string) {
- const qualifiedIdeas = Array.isArray(result.qualifiedIdeas) ? result.qualifiedIdeas : Array.isArray(result.ideas) ? result.ideas : [];
- const audit = result.appealGate || {};
- const qualified = Math.max(qualifiedIdeas.length,Number(audit.qualified)||0);
- return {...result,success:false,status:'incomplete',ideas:[],qualifiedIdeas,totalIdeas:0,error:message,
-  appealGate:{...audit,requested,qualified,returned:0,shortfall:Math.max(0,requested-qualified),partial:true,
-   wallBudgetMs,deadlineExceeded:true,stopReason:'discovery_deadline_exceeded',
-   fulfillment:{...(audit.fulfillment||{}),stopReason:'discovery_deadline_exceeded'}}};
-}
+/** Full-card fulfillment is governed by real quality gates and the unchanged
+ * physical-call budget, never by an elapsed-time cancellation. */

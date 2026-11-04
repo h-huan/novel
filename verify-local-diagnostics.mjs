@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
-/** The executable verification limit must follow the same source as discovery.
- * Reading a supported literal expression is deliberate: never eval policy text. */
+/** The performance acceptance target follows the canonical rule, but never
+ * terminates a production request. No eval and no independent runtime timer. */
 export function discoveryWallBudgetMs() {
   try {
     const source=fs.readFileSync(new URL('./server/shared/src/执行标准.ts',import.meta.url),'utf8');
@@ -62,8 +62,8 @@ export function normalizeProjectIntegrityAudit(value) {
   return isRecord(root.audit) ? { ...root, ...root.audit } : root;
 }
 
-/** Wall-clock verification uses the current discovery rule, never an
- * independent ten-minute allowance. Missing or unreadable policy fails closed. */
+/** Post-run performance verification only: never cancels a running request.
+ * Missing or unreadable acceptance policy fails closed. */
 export function discoveryWallClockCheck(audit) {
  const started=Date.parse(String(audit?.startedAt||''));
  const finished=Date.parse(String(audit?.finishedAt||''));

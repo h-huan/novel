@@ -29,4 +29,20 @@ describe('discovery cancellation propagates to the actual running model task',()
    assertGenerationActive();return 'clean next discovery';
   })).resolves.toBe('clean next discovery');
  });
+ it('does not cancel a discovery without an explicit deadline, even after the performance target has elapsed',async()=>{
+   const tasks=new GenerationTasks();
+   const result=await tasks.run('discovery','no-auto-deadline','',async()=>{
+     const signal=currentGenerationSignal();
+     expect(signal?.aborted).toBe(false);
+     const oldNow=Date.now;
+     try {
+       Date.now=()=>oldNow()+11*60*1000;
+       assertGenerationActive();
+       expect(signal?.aborted).toBe(false);
+       return 'still-running';
+     }finally{Date.now=oldNow;}
+   });
+   expect(result).toBe('still-running');
+ });
+
 });

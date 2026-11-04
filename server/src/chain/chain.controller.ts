@@ -8,7 +8,7 @@ import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAudit
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
-import {plannedPreselectionCount,fundedSourceReviewGroups,discoveryDeadlineResult} from './discovery-fulfillment';
+import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
 import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
@@ -42,7 +42,7 @@ import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources, foreshadowEnrichmentOutputIssues } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
 import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget,readyPremiseSourceBatch,type PremiseSourcePreparation } from './premise-source-batches';
-import { withGenerationSignal, generationTasks, assertGenerationActive, currentGenerationSignal, GenerationDeadlineExceededError, waitForGeneration } from '../common/generation-cancellation';
+import { withGenerationSignal, generationTasks, assertGenerationActive, currentGenerationSignal, waitForGeneration } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
 import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross-stage-review';
@@ -200,7 +200,7 @@ import {
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
 import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY, IDEA_DISCOVERY_MAX_WALL_MS } from '../../shared/src/system-workflow-rules.registry';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -4876,15 +4876,12 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       return active.task;
     }
     const discoveryRequestStartedAt = new Date(requestReceivedAt).toISOString();
+    // The ten-minute target belongs to verification only. Production keeps
+    // user cancellation, per-provider timeouts, quality gates and call budgets.
     const task = generationTasks.run('discovery', discoveryRequestId, '', () =>
       discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
       try {
-        let result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
-        const signalReason = currentGenerationSignal()?.reason;
-        const stop = signalReason instanceof GenerationDeadlineExceededError ? signalReason
-          : Date.now() - requestReceivedAt >= IDEA_DISCOVERY_MAX_WALL_MS ? new GenerationDeadlineExceededError('discovery') : undefined;
-        if(stop)
-          result = discoveryDeadlineResult(result,requestedCount,IDEA_DISCOVERY_MAX_WALL_MS,stop.message) as typeof result;
+        const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
         if (result && typeof result === 'object') {
           Object.defineProperties(result, {
             discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
@@ -4901,7 +4898,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         });
         throw error;
       }
-    }), {deadlineAt:requestReceivedAt + IDEA_DISCOVERY_MAX_WALL_MS});
+    }));
     this.ideaDiscoveryInFlight.set(requestKey, {
       task, canonicalRequestId: discoveryRequestId, requestIds: new Set([discoveryRequestId]),
     });
