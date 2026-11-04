@@ -3,7 +3,7 @@ import { assertGenerationActive, currentGenerationSignal, generationCancellation
 /** One shared queue around actual independent review calls, including fallback
  * partitions. Outer orchestration must not hold a slot while waiting on
  * children. Cancellation must also remove not-yet-started work immediately:
- * otherwise a 10-minute discovery deadline can keep waiting for queued reviews
+ * otherwise a request-level discovery deadline can keep waiting for queued reviews
  * which will never become admissible output. */
 export function createReviewLimiter(concurrency:number){
   if(!Number.isInteger(concurrency)||concurrency<1)throw Error('审核并发上限须为正整数');

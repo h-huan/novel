@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { normalizeIdeaDiscoveryAudit, discoveryTenMinuteCheck, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, summarizeRecentIdeaActivity, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryWallClockCheck, discoveryWallBudgetMs, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, summarizeRecentIdeaActivity, redactDiagnosticText, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -533,6 +533,7 @@ const runtime = redactDiagnosticValue({
   activeRequestCallTraces,
   standards: {
     codeSeedVersion,
+    discoveryMaxWallMs: discoveryWallBudgetMs(),
     activeCount: standards.length,
     consistent: standardsResponse.ok && standardMismatch.length === 0,
     mismatches: standardMismatch,
@@ -594,9 +595,9 @@ if (!health.ok) {
   if (latestAuditSummary.available && Number(latestAuditSummary.shortfall) > 0)
     runtimeProblems.push('latest_idea_discovery_shortfall_' + Number(latestAuditSummary.shortfall));
   if(latestAuditSummary.available){
-    const latency=discoveryTenMinuteCheck(latestAuditSummary);
+    const latency=discoveryWallClockCheck(latestAuditSummary);
     if(latency.measured&&!latency.passed)
-      runtimeProblems.push('latest_idea_discovery_over_10_minutes');
+      runtimeProblems.push('latest_idea_discovery_over_wall_budget');
     else if(runFull&&!latency.measured)
       runtimeProblems.push('latest_idea_discovery_latency_unverified');
   }

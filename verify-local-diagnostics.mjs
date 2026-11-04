@@ -1,3 +1,16 @@
+import fs from 'node:fs';
+
+/** The executable verification limit must follow the same source as discovery.
+ * Reading a supported literal expression is deliberate: never eval policy text. */
+export function discoveryWallBudgetMs() {
+  try {
+    const source=fs.readFileSync(new URL('./server/shared/src/执行标准.ts',import.meta.url),'utf8');
+    const match=source.match(/export\s+const\s+IDEA_DISCOVERY_MAX_WALL_MS\s*=\s*(\d+)\s*\*\s*60\s*\*\s*1000\s*;/);
+    const minutes=Number(match?.[1]);
+    return Number.isSafeInteger(minutes)&&minutes>0 ? minutes*60_000 : null;
+  }catch{return null;}
+}
+
 const isRecord = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 export function redactDiagnosticText(value) {
@@ -49,16 +62,17 @@ export function normalizeProjectIntegrityAudit(value) {
   return isRecord(root.audit) ? { ...root, ...root.audit } : root;
 }
 
-/** Check the REAL discovery request window, not the sum of parallel LLM
- * durations or a single phase. A 5/5 result taking 13 minutes is not a
- * successful under-10-minute acceptance. No production budget is changed. */
-export function discoveryTenMinuteCheck(audit) {
+/** Wall-clock verification uses the current discovery rule, never an
+ * independent ten-minute allowance. Missing or unreadable policy fails closed. */
+export function discoveryWallClockCheck(audit) {
  const started=Date.parse(String(audit?.startedAt||''));
  const finished=Date.parse(String(audit?.finishedAt||''));
- if(!audit?.available||!Number.isFinite(started)||!Number.isFinite(finished)||finished<started)
+ const limit=discoveryWallBudgetMs();
+ if(!audit?.available||!Number.isFinite(started)||!Number.isFinite(finished)||finished<started
+   ||limit===null)
    return {measured:false,wallMs:null,passed:false};
  const wallMs=finished-started;
- return {measured:true,wallMs,passed:wallMs<=600000};
+ return {measured:true,wallMs,passed:wallMs<=limit};
 }
 
 /** A full report can certify production only with a completed current-request
@@ -79,9 +93,9 @@ export function discoveryProductionAcceptanceIssues(audit) {
        &&(!validCount(audit.totalIdeas)||audit.totalIdeas!==audit.returned))) {
    issues.push('latest_idea_discovery_quantity_mismatch');
  }
- const time=discoveryTenMinuteCheck(audit);
+ const time=discoveryWallClockCheck(audit);
  if (!time.measured) issues.push('latest_idea_discovery_latency_unverified');
- else if (!time.passed) issues.push('latest_idea_discovery_over_10_minutes');
+ else if (!time.passed) issues.push('latest_idea_discovery_over_wall_budget');
  return issues;
 }
 
