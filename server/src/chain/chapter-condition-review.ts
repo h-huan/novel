@@ -13,7 +13,7 @@ export function chapterConditionReviewIssues(value:any,plan:any[],sources:string
    ||!['supported','gap','not_required'].includes(check.status)
    ||(check.status==='gap'&&!contradictions.some((finding:any)=>finding.chapter===check.chapter))
    ||(check.status==='supported'&&!(Array.isArray(check.bridgeAnchorIds)?typeof resolveAnchors==='function'&&resolveAnchors(check)
-    :check.bridgeSource==='body'&&resolveQualityEvidence(JSON.stringify({chapterResponsibilities:plan.slice(0,check.chapter).map(({exitState:_result,...actions}:any)=>actions)}),check.bridgeEvidence).verified));
+    :check.bridgeSource==='body'&&resolveQualityEvidence(JSON.stringify({chapterResponsibilities:plan.slice(0,check.chapter).map(({responsibility}:any)=>({responsibility}))}),check.bridgeEvidence).verified));
  })?['逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported需要当前计划的实际取得路径，不能只引用世界规则']:[];
 }
 
