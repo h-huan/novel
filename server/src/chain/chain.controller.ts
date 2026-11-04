@@ -5280,12 +5280,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const poolFilterTotals = {
           rawReturned: 0, rawReturnedUnknownBatches: 0, validBeforeDedup: 0, invalidShape: 0, invalidFields: 0,
           invalidCategory: 0, invalidNaming: 0, duplicateCount: 0, uniqueBeyondTarget: 0,
+        invalidFieldReasons: {} as Record<string,number>,
         };
         const categoryBindingCounts: Record<string, number> = {};
         const batchFilterStats = new Map<number, {
           rawReturned: number | null; validBeforeDedup: number; invalidShape: number; invalidFields: number;
           invalidCategory: number; invalidNaming: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
-          categoryBindingCounts: Record<string, number>;
+          categoryBindingCounts: Record<string, number>; invalidFieldReasons:Record<string,number>;
         }>();
         const processPoolBatch = (batch: typeof poolBatchResults[number]) => {
           const stats = {
@@ -5299,6 +5300,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             retained: 0,
             uniqueBeyondTarget: 0,
             categoryBindingCounts: {} as Record<string, number>,
+          invalidFieldReasons: {} as Record<string,number>,
           };
           batchFilterStats.set(batch.batchIndex, stats);
           if (batch.rawReturned === null) poolFilterTotals.rawReturnedUnknownBatches += 1;
@@ -5308,6 +5310,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           const screened=batch.screened??screenPremisePoolBatch(batch.candidates);
           stats.invalidShape=screened.invalidShape;
           stats.invalidFields=screened.invalidFields;
+          stats.invalidFieldReasons={...screened.invalidFieldReasons};
+          for(const [reason,count] of Object.entries(screened.invalidFieldReasons))
+            poolFilterTotals.invalidFieldReasons[reason]=(poolFilterTotals.invalidFieldReasons[reason]||0)+count;
           stats.invalidNaming=screened.invalidNaming;
           poolFilterTotals.invalidShape+=screened.invalidShape;
           poolFilterTotals.invalidFields+=screened.invalidFields;
@@ -5371,7 +5376,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               continue;
             }
             try{Object.assign(bound,freezePremiseCreationChoices(item,dto,autoOptions,submissionForCategory(String(bound.storyCategory||dto.storyCategory))));}
-            catch{stats.invalidFields++;poolFilterTotals.invalidFields++;stats.validBeforeDedup--;poolFilterTotals.validBeforeDedup--;continue;}
+            catch(error){stats.invalidFields++;poolFilterTotals.invalidFields++;stats.validBeforeDedup--;poolFilterTotals.validBeforeDedup--;
+              const reason=error instanceof Error?error.message.slice(0,80):'创作维度冻结失败';
+              stats.invalidFieldReasons[reason]=(stats.invalidFieldReasons[reason]||0)+1;
+              poolFilterTotals.invalidFieldReasons[reason]=(poolFilterTotals.invalidFieldReasons[reason]||0)+1;continue;}
             seenTitles.add(titleKey);
             seenCores.add(coreKey);
             if (candidatePool.length >= premisePoolSize) {
@@ -5463,6 +5471,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           invalid: {
             shape: poolFilterTotals.invalidShape,
             requiredFields: poolFilterTotals.invalidFields,
+            requiredFieldReasons:poolFilterTotals.invalidFieldReasons,
             categoryBinding: poolFilterTotals.invalidCategory,
             naming: poolFilterTotals.invalidNaming,
           },
