@@ -207,7 +207,7 @@ export function normalizePremisePayoffGapRoutes(value:any,selection:PremiseSelec
  let changed=false;
  const rows=value.payoffChecks.map((row:any)=>{
    if(!row||row.status!=='gap'||row.gapRepair!==undefined)return row;
-   const position=Number(/^S(\\d+)\\.payoff$/.exec(String(row.ref))?.[1])-1;
+   const position=Number(/^S(\d+)\.payoff$/.exec(String(row.ref))?.[1])-1;
    const candidate=selection.selected[position],seed=selection.pool.find(item=>item.premiseId===candidate?.premiseId);
    if(!candidate||!seed)return row;
    const quote=row.sourceConditionQuote;
