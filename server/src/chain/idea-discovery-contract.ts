@@ -141,10 +141,49 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
   return issues;
 }
 
+/** Only literal authored sections become one canonical storyCore. Missing,
+ * conflicting or malformed sections are rejected by the same structural Gate.
+ * The transient JSON envelope is never saved or used as parallel story facts. */
+export function materializePremiseSeedSections(raw:Record<string,unknown>):Record<string,unknown>|null{
+ if(raw.storySections===undefined)return raw;
+ const source=raw.storySections;
+ if(!source||typeof source!=='object'||Array.isArray(source))return null;
+ const sections=source as Record<string,unknown>;
+ if(Object.keys(sections).length!==PREMISE_SOURCE_SECTIONS.length
+  ||Object.keys(sections).some(name=>!PREMISE_SOURCE_SECTIONS.includes(name as typeof PREMISE_SOURCE_SECTIONS[number])))return null;
+ const parts=PREMISE_SOURCE_SECTIONS.map(name=>sections[name]);
+ if(parts.some(part=>typeof part!=='string'||!part.trim()
+  ||/【(?:处境触发|主动选择|必要条件|反转兑现|分类流派机制)】/.test(part)))return null;
+ const storyCore=PREMISE_SOURCE_SECTIONS.map((name,i)=>'【'+name+'】'+(parts[i] as string).trim()).join('\n');
+ if(raw.storyCore!==undefined&&raw.storyCore!==storyCore)return null;
+ const {storySections:_transient,...candidate}=raw;
+ return {...candidate,storyCore};
+}
+
 /** Deterministic screening runs as soon as each provider batch returns.
  * It is not a semantic review or generator self-score; all later Gates remain. */
 export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
  candidates: Record<string,unknown>[]; invalidShape:number; invalidFields:number; invalidNaming:number;
+ invalidFieldReasons: Record<string,number>;
+} {
+ const candidates:Record<string,unknown>[]=[],invalidFieldReasons:Record<string,number>={};
+ let invalidShape=0,invalidFields=0,invalidNaming=0;
+ const reject=(reason:string)=>{invalidFields++;invalidFieldReasons[reason]=(invalidFieldReasons[reason]||0)+1;};
+ for(const raw of rawCandidates){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)){invalidShape++;continue;}
+  const item=materializePremiseSeedSections(raw as Record<string,unknown>);
+  if(!item){reject('五节原文不完整或与另一版本冲突');continue;}
+  const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
+  const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
+  if(title.length<2||core.length<20||!normalize(title)||!normalize(core)){
+   reject('标题或故事正文过短或缺失');continue;
+  }
+  const issues=premiseSeedFactIssues(core);
+  if(issues.length){reject(issues[0]);continue;}
+  if(prohibitedFictionNames({workingTitle:title,storyCore:core}).length){invalidNaming++;continue;}
+  candidates.push(item);
+ }
+ return {candidates,invalidShape,invalidFields,invalidNaming,invalidFieldReasons};
 } {
  const candidates:Record<string,unknown>[]=[];
  let invalidShape=0,invalidFields=0,invalidNaming=0;
