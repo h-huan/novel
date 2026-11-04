@@ -1,5 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
-import { premiseSeedFactIssues, screenPremisePoolBatch, freezePremiseCreationChoices } from './idea-discovery-contract';
+import { premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, freezePremiseCreationChoices } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -871,5 +871,31 @@ describe('automatic plot-tag metadata never discards valid story facts',()=>{
   expect(freezePremiseCreationChoices({...raw,plotTags:['完全无效']},manual,options,submission).plotTags).toEqual(['亲情']);
   expect(()=>freezePremiseCreationChoices({...raw,webNovelGenre:['未知类型']},{},options,submission))
    .toThrow('候选未固定有效创作选项：webNovelGenre');
+ });
+});
+
+describe('bounded pool JSON partial transport recovery never invents weak candidate facts',()=>{
+ const section=(label:string)=>label+'这一条有对应行动与现有权力的真实条件，双方在明确时间内互相阻挡，实际执行后产生不同结果。';
+ const card=(id:string)=>({premiseId:id,workingTitle:'对应机制'+id,storyCategoryId:'K1',storySections:{
+  '处境触发':section('处境触发'),'主动选择':section('主动选择'),
+  '必要条件':section('必要条件'),'反转兑现':section('反转兑现'),
+  '分类流派机制':section('分类流派机制'),
+ },storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],plotTags:['调查']});
+ it('recovers fully closed first seven seeds from an unfinished eighth seed, without changing the exact originals',()=>{
+  const seven=Array.from({length:7},(_,i)=>card('B1-P'+(i+1)));
+  const raw='{"pool":['+seven.map(row=>JSON.stringify(row)).join(',')+',{"premiseId":"B1-P8","workingTitle":"只生成到';
+  const recovered=recoverClosedPremisePoolObjects(raw);
+  expect(recovered).toEqual(seven);
+  expect(screenPremisePoolBatch(recovered).candidates).toHaveLength(7);
+  expect(recovered.every(row=>row.premiseId!=='B1-P8')).toBe(true);
+ });
+ it('accepts no fabricated entry after an unterminated or malformed first object',()=>{
+  expect(recoverClosedPremisePoolObjects('{"pool":[{"premiseId":"B1-P1"')).toEqual([]);
+  expect(recoverClosedPremisePoolObjects('{"pool":[{"premiseId":,"workingTitle":"x"}]}')).toEqual([]);
+  expect(recoverClosedPremisePoolObjects('{"notPool":[{"premiseId":"x"}]}')).toEqual([]);
+ });
+ it('handles escaped quotes, nested objects and arrays inside independently closed original entries',()=>{
+  const row={...card('B1-P1'),extra:{quote:'她说"不行"，接着行动',facts:['拥有凭证','看见拒绝']}};
+  expect(recoverClosedPremisePoolObjects('{"pool":['+JSON.stringify(row)+',{"premiseId":"B1-P2"')).toEqual([row]);
  });
 });
