@@ -84,7 +84,10 @@ describe('same chapter audit envelope for both creator paths',()=>{
   const finalContract=prompt.slice(prompt.lastIndexOf('只输出JSON对象：'));
   expect(finalContract).toContain('{"consistent":true,"contradictions":[],"conditionChecks":');
   expect(finalContract).toContain('{"consistent":false,"contradictions":');
-  expect(finalContract).toContain('"exitStateEvidence":');
+  expect(finalContract).not.toContain('"exitStateEvidence":');
+  expect(finalContract).not.toContain('"taskEvidence":');
+  expect(finalContract).toContain('"bridgeEvidence":');
+  expect(prompt).toContain('服务器按真实章号绑定responsibility与exitState原文');
   expect(finalContract).toContain('conditionChecks必须每章一项');
   expect(finalContract).toContain('gap必须对应contradictions');
  });
