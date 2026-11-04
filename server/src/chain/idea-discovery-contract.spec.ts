@@ -811,3 +811,38 @@ it('uses the same causal sequence in identity-only and expanded selection',()=>{
   expect(prompt).toContain('每个result只填写该步action及其已成立conditions实际产生的结果');
  }
 });
+
+describe('single lossless five-section pool contract',()=>{
+ const facts={
+  '处境触发':'村里的桥停工，我运送的材料被扣，家里人还要靠这座桥出行。',
+  '主动选择':'我拿出过去的采购单，请在现场的监理核对材料批次，不依赖突然出现的力量。',
+  '必要条件':'监理已接受现场查验委托，采购单有盖章签收和可以核对的日期。',
+  '反转兑现':'监理现场确认实际批次不合格并签发暂停验收通知，承包方依合同退换了材料。',
+  '分类流派机制':'被轻视的送货司机凭多年留存的清单改变局面，自己也承担运输延误的代价。',
+ };
+ it('materializes literal five-section facts into the only canonical storyCore',()=>{
+  const raw={premiseId:'B2-P1',workingTitle:'送货司机保住了旧桥',storyCategoryId:'K1',storySections:facts};
+  const before=structuredClone(raw),result=screenPremisePoolBatch([raw]);
+  expect(result.invalidFields).toBe(0);expect(result.candidates).toHaveLength(1);
+  expect(result.candidates[0].storyCore).toBe(Object.entries(facts).map(([name,body])=>'【'+name+'】'+body).join('\n'));
+  expect(result.candidates[0]).not.toHaveProperty('storySections');
+  expect(raw).toEqual(before);
+  expect(premiseSeedFactIssues(result.candidates[0].storyCore)).toEqual([]);
+ });
+ it('rejects missing sections, ambiguous extra facts and conflicting alternate stories',()=>{
+  const raw={workingTitle:'送货司机仍保留收据',storySections:facts};
+  const result=screenPremisePoolBatch([
+   {...raw,storySections:{...facts,'必要条件':''}},
+   {...raw,storySections:{...facts,'另一个结局':'未经审核的新事实'}},
+   {...raw,storyCore:'与原章节故事互斥的另一份正文'},
+  ]);
+  expect(result.candidates).toHaveLength(0);expect(result.invalidFields).toBe(3);
+  expect(Object.values(result.invalidFieldReasons).reduce((sum,count)=>sum+count,0)).toBe(3);
+ });
+ it('retains valid legacy storyCore and rejects incomplete old input',()=>{
+  const storyCore=Object.entries(facts).map(([name,body])=>'【'+name+'】'+body).join('\n');
+  const raw={workingTitle:'原来那座桥',storyCore};
+  expect(screenPremisePoolBatch([raw]).candidates).toEqual([raw]);
+  expect(screenPremisePoolBatch([{...raw,storyCore:'只有开头的一段场景'}]).invalidFields).toBe(1);
+ });
+});
