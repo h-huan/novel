@@ -24,7 +24,7 @@ describe('character revisions persist all semantic fields', () => {
 
   it('generated card persists one profile consumed by both storage and context', () => {
     const source=readFileSync(new URL('../chain/chain.controller.ts',import.meta.url),'utf8');
-    const start=source.indexOf('                const generatedProfile = {');
+    const start=source.indexOf('const generatedProfile = {');
     const end=source.indexOf('                charCount++;',start);
     expect(start).toBeGreaterThan(0);expect(end).toBeGreaterThan(start);
     // Run the production persistence block against actual SQLite, not a mocked repository.
