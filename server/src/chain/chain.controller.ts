@@ -1,6 +1,6 @@
 import {bindModelRequestClock,remainingModelRequestTime} from './model-request-clock';
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
-import {chapterConditionReviewIssues} from './chapter-condition-review';
+import {chapterConditionReviewIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
 import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
@@ -8967,6 +8967,15 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         }
 
         const auditChapterResponsibilities = async (plan: any[]): Promise<string[]> => {
+          // Both short and long creation now validate the same immutable task
+          // evidence. Text quotes remain supported; an explicit server-owned
+          // chapter task address is resolved without changing the verdict.
+          const conditionSource=JSON.stringify({canonicalCreativeBrief,worldContinuityDirective});
+          const taskAnchors=chapterConditionTaskAnchors(plan);
+          const byTaskId=new Map(taskAnchors.map(anchor=>[anchor.id,anchor]));
+          const verifiedConditions=(value:any)=>chapterConditionReviewIssues(
+            materializeChapterConditionSources(value,plan),plan,conditionSource,
+            check=>chapterConditionBridgeAnchorsVerified(check,plan,byTaskId,conditionSource),true);
           const result = await this.llmCallWithRetry<any>(
             '全书章节分工边界审查',
             buildChapterResponsibilityAuditPrompt({ includeSharedPolicies: false,
@@ -8974,7 +8983,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               creativeBrief: canonicalCreativeBrief,
               shortStoryCard,
               worldContinuityDirective,
-              plan, entryExitContract: true,
+              plan, entryExitContract: true,evidenceMode:'quotes',
             }),
             {
               // 全书章节分工边界审查：同样是审查任务，按 review 标准执行（判据同上——daily 零标准注入，
@@ -8985,14 +8994,14 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               validate: value => {
                 const audit = value as any;
                 if (!audit || typeof audit !== "object" || Array.isArray(audit) || !Array.isArray(audit.contradictions)) return false;
-                if (chapterConditionReviewIssues(audit,plan,JSON.stringify({canonicalCreativeBrief,worldContinuityDirective}),false,true).length) return false;
+                if (verifiedConditions(audit).length) return false;
                 if (audit.consistent === true) return audit.contradictions.length === 0;
                 if (audit.consistent !== false) return false;
                 return audit.contradictions.length > 0 && audit.contradictions.every((item: any) => isEvidencedChapterResponsibilityConflict(item));
               },
               describeValidation: value => {
                 const audit = value as any;
-                const conditionIssues=chapterConditionReviewIssues(audit,plan,JSON.stringify({canonicalCreativeBrief,worldContinuityDirective}),false,true);
+                const conditionIssues=verifiedConditions(audit);
                 if(conditionIssues.length)return conditionIssues;
                 if (audit?.consistent === true && Array.isArray(audit.contradictions) && audit.contradictions.length > 0) {
                   return ['consistent 为 true 时 contradictions 必须为空数组，不得只报冲突不改 consistent'];
@@ -9004,7 +9013,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               },
             },
           );
-          const audit = result.data as any;
+          const audit = materializeChapterConditionSources(result.data as any,plan);
           // 审查不可判定时既不放行也不编造冲突：这里直接以具体步骤名终止。
           // 旧实现把「未明确确认通过」伪造成一条冲突丢进修复闭环，白跑三轮语义重规划，
           // 最终在 12 分钟后以一句「仍违反世界规则」失败，且看不出真实原因。
