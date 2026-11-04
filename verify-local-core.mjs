@@ -663,6 +663,7 @@ if (health.ok) for (const target of projectTargets) {
 // misreport downstream probes deliberately skipped as separate model/metric
 // failures or as an unbound completed audit.
 const diagnosticWarnings = [];
+const diagnosticNotes = [];
 if (health.ok) {
   if (!runtime.ideaActivity?.source?.ok) diagnosticWarnings.push('灵感进行中/取消调用查询失败：只能看到最新完成的审计。');
   if (runtime.ideaActivity?.totalRecent>0) diagnosticWarnings.push('最新完成审计之后还存在灵感模型调用，其中进行中 '+runtime.ideaActivity.running+'、已取消 '+runtime.ideaActivity.cancelled+'；这些调用不属于旧审计。');
@@ -677,16 +678,17 @@ if (health.ok) {
     diagnosticWarnings.push('最新灵感审计时间窗内没有模型调用指标；不能据此宣称耗时或调用次数为零。');
   }
   if (runtime.discoveryCallTrace?.sameVersionCallGroups?.length) {
-    diagnosticWarnings.push('灵感发现存在相同版本元数据组合的多次调用；指标没有保存实际输入指纹，这只能提示人工核对 Run ID、时间窗与请求，不能单独认定重复调用。');
+    diagnosticNotes.push('灵感发现同版本元数据组合出现多次：可能是不同候选或分组的正常调用；缺少完整输入指纹，未确认重复调用，不作为警告。');
   }
   for (const target of projectTargets) {
     const diagnostics = inspectedProjects[target.key]?.cockpit?.diagnostics;
     if (Number(diagnostics?.exactDuplicateRunGroups) > 0) {
-      diagnosticWarnings.push(target.label + '：后端同版本元数据分组数=' + diagnostics.exactDuplicateRunGroups + '；未保存完整输入指纹，不能单独认定为精确重复运行。');
+      diagnosticNotes.push(target.label + '：同版本元数据分组数=' + diagnostics.exactDuplicateRunGroups + '；缺少完整输入指纹，未确认实际重复调用。');
     }
   }
 }
 runtime.diagnosticWarnings = diagnosticWarnings;
+runtime.diagnosticNotes = diagnosticNotes;
 
 const selectionMode = singleMode
   ? 'single_project'
@@ -989,7 +991,7 @@ const selectionLine = singleMode
   ? `single · ${legacyProjectId}`
   : `${selectionMode} · short=${shortProjectId ?? 'NOT_FOUND'} · long=${longProjectId ?? 'NOT_FOUND'}`;
 
-const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 后端加载身份：${backendIdentity.loadedLocalRevision} · marker=${backendIdentity.diagnosticsMarkerStatus} · build=${backendIdentity.buildCommit ?? 'unknown'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 后端进程身份\n\n- API 实例：${backendIdentity.instanceId ?? 'unknown'}\n- 后端版本：${backendIdentity.buildVersion ?? 'unknown'}\n- 构建提交：${backendIdentity.buildCommit ?? 'unknown'}\n- 与本地提交一致：${backendIdentity.loadedLocalRevision}\n- 诊断标记：${backendIdentity.diagnosticsMarkerStatus}\n- 进程启动时间：${backendIdentity.processStartedAt ?? 'unknown'}\n\n## 项目验收\n\n${projectSections}\n\n${detailedSections}\n\n## 仓库测试\n\n${testLines}\n\n${failedTestsMarkdown()}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- 本报告只读取现有 generation_runs 与 cockpit 等接口，不等同于直接读取 Server 进程 stdout/stderr；若有独立服务端日志，可与 JSON 一并提供。\n- generation_runs 最多返回最近 200 条，较早历史需单独提供服务端日志或数据库备份；Markdown 中较长证据可能截断，JSON 保留接口返回的完整结构化数据。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
+const markdown = `# 本地验收报告\n\n生成时间：${now}\n\n## 总结\n\n- 模式：${runFull ? '最终完整验收' : '快速运行诊断'}\n- 最终结果：**${report.verdict.status.toUpperCase()}**\n- Git：${gitInfo.branch ?? 'unknown'} @ ${gitInfo.commit ?? 'unknown'}${gitInfo.dirty ? '（工作区有未提交改动）' : ''}\n- Server：${health.ok ? 'PASS' : 'UNAVAILABLE'}\n- 后端加载身份：${backendIdentity.loadedLocalRevision} · marker=${backendIdentity.diagnosticsMarkerStatus} · build=${backendIdentity.buildCommit ?? 'unknown'}\n- 执行标准：${standardLine}\n- 项目选择：${selectionLine}\n\n## 后端进程身份\n\n- API 实例：${backendIdentity.instanceId ?? 'unknown'}\n- 后端版本：${backendIdentity.buildVersion ?? 'unknown'}\n- 构建提交：${backendIdentity.buildCommit ?? 'unknown'}\n- 与本地提交一致：${backendIdentity.loadedLocalRevision}\n- 诊断标记：${backendIdentity.diagnosticsMarkerStatus}\n- 进程启动时间：${backendIdentity.processStartedAt ?? 'unknown'}\n\n## 项目验收\n\n${projectSections}\n\n${detailedSections}\n\n## 仓库测试\n\n${testLines}\n\n${failedTestsMarkdown()}\n\n## 运行问题\n\n${runtimeProblems.length ? runtimeProblems.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 诊断备注（非故障警告）\n\n${diagnosticNotes.length ? diagnosticNotes.map((x) => `- ${x}`).join('\n') : '- 无'}\n\n## 说明\n\n- 本报告只有执行 verify-local.mjs 后才会生成，并且每次覆盖 verification/latest.json 与 verification/latest.md，不叠加历史。\n- 不带 --full 是故障诊断：自动选择最近项目（包括 creating / generation_failed），不要求短篇和长篇同时存在；正常创建中的项目显示 IN_PROGRESS，只有无运行调用且超过诊断阈值无活动才标记 creation_stalled。\n- --full 是最终验收：自动选择最近 active 的一个短篇和一个长篇，并要求两本都至少完成第一章、generation run 成功且 Gate 通过。\n- 需要精确指定项目时仍可使用 --short-project <短篇ID> --long-project <长篇ID>；兼容单项目模式 --project <项目ID>。\n- 本报告只读取现有 generation_runs 与 cockpit 等接口，不等同于直接读取 Server 进程 stdout/stderr；若有独立服务端日志，可与 JSON 一并提供。\n- generation_runs 最多返回最近 200 条，较早历史需单独提供服务端日志或数据库备份；Markdown 中较长证据可能截断，JSON 保留接口返回的完整结构化数据。\n- Git/CI/数据库运行记录负责历史追溯；latest 报告只描述当前状态。\n`;
 
 const mdPath = path.join(outDir, 'latest.md');
 fs.writeFileSync(mdPath, markdown, 'utf8');

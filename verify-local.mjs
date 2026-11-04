@@ -264,7 +264,8 @@ function printDetailedReport(value) {
   console.log('[verify] 灵感发现实际调用时间线：\n' + JSON.stringify(callEvidence, null, 2).slice(0, 22000));
   console.log('[verify] 运行中/已中止灵感调用（不冒充最近完成审计）：\n'
     +JSON.stringify(summarizeIdeaActivityEvidence(runtime.ideaActivity),null,2).slice(0,14000));
-  console.log('[verify] 诊断警告：\n' + JSON.stringify(runtime.diagnosticWarnings ?? [], null, 2));
+  if (runtime.diagnosticWarnings?.length) console.log('[verify] 诊断警告：\n' + JSON.stringify(runtime.diagnosticWarnings, null, 2));
+  if (runtime.diagnosticNotes?.length) console.log('[verify] 诊断备注（尚无输入指纹证据，不作为错误）：\n' + JSON.stringify(runtime.diagnosticNotes, null, 2));
   console.log('[verify] 项目创建、落库与失败步骤证据：\n' + JSON.stringify(projectEvidence, null, 2).slice(0, 20000));
   const failedTests = Array.isArray(value.tests) ? value.tests.filter(test => test.status !== 'passed') : [];
   if (failedTests.length) {

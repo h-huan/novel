@@ -1,11 +1,26 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence} from './premise-payoff-review';
+import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence,normalizePremisePayoffGapRoutes} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 const selection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案，并承担失去工作的代价。'}],selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',escalation:'受害人提供已有资料，警方核实现场情况。',payoff:'警方到场解救被困的人，她失去工作。'}],poolTargetMet:true};
 const supported={ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',conditionEvidenceRef:'S1.escalation',reason:'已提供现场地点并由警方核实后到场解救'};
+it('keeps a substantive gap negative when the model omits its repair route, and never invents pool evidence',()=>{
+ const absent={...supported,status:'gap' as const,reason:'缺少公司有权决定者实际批准联名合作的事实依据'};
+ const normalized=normalizePremisePayoffGapRoutes({payoffChecks:[absent]},selection);
+ expect(normalized.payoffChecks[0]).toMatchObject({status:'gap',gapRepair:'replace_from_pool'});
+ expect(materializePremisePayoffReview(normalized,selection)[0]).toMatchObject({premiseId:'P1',repairMode:'replace_from_pool'});
+ expect(normalizePremisePayoffGapRoutes({payoffChecks:[{...absent,status:'unknown'}]},selection).payoffChecks[0]).not.toHaveProperty('gapRepair');
+ const sourceQuote='她通过已有录音报案';
+ const restored=normalizePremisePayoffGapRoutes({payoffChecks:[{...absent,sourceConditionQuote:sourceQuote}]},selection);
+ expect(restored.payoffChecks[0]).toMatchObject({status:'gap',gapRepair:'restore_source_conditions',sourceConditionQuote:sourceQuote});
+ const invented=normalizePremisePayoffGapRoutes({payoffChecks:[{...absent,sourceConditionQuote:'凭空出现的公司董事长批准交易'}]},selection);
+ expect(invented.payoffChecks[0]).not.toHaveProperty('gapRepair');
+ expect(premisePayoffReviewIssues(invented,selection).length).toBeGreaterThan(0);
+ expect(premisePayoffReviewDirective(selection)).toContain('gapRepair');
+ expect(premisePayoffReviewDirective(selection)).toContain('"gapRepair":"replace_from_pool"');
+});
 it('does not reuse a claimed capture as its own prior reversal action when the plan only concludes a later reward',()=>{
  const item={...selection.selected[0],reversalEffect:'第三夜对手在后山取走旧批货物，被负责人当场截住并指认。',
   payoff:'主角被调入核心部门，从此失去原有清净生活。',

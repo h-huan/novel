@@ -3,7 +3,7 @@ import { premiseSourceComparisonCatalog, premiseSourceReviewIssues, PREMISE_REVI
 import { premiseGenreFitCatalog, premiseGenreFitIssues } from './premise-genre-fit';
 import { premiseCategoryCatalog, premiseCategoryFitIssues } from './premise-category-fit';
 import { premiseCausalCatalog } from './premise-causal-plan';
-import { premisePayoffReviewIssues, quarantineUnprovenReversalEvidence } from './premise-payoff-review';
+import { premisePayoffReviewIssues, quarantineUnprovenReversalEvidence, normalizePremisePayoffGapRoutes } from './premise-payoff-review';
 
 const reason = PREMISE_REVIEW_PROTOCOL_REASON + '，不能确认通过，已隔离本卡';
 
@@ -26,7 +26,7 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
   value = { ...value, sourceChecks: stripMarker(value.sourceChecks), payoffChecks: stripMarker(value.payoffChecks),
     ...(Array.isArray(value.genreChecks) ? {genreChecks:stripMarker(value.genreChecks)} : {}),
     ...(Array.isArray(value.categoryChecks) ? {categoryChecks:stripMarker(value.categoryChecks)} : {}) };
-  value = quarantineUnprovenReversalEvidence(value, selection);
+  value = quarantineUnprovenReversalEvidence(normalizePremisePayoffGapRoutes(value, selection), selection);
   // A malformed payoff receipt is NOT evidence that the already verified
   // source/category/genre receipts for the same identity are unknown.
   // Quarantine by (premise, review family), not by the whole premise. Every
