@@ -125,7 +125,7 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
   // the later sourceRef codec rejected them only after a paid selection call.
   let sections: ReturnType<typeof premiseSourceSections>;
   try { sections = premiseSourceSections({storyCore:raw}); }
-  catch { return ['候选骨架缺少有序且唯一的处境触发、主动选择、必要条件、反转兑现、分类流派机制']; }
+  catch { return ['候选骨架缺少有序的处境触发、主动选择、必要条件、反转兑现、分类流派机制']; }
   const issues: string[] = [];
   for (const section of sections) {
     if (section.text.replace(/[，。；：、！!？?\s]/g,'').length < 12)
