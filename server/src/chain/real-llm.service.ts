@@ -10,7 +10,7 @@ import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidence
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -749,9 +749,16 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       && /^(worldRules|world)(\.|$)/.test(anchor.path || '');
     const worldMechanisms = evidenceAnchors.filter(isWorldMechanism);
     const bodyAnchors = evidenceAnchors.filter(anchor => anchor.source === 'body');
-    const chapterEvidenceCatalog = chapters.map((chapter, index) => ({ chapterNumber: chapter.chapterNumber,
-      anchorIds: bodyAnchors.filter(anchor => resolveQualityEvidence(JSON.stringify(chapter), anchor.text).verified).map(anchor => anchor.id),
-      resultAnchorIds: (resultField ? causalExitResultAnchors(bodyAnchors, chapter[resultField]) : causalChapterResultAnchors(bodyAnchors, index)).map(anchor => anchor.id) }));
+    const resultAliasesByReview:Record<string,string[]>={};
+    const chapterEvidenceCatalog = chapters.map((chapter, index) => {
+      const resultReview=resultField
+        ?{review:causalExitResultAnchors(bodyAnchors,chapter[resultField]),aliasesByReview:{} as Record<string,string[]>}
+        :causalChapterResultReviewGroups(bodyAnchors,index);
+      Object.assign(resultAliasesByReview,resultReview.aliasesByReview);
+      return {chapterNumber:chapter.chapterNumber,
+        anchorIds:bodyAnchors.filter(anchor => resolveQualityEvidence(JSON.stringify(chapter), anchor.text).verified).map(anchor => anchor.id),
+        resultAnchorIds:resultReview.review.map(anchor=>anchor.id)};
+    });
     let audit: any = null;
     let checked = { verified: false, errors: ['缺少关键场景行动结果审查'], issues: [] as any[] };
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -817,6 +824,18 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           row.chapterNumber === chapter.chapterNumber && resolveQualityEvidence(JSON.stringify(chapter), row.actionEvidence).verified
             && resolveQualityEvidence(JSON.stringify(chapter), row.resultEvidence).verified)))) {
           checked = { ...checked, verified: false, errors: ['关键场景因果账目未按实际章号完整覆盖'] };
+        }
+        if(checked.verified&&!resultField&&Object.keys(resultAliasesByReview).length){
+          // A single verified literal result can occur in several projected
+          // fields. Expand ONLY exact same-chapter text, then rerun the entire
+          // existing citation validator on all real original addresses.
+          // Distinct text, negations and independently differing outcomes
+          // remain separate semantic obligations and independent fact checks.
+          const expanded=expandCausalReviewedResultAliases(audit,resultAliasesByReview,body,sources);
+          const aliasProof=validateCausalAudit(expanded,body,sources);
+          if(!aliasProof.verified){
+            checked={verified:false,errors:aliasProof.errors,issues:checked.issues};
+          }else audit=expanded;
         }
         if (checked.verified && (!resultField || countercheck)) break;
       } catch (error) { checked = { verified: false,
