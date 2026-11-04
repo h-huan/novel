@@ -199,7 +199,14 @@ export function materializeCausalAuditAnchors(value: any, content: string, sourc
     const result=anchors.get(row?.resultAnchorId);
     const bridge=anchors.get(row?.bridgeAnchorId);
     const before=anchors.get(row?.beforeStateAnchorId);
-    return {...row,actionEvidence:action?.source==='body'?action.text:'',resultEvidence:result?.source==='body'?result.text:'',
+    return {...row,
+      // An exact raw quote can be server-bound to a unique result ID without
+      // inventing an action address. Preserve the raw action ONLY when no
+      // actionAnchorId was supplied; a false provided ID must still fail shut.
+      actionEvidence:action?.source==='body'?action.text:
+        row.actionAnchorId===undefined?String(row.actionEvidence||''):'',
+      resultEvidence:result?.source==='body'?result.text:
+        row.resultAnchorId===undefined?String(row.resultEvidence||''):'',
       ...(Object.prototype.hasOwnProperty.call(row,'beforeStateAnchorId') ? {beforeStateEvidence:before?.source==='body'?before.text:''} : {}),
       bridgeEvidence:bridge?.text||'',basisSource:bridge?.source||'body'};
   })};
