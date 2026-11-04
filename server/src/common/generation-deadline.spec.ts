@@ -1,9 +1,8 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {GenerationTasks,GenerationDeadlineExceededError,assertGenerationActive,currentGenerationSignal,withGenerationSignal,waitForGeneration} from './generation-cancellation';
 import {RealLLMService} from '../chain/real-llm.service';
-import {discoveryDeadlineResult} from '../chain/discovery-fulfillment';
 afterEach(()=>vi.useRealTimers());
-describe('one discovery request lifetime',()=>{
+describe('explicit test-only deadlines and unbounded production-style discovery',()=>{
  it('cancels parallel child work and backoff under the original deadline, then releases the slot',async()=>{
   vi.useFakeTimers();const tasks=new GenerationTasks(),signals:AbortSignal[]=[];
   const task=tasks.run('discovery','same-request','',async()=>{
@@ -36,12 +35,19 @@ describe('one discovery request lifetime',()=>{
   expect(call).toHaveBeenCalledTimes(1);
   expect(metrics.finishRun).toHaveBeenCalledWith('deadline-run','cancelled',expect.any(Number),undefined,expect.stringContaining('整次请求总时限'));
  });
- it('preserves qualified evidence and never calls partial or late delivery successful',()=>{
+ it('does not throw away qualified cards or cancel work after eleven minutes without an explicit deadline',async()=>{
+  vi.useFakeTimers();
+  const tasks=new GenerationTasks();
   const passed=[{sourcePremiseId:'P1',gate:'passed'},{sourcePremiseId:'P2',gate:'passed'}];
-  const partial=discoveryDeadlineResult({success:false,ideas:[],qualifiedIdeas:passed,appealGate:{qualified:2}},5,600000,'deadline');
-  expect(partial).toMatchObject({success:false,status:'incomplete',ideas:[],totalIdeas:0,appealGate:{qualified:2,shortfall:3,returned:0,deadlineExceeded:true}});
-  expect(partial.qualifiedIdeas).toBe(passed);
-  const late=discoveryDeadlineResult({success:true,ideas:passed,totalIdeas:2},2,600000,'deadline');
-  expect(late.success).toBe(false);expect(late.totalIdeas).toBe(0);expect(late.qualifiedIdeas).toBe(passed);
+  const task=tasks.run('discovery','production-style','',async()=>{
+    await waitForGeneration(11*60*1000);
+    return {success:true,ideas:passed,totalIdeas:2,appealGate:{qualified:2,returned:2,shortfall:0}};
+  });
+  await vi.advanceTimersByTimeAsync(11*60*1000);
+  await expect(task).resolves.toMatchObject({
+    success:true,ideas:passed,totalIdeas:2,
+    appealGate:{qualified:2,returned:2,shortfall:0},
+  });
+  expect(tasks.isRunning('discovery','production-style')).toBe(false);
  });
 });
