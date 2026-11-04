@@ -84,7 +84,7 @@ it('aborts the physical call at the deadline without retrying or accepting parti
     }));
     (service as any).callModel = callModel;
     const pending = expect(service.generate({ prompt: '验收', scenario: 'review', timeout: 100, maxTokens: 4096 }))
-      .rejects.toThrow('LLM 主调用超时');
+      .rejects.toThrow('模型请求的原始时限已耗尽');
     await vi.advanceTimersByTimeAsync(100);
     await pending;
     await vi.advanceTimersByTimeAsync(2000);
