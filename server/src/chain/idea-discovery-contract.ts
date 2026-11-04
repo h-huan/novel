@@ -184,20 +184,6 @@ export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
   candidates.push(item);
  }
  return {candidates,invalidShape,invalidFields,invalidNaming,invalidFieldReasons};
-} {
- const candidates:Record<string,unknown>[]=[];
- let invalidShape=0,invalidFields=0,invalidNaming=0;
- for(const raw of rawCandidates){
-  if(!raw||typeof raw!=='object'||Array.isArray(raw)){invalidShape++;continue;}
-  const item=raw as Record<string,unknown>;
-  const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
-  const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
-  if(title.length<2||core.length<20||!normalize(title)||!normalize(core)
-    ||premiseSeedFactIssues(core).length){invalidFields++;continue;}
-  if(prohibitedFictionNames({workingTitle:title,storyCore:core}).length){invalidNaming++;continue;}
-  candidates.push(item);
- }
- return {candidates,invalidShape,invalidFields,invalidNaming};
 }
 
 /**
