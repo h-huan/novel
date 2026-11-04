@@ -6396,9 +6396,21 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     return value.pool;
                   });
                 let nextId=1;
+                const refillSeedRejections:Record<string,number>={};
                 for(const batch of newSeedBatches)for(const raw of batch){
-                  if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;
-                  const seed=raw as Record<string,unknown>;
+                  // The generator's FIVE storySections are the same wire shape
+                  // used by the initial pool. Always normalize and validate at
+                  // this one existing boundary before accessing storyCore.
+                  // Directly reading raw.storyCore here used to discard every
+                  // valid refill produced by the new canonical generator.
+                  const screened=screenPremisePoolBatch([raw]);
+                  const seed=screened.candidates[0];
+                  if(!seed){
+                    const reason=Object.keys(screened.invalidFieldReasons)[0]
+                      ||(screened.invalidNaming?'invalid_naming':'invalid_shape');
+                    refillSeedRejections[reason]=(refillSeedRejections[reason]||0)+1;
+                    continue;
+                  }
                   const title=String(seed.workingTitle||'').trim();
                   const core=String(seed.storyCore||'').trim();
                   const titleKey='title:'+normalizeTitle(title);
@@ -6427,7 +6439,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 }
                 fulfillmentActions.push({phase:'lightweight_pool_refill',
                   requested:seedDeficit,retained:unusedSeeds.length-
-                    premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId))).length});
+                    premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId))).length,
+                  rejectedByContract:refillSeedRejections});
                 }catch(error){
                   // A failed supplementary generation is not permission to turn
                   // previously validated cards into a failed whole request.
