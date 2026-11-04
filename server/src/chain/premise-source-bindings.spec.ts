@@ -83,7 +83,8 @@ it('resolves numbered contiguous source clauses to exact original text before ev
  const result=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:projectPremiseSourceChoices([chosen],[seed])},1,1);
  expect(result.selected[0].causalPlan).toEqual(nomination().causalPlan);
  expect(result.selected[0].storyCore).toBe(seed.storyCore);
- expect(indexedPremiseSourcePool([seed])[0].storyCore).toContain('[2]邻居看到桥面能站人，[3]选择带来工具共同修桥。');
+ expect(indexedPremiseSourcePool([seed])[0].storyCore).toContain('[P1:2:2]邻居看到桥面能站人，[P1:2:3]选择带来工具共同修桥。');
+ expect(resolvePremiseSourceReference(seed,'P1:2:2-3')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
  expect(seed.storyCore).not.toContain('[2]');
 });
 

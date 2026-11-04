@@ -59,7 +59,7 @@ export function premiseSourceSections(seed:Record<string,unknown>):Array<{sectio
 export function indexedPremiseSourcePool<T extends Record<string,unknown>>(pool:readonly T[]):T[] {
  return pool.map(seed=>{
   try{return {...seed,storyCore:premiseSourceSections(seed).map(row=>'【'+row.name+'｜分节'+row.section+'】'
-   +row.clauses.map((text,index)=>'['+(index+1)+']'+text).join('')).join('\n')};}
+   +row.clauses.map((text,index)=>'['+String(seed.premiseId)+':'+row.section+':'+(index+1)+']'+text).join('')).join('\n')};}
   catch{return {...seed};} // Legacy unsectioned material retains strict quote validation.
  });
 }
