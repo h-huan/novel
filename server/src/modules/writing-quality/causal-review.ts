@@ -172,7 +172,12 @@ export function expandCausalReviewedResultAliases(value:any,aliasesByReview:Reco
  content:string,sources:Record<string,string>){
  if(!value||!Array.isArray(value.transitions))return value;
  const anchors=new Map(causalEvidenceAnchors(content,sources).map(anchor=>[anchor.id,anchor]));
- const seen=new Set(value.transitions.map((row:any)=>String(row.resultAnchorId||'')));
+ const seen=new Map<string,any>();
+ for(const row of value.transitions){
+  const id=String(row?.resultAnchorId||'');
+  if(id&&seen.has(id))throw new Error('因果审核的同一结果地址存在多条互斥审查，必须逐项澄清：'+id);
+  if(id)seen.set(id,row);
+ }
  const extra:any[]=[];
  for(const row of value.transitions){
   const representative=anchors.get(String(row.resultAnchorId||''));
@@ -181,8 +186,13 @@ export function expandCausalReviewedResultAliases(value:any,aliasesByReview:Reco
    const target=anchors.get(id);
    if(!representative||!target||representative.source!=='body'||target.source!=='body'
      ||representative.text!==target.text)throw new Error('因果审核的同文结果别名地址不一致');
-   if(seen.has(id))throw new Error('因果审核的同文结果被重复核对或引用');
-   seen.add(id);
+   // A reviewer may independently assess an alias even when the prompt
+   // contains only the representative result ID. That verdict has already
+   // been paid for; do not throw and discard the complete chapter, or
+   // overwrite its independently cited action/condition/gap.
+   // Both rows remain subject to the original per-row citation validator.
+   if(seen.has(id))continue;
+   seen.set(id,row);
    extra.push({...row,resultAnchorId:id,resultEvidence:target.text});
   }
  }
