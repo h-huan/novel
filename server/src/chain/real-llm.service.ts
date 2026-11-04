@@ -10,7 +10,7 @@ import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidence
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -786,8 +786,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           temperature: 0, responseFormat: 'json_object', maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
           metrics: { ...request.metrics, runId: run.id, stepKey: countercheck ? 'framework_action_state_countercheck' : 'framework_action_proof' } });
         const value = JSON.parse(response.content);
-        audit = materializeCausalAuditAnchors(countercheck ? preserveCausalCountercheckAnchors(audit, value.causalAudit, body, sources)
-          : attempt ? applyCausalAuditRepair(audit, checked.errors, value) : value.causalAudit, body, sources);
+        const rawVerdict=countercheck ? preserveCausalCountercheckAnchors(audit,value.causalAudit,body,sources)
+          : attempt ? applyCausalAuditRepair(audit,checked.errors,value) : value.causalAudit;
+        // Literal model quotes can be assigned a server-owned result ID only
+        // when unique in the same chapter. Unknown, paraphrased or conflicting
+        // IDs remain invalid; no causal proof or outcome is supplied by code.
+        audit=materializeCausalAuditAnchors(
+          bindUniqueCausalResultAnchors(rawVerdict,chapterEvidenceCatalog,evidenceAnchors),body,sources);
         checked = validateCausalAudit(audit, body, sources);
         if (Array.isArray(audit?.transitions)) audit.transitions.forEach((row: any, index: number) => {
           const chapter = chapters.find(candidate => candidate.chapterNumber === row.chapterNumber);
