@@ -33,22 +33,50 @@ export const CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE = responsibilityRule.contra
 /** The short/long creation entry/exit review uses the same verdict as other
  * chapter checks, but MUST include conditionChecks even when consistent=true.
  * This is a transport contract, not a weaker semantic quality gate. */
-export function chapterResponsibilityAuditOutputContract(entryExitContract=false):string{
- const condition=(status:'supported'|'gap')=>entryExitContract?{conditionChecks:[{
-   chapter:1,taskEvidence:'本章responsibility逐字原文',exitStateEvidence:'本章exitState逐字原文',
-   status,bridgeSource:'body',
-   bridgeEvidence:status==='gap'?'':'本章或前章真实发生的行动与条件来源逐字原文',
-   reason:'核对实际条件如何取得、是否仍有效以及整个出口结果是否成立',
- }]}:{};
- const conflict={chapter:1,criterion:'CR-1',task:'存在冲突的任务原文',
-   conflict:'违反了哪条判据与哪条已确认规则，以及为何无法执行',
-   ruleEvidence:'被违反的判据编号与【已确认世界规则/执行标准】原文逐字引用',
-   retain:'必须保留的故事目标',fix:'不新增任何能力、且可直接执行的替代任务'};
- return '只输出JSON对象：全部可在已确认规则内执行时返回 '
-   +JSON.stringify({consistent:true,contradictions:[],...condition('supported')})
-   +'；确有冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
-   +'。criterion必须是上列判据编号之一，ruleEvidence必须是逐字引用；给不出逐字证据的疑虑不得写成冲突。'
-   +(entryExitContract?' conditionChecks必须每章一项，不限于示例第一章；真实情况选择supported、gap、not_required。gap必须对应contradictions，supported必须有已发生的非结果自证行动原文。':'');
+/** The two real callers use different citation transports. Render the
+ * correct ONE shape at the shared rule source; mixing quote examples into
+ * ID-address prompts made the model omit required chapter checks. The verdict,
+ * independent causal Gate, and evidence requirements stay unchanged. */
+export function chapterResponsibilityAuditOutputContract(
+ entryExitContract=false,evidenceMode:'quotes'|'anchors'='quotes',
+):string{
+ const condition=(status:'supported'|'gap')=>!entryExitContract?{}:{
+  conditionChecks:[evidenceMode==='anchors'?{
+   chapter:1,taskAnchorId:'chapter:c1:task',status,
+   bridgeAnchorIds:status==='gap'?[]:['chapter:c1:task'],
+   reason:'逐章核对实际取得的行动、条件时效及完整出口结果',
+  }:{
+   chapter:1,taskEvidence:'本章responsibility连续逐字原文',
+   exitStateEvidence:'本章exitState连续逐字原文',status,
+   bridgeSource:'body',
+   bridgeEvidence:status==='gap'?'':'本章或前章responsibility中实际完成的动作逐字原文',
+   reason:'逐章核对实际取得的行动、条件时效及完整出口结果',
+  }]
+ };
+ const conflict=evidenceMode==='anchors'&&entryExitContract?{
+  chapter:1,criterion:'CR-1',taskAnchorId:'chapter:c1:task',
+  conflict:'已确认规则与实际行动之间的具体冲突',
+  ruleAnchorIds:['project_context:v1'],retain:'必须保留的目标',
+  fix:'沿确认规则可执行的替代任务',
+ }:{
+  chapter:1,criterion:'CR-1',task:'发生冲突的本章责任原文',
+  conflict:'已确认规则与实际行动之间的具体冲突',
+  ruleEvidence:'已确认世界规则或执行标准中的连续逐字原文',
+  retain:'必须保留的目标',fix:'沿确认规则可执行的替代任务',
+ };
+ return '只输出JSON对象：无真实冲突时返回 '
+  +JSON.stringify({consistent:true,contradictions:[],...condition('supported')})
+  +'；确有冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
+  +'。以上仅为字段结构示例，不是对任一章节的事实判定；不得复制示例引用地址或假定全部章节supported。'
+  +' criterion必须是已有判据编号，冲突需有真实冻结来源的逐字双边证据。'
+  +(entryExitContract?
+   ' conditionChecks必须每章恰好一项，包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
+   +' 普通自主行动且不依赖外部资格时用not_required并说明，不能为凑supported虚构已取得条件。'
+   +' supported必须引用当章或前章实际执行的取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应真实contradictions，不得擅自放行。'
+   +(evidenceMode==='anchors'?
+    ' conditionChecks只返回taskAnchorId、bridgeAnchorIds及状态理由，证据编号须从本次服务端目录选择，不返回taskEvidence/bridgeEvidence。'
+    :' conditionChecks只返回taskEvidence、exitStateEvidence、bridgeSource、bridgeEvidence及状态理由，证据必须是本次章节规划中的连续逐字原文，不返回虚构地址。')
+   :'');
 }
 export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT=chapterResponsibilityAuditOutputContract();
 
