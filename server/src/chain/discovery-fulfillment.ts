@@ -147,7 +147,7 @@ export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved
  // when the initial shortlist had proven rejections. The caller must still
  // fund reselection and every independent review from the original allowance.
  const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4)))
-   :retainedApproved<screeningTarget?1:0;
+   :0;
  return {mandatory,hedge,total:mandatory+hedge};
 }
 
@@ -196,4 +196,15 @@ export function fundedSourceReviewGroups(count:number,batchSize:number,credits:n
  const oneWaveGroups=Math.max(minimum,Math.min(count,concurrency));
  return preferFineSourceReview(count,batchSize,concurrency,groupingMode)&&credits>=count+correctionFloor
   ?oneWaveGroups:minimum;
+}
+
+/** A deadline never upgrades partial quality evidence into full delivery. */
+export function discoveryDeadlineResult(result: Record<string,any>, requested: number, wallBudgetMs: number, message: string) {
+ const qualifiedIdeas = Array.isArray(result.qualifiedIdeas) ? result.qualifiedIdeas : Array.isArray(result.ideas) ? result.ideas : [];
+ const audit = result.appealGate || {};
+ const qualified = Math.max(qualifiedIdeas.length,Number(audit.qualified)||0);
+ return {...result,success:false,status:'incomplete',ideas:[],qualifiedIdeas,totalIdeas:0,error:message,
+  appealGate:{...audit,requested,qualified,returned:0,shortfall:Math.max(0,requested-qualified),partial:true,
+   wallBudgetMs,deadlineExceeded:true,stopReason:'discovery_deadline_exceeded',
+   fulfillment:{...(audit.fulfillment||{}),stopReason:'discovery_deadline_exceeded'}}};
 }

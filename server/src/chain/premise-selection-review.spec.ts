@@ -219,7 +219,7 @@ it('does not spend an optional hedge when reselection allowance is unavailable',
    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
  });
 
-it('funds one early independently reviewed hedge after three screened candidates fail',async()=>{
+it('preserves paid review credits when the actual delivery count is already source-vetted',async()=>{
  const ids='ABCDEFGHIJK'.split('');
  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
    selectedPremises:ids.slice(0,8).map(premise)},8,15);
@@ -240,9 +240,9 @@ it('funds one early independently reviewed hedge after three screened candidates
  });
  const shared={reviews:{remaining:12},reselection:{remaining:3}};
  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],shared,5);
- expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I']);
- expect(result.selectionAudit.reselectionAttempted).toBe(true);
+ expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E']);
+ expect(result.selectionAudit.reselectionAttempted).toBe(false);
  expect(result.selectionAudit.finalReview.passed).toBe(true);
  expect(shared.reselection.remaining).toBeLessThanOrEqual(3);
  expect(shared.reviews.remaining).toBeLessThanOrEqual(12);
@@ -1104,8 +1104,8 @@ it('keeps source-correctable original IDs eligible when screening target exceeds
 it.each([{credits:8,recover:true},{credits:7,recover:false}])('funds the observed 3-card delivery gap before optional hedges with $credits shared calls',async({credits,recover})=>{
  vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,sourceBatchSize:2});
  const {materializePremiseCategoryFit}=await import('./premise-category-fit');
- const make=(id:string)=>({...premise(id),causalPlan:[{action:{field:'activeChoice',quote:premise(id).activeChoice},
-   conditions:[{field:'escalation',quote:premise(id).escalation}],result:{field:'payoff',quote:premise(id).payoff}}]});
+ const make=(id:string)=>({...premise(id),payoff:'救出家属，自己按既定规则被遗忘'+id,causalPlan:[{action:{field:'activeChoice',quote:premise(id).activeChoice},
+   conditions:[{field:'escalation',quote:premise(id).escalation}],result:{field:'payoff',quote:'救出家属，自己按既定规则被遗忘'+id}}]});
  const pool='ABCDEFGHIJKL'.split('').map(make);
  const input=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,7)},8,12,['悬疑'],5);
  const c=Object.create(ChainController.prototype) as any;c.logger={log:vi.fn(),warn:vi.fn()};
@@ -1120,7 +1120,7 @@ it.each([{credits:8,recover:true},{credits:7,recover:false}])('funds the observe
    const payoffChecks=current.selected.map((row:any,index:number)=>({ref:`S${index+1}.payoff`,status:'supported',
      actionEvidenceRef:`S${index+1}.activeChoice`,conditionEvidenceRef:`S${index+1}.escalation`,
      reversalCheck:{status:'supported',actionEvidenceRef:`S${index+1}.activeChoice`,reason:'独立核对既有行动和条件能够支持反转结果'},
-     links:row.causalPlan.map((_:any,n:number)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported',reason:'该实际行动及已建立条件能够产生点名结果'})),
+     links:row.causalPlan.map((_:any,n:number)=>({ref:`S${index+1}.causalPlan[${n}]`,status:'supported',reason:'该实际行动及已建立条件能够产生点名结果',decisionCheck:{status:'not_required',reason:'本预算样例按既定救人代价规则直接改变状态，不依赖第三者改判'}})),
      reason:'全部决定性结果均经独立行动条件及代价核对'}));
    const result=materializePremiseSourceReview({sourceChecks},current);
    result.issues.push(...materializePremiseCategoryFit({categoryChecks},current));

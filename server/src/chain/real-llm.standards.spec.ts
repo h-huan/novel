@@ -178,3 +178,44 @@ it('projects the actual payoff recheck and citation-only protocols instead of th
  expect(standardDirectiveCache.get('idea_generate','idea_presentation_review')).toContain(rules.READER_ENGAGEMENT_POLICY);
  expect(standardDirectiveCache.get('idea_generate','idea_premise_source_drift_review')).toContain(rules.PREMISE_PAYOFF_REVIEW_POLICY);
 });
+
+it('delivers the shared action-state condition to draft and local repair before any model output, once per physical call',async()=>{
+ const {STORY_CAUSAL_STATE_POLICY,SOURCE_QUALITY_POLICY}=await import('../modules/module-standards/system-workflow-rules.registry');
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ const service=new RealLLMService({
+  getConfig:()=>({defaults:{maxTokens:4096}}),
+  getModelForScenario:()=>({modelName:'fixture',modelVersion:'fixture',temperature:0}),
+ } as any,{beginRun:vi.fn(),finishRun:vi.fn()} as any);
+ const call=vi.fn(async()=>({content:'{}',finishReason:'stop'}));(service as any).callModel=call;
+ for(const stepKey of ['creation_chapter_detail','creation_chapter_fact_repair']){
+  call.mockClear();
+  await service.generate({prompt:'按既定职责生成候选',scenario:'outline',responseFormat:'json_object',metrics:{stepKey}});
+  expect(call).toHaveBeenCalledTimes(1);
+  const system=(call.mock.calls[0] as any)[2] as string;
+  expect(system.split(STORY_CAUSAL_STATE_POLICY)).toHaveLength(2);
+  expect(system).toContain(SOURCE_QUALITY_POLICY);
+  expect(system).toContain('CR-1');
+  expect(system).not.toContain('坐标由程序按 UTF-16');
+ }
+});
+
+it('projects the same established-boundary check into candidate generation, source audit and final card audit',()=>{
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_source_drift_review','idea_presentation_review']){
+  const directive=standardDirectiveCache.get('idea_generate',step);
+  expect(directive).toContain(STORY_PREREQUISITE_POLICY);
+  expect(directive).toContain('原池自身的规则与用法相冲突时，同样不合格');
+ }
+});
+
+it('keeps discovery scheduling out of confirmed-story generation while retaining story constraints',async()=>{
+ const rules=await import('../../shared/src/system-workflow-rules.registry');standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const [scene,step]of [['outline','creation_chapter_detail'],['review','review'],['world_building','world_generation']]){
+  const directive=standardDirectiveCache.get(scene,step);expect(directive).toContain(rules.CONFIRMED_STORY_FOUNDATION_POLICY);expect(directive).toContain(rules.STORY_PREREQUISITE_POLICY);expect(directive).not.toContain(rules.IDEA_DISCOVERY_FULFILLMENT_POLICY);expect(directive).not.toContain(rules.IDEA_AGGREGATE_RESERVE_POLICY);
+ }
+ expect(standardDirectiveCache.get('idea_generate','idea_premise_pool_generation')).toContain(rules.IDEA_CANDIDATE_CONSTRUCTION_POLICY);
+});
+
+it('injects the same decisive-choice prerequisite before pool generation, selection and either gate',async()=>{
+ const rules=await import('../../shared/src/system-workflow-rules.registry');standardDirectiveCache.rebuild(activeSystemWorkflowRules());for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_source_drift_review','idea_presentation_review'])expect(standardDirectiveCache.get('idea_generate',step)).toContain(rules.DECISIVE_CHOICE_CONDITION_POLICY);
+});

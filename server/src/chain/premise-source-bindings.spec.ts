@@ -161,3 +161,16 @@ it('accepts source-only numeric addresses and restores every field before the or
  (raw.causalPlan[0] as any).action={sourceRef:'P2:2:2-3'};
  expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
 });
+
+it('inherits the reviewed question for initial and refill cards without regenerating or inventing novelty claims',()=>{
+ const selected=normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[nomination()]},1,1).selected[0];
+ for(const noveltyProof of [undefined,{familiarShell:'原有外壳',readerQuestion:'未经审核的新追问'}]){
+   const raw={title:'他先把木料扛上桥',noveltyProof},before=JSON.stringify(raw);
+   const card=bindStructuredIdeaCardToPremise(selected,[raw]);
+   expect((card.noveltyProof as any).readerQuestion).toBe(selected.readerQuestion);
+   expect((card.noveltyProof as any).secondOrderConsequence).toBeUndefined();
+   expect(JSON.stringify(raw)).toBe(before);
+ }
+ const legacy=bindStructuredIdeaCardToPremise({premiseId:'legacy'},[{noveltyProof:{readerQuestion:'旧卡原有追问'}}]);
+ expect((legacy.noveltyProof as any).readerQuestion).toBe('旧卡原有追问');
+});

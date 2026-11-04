@@ -59,6 +59,8 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   timeout?: number;
+  /** Internal absolute deadline, preserved across transport/shape recovery. */
+  deadlineAt?: number;
   /** 场景先经 scenario-taxonomy 归一：如 idea_generate、outline、writing、review；不得使用旧别名自建一套路由。 */
   scenario?: string;
   /** 章节功能，用于动态路由（如 exposition, climax 等） */

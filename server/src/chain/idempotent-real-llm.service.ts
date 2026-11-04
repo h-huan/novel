@@ -1,4 +1,5 @@
-import { assertGenerationActive } from '../common/generation-cancellation';
+import { bindModelRequestClock, remainingModelRequestTime } from './model-request-clock';
+import { assertGenerationActive, waitForGeneration } from '../common/generation-cancellation';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { jsonrepair } from 'jsonrepair';
@@ -58,6 +59,7 @@ export class IdempotentRealLLMService extends RealLLMService {
   }
 
   override async generate(request: LLMRequest): Promise<LLMResponse> {
+    request = bindModelRequestClock(request);
     assertGenerationActive();
     const projectId = request.metrics?.projectId ?? currentCreationProjectId() ?? undefined;
     this.captureReviewedShortStoryCard(request, projectId);
@@ -182,9 +184,11 @@ export class IdempotentRealLLMService extends RealLLMService {
     const retries = Math.max(0, Math.floor(LLM_TUNABLES.NETWORK_RECOVERY_RETRIES));
     for (let recoveryAttempt = 0; ; recoveryAttempt += 1) {
       try {
+        remainingModelRequestTime(request);
         return await super.generate(request);
       } catch (error) {
         assertGenerationActive();
+        remainingModelRequestTime(request);
         // Discovery already receives the provider's bounded network recovery.
         // Re-entering it here reset that allowance and duplicated physical calls.
         if (request.scenario === 'idea_generate' || !this.isTransientNetworkFailure(error) || recoveryAttempt >= retries) {
@@ -199,7 +203,7 @@ export class IdempotentRealLLMService extends RealLLMService {
           + `scenario=${request.scenario || 'daily'}, step=${request.metrics?.stepKey || 'unknown'}, delayMs=${delayMs}`,
         );
         if (delayMs > 0) {
-          await new Promise(resolve => setTimeout(resolve, delayMs));
+          await waitForGeneration(delayMs);
         }
       }
     }

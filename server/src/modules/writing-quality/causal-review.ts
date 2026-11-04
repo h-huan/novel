@@ -9,10 +9,9 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   };
 }
 
-const causalResultPath = /(?:^|\.)(?:exitState|scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|highlights\.\d+\.point|characterStates\.\d+\.stateAfter|foreshadowingRecover\.\d+\.(?:method|payoff))$/;
 
 /** Addresses only: keep punctuation and the complete source, including conditional context. */
-function resultAssertionParts(text: string): string[] {
+function causalAssertionParts(text: string): string[] {
   const pairs: Record<string,string> = {'“':'”','‘':'’','「':'」','『':'』','（':'）','(':')','[':']'};
   const stack: string[] = [], parts: string[] = [];
   let start=0, attachedCondition=false;
@@ -47,13 +46,33 @@ function completeResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>
 }
 
 
+function expandCausalSourceAnchors(values: Array<{id:string;source:string;text:string;path?:string}>) {
+  // Keep the old IDs stable, but offer exact clauses so one broad quotation
+  // cannot stand in for several different outcome proofs.
+  const clauses = values.flatMap(value => {
+    const parts = value.text.match(/[^。！？；]+[。！？；]?/g)?.filter(text => text.replace(/[\s\\“”"‘’]/g, '').length) || [];
+    return parts.length > 1 ? parts.map((text, index) => ({
+      id: `${value.id}:c${index + 1}`, source:value.source, text, path: value.path,
+    })) : [];
+  });
+  const clauseParents=new Set(clauses.map(clause=>clause.id.replace(/:c\d+$/,'')));
+  const assertions=[...values.filter(value=>!clauseParents.has(value.id)),...clauses].flatMap(value=>{
+    // Conditions need the same selectable granularity as result claims.
+    // Otherwise an independent condition shares an indivisible address with
+    // its consequence and the reviewer cannot correct a broad bridge.
+    const parts=causalAssertionParts(value.text);
+    return parts.length>1?parts.map((text,index)=>({id:value.id+':s'+(index+1),source:value.source,text,path:value.path})):[];
+  });
+  return [...clauses,...assertions];
+}
+
 export function causalEvidenceAnchors(content: string, sources: Record<string,string>): Array<{id:string;source:string;text:string;path?:string}> {
   return Object.entries({body:content,...sources}).flatMap(([source,text])=> {
     const raw = String(text || '');
     const paragraphs = raw.split(/\n\s*\n/).map((text,index)=>({id:`${source}:p${index+1}`,source,text:text.trim()})).filter(x=>x.text);
-    if (!/^[\s]*[\[{]/.test(raw)) return paragraphs;
+    if (!/^[\s]*[\[{]/.test(raw)) return [...paragraphs,...expandCausalSourceAnchors(paragraphs)];
     let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { return paragraphs; }
+    try { parsed = JSON.parse(raw); } catch { return [...paragraphs,...expandCausalSourceAnchors(paragraphs)]; }
     const paths: string[] = [];
     const collect = (value: unknown, fieldPath: string) => {
       if (typeof value === 'string') {
@@ -67,21 +86,7 @@ export function causalEvidenceAnchors(content: string, sources: Record<string,st
     const values = [...raw.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
       .filter(match => !/^\s*:/.test(raw.slice(match.index! + match[0].length)) && match[1].trim())
       .map((match,index)=>({id:`${source}:v${index+1}`,source,text:match[1],path:paths[index]}));
-    // Keep the old IDs stable, but offer exact clauses so one broad quotation
-    // cannot stand in for several different outcome proofs.
-    const clauses = values.flatMap(value => {
-      const parts = value.text.match(/[^。！？；]+[。！？；]?/g)?.filter(text => text.replace(/[\s\\“”"‘’]/g, '').length) || [];
-      return parts.length > 1 ? parts.map((text, index) => ({
-        id: `${value.id}:c${index + 1}`, source, text, path: value.path,
-      })) : [];
-    });
-    const clauseParents=new Set(clauses.map(clause=>clause.id.replace(/:c\d+$/,'')));
-    const assertions=[...values.filter(value=>!clauseParents.has(value.id)),...clauses].flatMap(value=>{
-      if(!causalResultPath.test(value.path||''))return [];
-      const parts=resultAssertionParts(value.text);
-      return parts.length>1?parts.map((text,index)=>({id:value.id+':s'+(index+1),source,text,path:value.path})):[];
-    });
-    return [...paragraphs, ...values, ...clauses, ...assertions];
+    return [...paragraphs, ...values, ...expandCausalSourceAnchors(values)];
   });
 }
 
@@ -156,6 +161,17 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     return { verified: errors.length === 0, errors, issues };
   }
   if (!value.transitions.length) errors.push('已评因果结论缺少关键行动与结果证据');
+  // The same assertion may be projected into several result fields with
+  // different addresses. Resolve the exact text too, then invalidate uses of
+  // that same result-only bridge until the existing citation correction has
+  // located actual conditions. Do not mistake different field IDs for proof.
+  const resultOnlyBridges=new Set<string>();
+  for(const row of value.transitions){
+    if(row?.status!=='supported'||row.basisSource!=='body'||typeof row.bridgeAnchorId!=='string')continue;
+    const action=resolveQualityEvidence(content,row.actionEvidence),result=resolveQualityEvidence(content,row.resultEvidence);
+    const bridge=resolveQualityEvidence(content,row.bridgeEvidence);
+    if(action.verified&&result.verified&&bridge.verified&&bridge.quote.includes(result.quote)&&!bridge.quote.includes(action.quote))resultOnlyBridges.add(row.bridgeAnchorId);
+  }
   value.transitions.forEach((row: any, index: number) => {
     const action = resolveQualityEvidence(content, row?.actionEvidence);
     const result = resolveQualityEvidence(content, row?.resultEvidence);
@@ -165,6 +181,17 @@ export function validateCausalAudit(value: any, content: string, sources: Record
       || typeof row?.reason !== 'string' || row.reason.trim().length < 8
       || (row.status === 'supported' && !bridge.verified)) {
       errors.push(`第${index + 1}项因果审查缺少可验证行动、结果或成立条件`);
+      return;
+    }
+    // A result and its enclosing paragraph are the same assertion. If that
+    // paragraph does not even contain the cited action, it cannot serve as
+    // an independent bridge. Ask the existing citation correction to locate
+    // actual conditions; this is NOT an automatically invented story defect.
+    if(row.status==='supported'&&row.basisSource==='body'
+      &&typeof row.bridgeAnchorId==='string'&&typeof row.resultAnchorId==='string'
+      &&(resultOnlyBridges.has(row.bridgeAnchorId)||row.resultAnchorId===row.bridgeAnchorId||row.resultAnchorId.startsWith(row.bridgeAnchorId+':'))
+      &&!bridge.quote.includes(action.quote)){
+      errors.push(`第${index + 1}项因果审查以结果自身或其上层段落自证，须定位独立成立条件；直接结果可引用含实际行动的同段`);
       return;
     }
     if (row.status === 'gap') issues.push({

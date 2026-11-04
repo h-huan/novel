@@ -32,7 +32,7 @@ it('reuses existing exact causal action in reversalEffect without an invented se
  const row={...supported,reversalCheck:{status:'supported' as const,
    actionEvidenceRef:'S1.reversalEffect',reason:'文件已交给窗口，随后工作人员核验并暂停登记'},
    links:candidate.causalPlan.map((_,i)=>({ref:`S1.causalPlan[${i}]`,status:'supported',
-     reason:'逐环节核对实际行动和发生条件'}))};
+     reason:'逐环节核对实际行动和发生条件',decisionCheck:{status:'not_required',reason:'本例核验既定程序操作的引用，不含已有否决决定的改判'}}))};
  expect(premisePayoffReviewIssues({payoffChecks:[row]},input)).toEqual([]);
  const wrong={...candidate,causalPlan:[{...candidate.causalPlan[0],action:{field:'reversalEffect',
    quote:'工作人员核验身份后暂停登记'}},candidate.causalPlan[1]]};
@@ -136,7 +136,7 @@ it('permits restoring an omitted condition only with real same-ID original-pool 
 it('allows an actual independent condition in payoff outside the generator index, but does not prove story semantics',()=>{
  const p={...selection.selected[0],payoff:'她把录音交给值班人员，值班人员核验来访登记后通知警员到场。警方暂停处理。',
   causalPlan:[{action:{field:'activeChoice',quote:selection.selected[0].activeChoice},conditions:[],result:{field:'payoff',quote:'警方暂停处理。'}}]};
- const input={...selection,selected:[p]},row={...supported,conditionEvidenceRef:'S1.payoff',conditionEvidenceQuote:'值班人员核验来访登记后通知警员到场',links:[{ref:'S1.causalPlan[0]',status:'supported',reason:'核验登记并通知警员是实际写出的条件'}]};
+ const input={...selection,selected:[p]},row={...supported,conditionEvidenceRef:'S1.payoff',conditionEvidenceQuote:'值班人员核验来访登记后通知警员到场',links:[{ref:'S1.causalPlan[0]',status:'supported',reason:'核验登记并通知警员是实际写出的条件',decisionCheck:{status:'not_required',reason:'本例只核验实际通知与程序操作，不涉及第三者改变既有决定'}}]};
  expect(premisePayoffReviewIssues({payoffChecks:[row]},input)).toEqual([]);
  for(const quote of [undefined,'警方暂停处理。','暂停处理',p.payoff,'另一题材才有的证据']){
   expect(premisePayoffReviewIssues({payoffChecks:[{...row,conditionEvidenceQuote:quote}]},input).length).toBeGreaterThan(0);

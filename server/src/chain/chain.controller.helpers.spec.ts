@@ -643,9 +643,9 @@ describe('chapter responsibility semantic repair', () => {
 
   const repairedChapters = (firstResponsibility: string) => ({
     data: {
-      chapters: [
-        { order: 1, title: '断供', function: 'development', responsibility: firstResponsibility },
-        { order: 2, title: '验毒', function: 'climax', responsibility: '明确师兄在九名食客内，吃下锅气菜后显出毒斑' },
+      chapterResponsibilities: [
+        { chapter: 1, title: '断供', function: 'development', responsibility: firstResponsibility, prerequisites: [], timeline: '依责任中的已确认触发时点', exitState: firstResponsibility },
+        { chapter: 2, title: '验毒', function: 'climax', responsibility: '明确师兄在九名食客内，吃下锅气菜后显出毒斑', prerequisites:['师兄属于九名食客且实际吃下'],timeline:'进食以后',exitState:'师兄显出毒斑' },
       ],
     },
   });

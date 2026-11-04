@@ -90,6 +90,9 @@ export function chapterResponsibilityPlanningDirective(includeSharedPolicies = t
   ].join("\n");
 }
 
+/** Shared output contract for short and long chapter planning. */
+export const CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE = { chapterResponsibilities: [{chapter:1,title:'原章节标题',function:'章节功能',responsibility:'本章实际行动与唯一推进任务',prerequisites:['由已确认资源、规则和先行动作取得且本章仍有效的条件；普通自主动作允许空数组'],timeline:'继承既定期限的相对时点，不补精确时长',exitState:'本章行动实际产生的状态，未完成目标明确保留'}] };
+
 /** The same entry/exit contract must survive analysis -> volume -> detail. */
 export function describeChapterResponsibilityPlan(value: unknown, chapterLimit?: unknown): string[] {
   const plan = (value as any)?.chapterResponsibilities;
@@ -126,7 +129,7 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
     `【待审查章节分工】${JSON.stringify(input.plan)}`,
-    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章核对：关键结果依赖什么，具体怎样取得，该章是否仍有效，前章退出状态有没有撤销它。名称重复或写在prerequisites里不等于已经取得；受规则约束的进出、位置变化和终局反制也不能只列目标而省略成立路径。普通自主行动及自身直接结果不强加额外程序。除原consistent/contradictions外，返回conditionChecks，每章恰好一项：{"chapter":1,"taskEvidence":"本章responsibility逐字原文","status":"supported|gap|not_required","bridgeSource":"body或project_context","bridgeEvidence":"计划中实际取得路径或已确认规则明确允许直接执行的逐字依据；gap可空","reason":"具体条件如何取得、跨章是否失效；not_required说明为何是普通自主行动"}。gap必须对应同章contradictions，supported必须给实际桥接证据；不能只返回consistent:true跳过核对。' : '',
+    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章核对：关键结果依赖什么，具体怎样取得，该章是否仍有效，前章退出状态有没有撤销它。名称重复或写在prerequisites里不等于已经取得；受规则约束的进出、位置变化和终局反制也不能只列目标而省略成立路径。普通自主行动及自身直接结果不强加额外程序。除原consistent/contradictions外，返回conditionChecks，每章恰好一项：{"chapter":1,"taskEvidence":"本章responsibility逐字原文","exitStateEvidence":"本章exitState逐字原文；reason必须核对实际行动能否经已有条件产生这一完整结果，不仅核对任务可启动","status":"supported|gap|not_required","bridgeSource":"body","bridgeEvidence":"本章或前章计划中实际取得路径的逐字依据，不引用exitState结果断言或未来章行动；普通自主动作可用not_required，gap可空","reason":"具体条件如何取得、跨章是否失效；not_required说明为何是普通自主行动"}。gap必须对应同章contradictions，supported必须给实际桥接证据；不能只返回consistent:true跳过核对。' : '',
     "逐章按下列判据检查：",
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,

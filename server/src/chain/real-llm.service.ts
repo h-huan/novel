@@ -1,5 +1,7 @@
+import {chapterConditionReviewIssues} from './chapter-condition-review';
+import { bindModelRequestClock, remainingModelRequestTime } from './model-request-clock';
 import {generationOutputBounds} from '../config/generation-budgets';
-import { assertGenerationActive, currentGenerationSignal, GenerationCancelledError } from '../common/generation-cancellation';
+import { assertGenerationActive, currentGenerationSignal, generationCancellationReason, GenerationDeadlineExceededError, waitForGeneration } from '../common/generation-cancellation';
 import { reviewCharacterContracts } from '../modules/writing-quality/character-contract';
 import { narrativeTrace } from '../modules/writing-quality/narrative-trace';
 import { repairPrompt, executeRepair } from '../modules/writing-quality/repair-strategy-registry';
@@ -261,6 +263,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
+    request = bindModelRequestClock(request);
     assertGenerationActive();
     const discoveryRequestId = request.metrics?.discoveryRequestId ?? currentDiscoveryRequestId();
     if (discoveryRequestId && request.metrics?.discoveryRequestId !== discoveryRequestId) {
@@ -293,7 +296,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     } catch (error) {
       const failedContent = (error as {generatedContent?:unknown})?.generatedContent;
       if (typeof failedContent === 'string') generatedOutput = failedContent;
-      if (run) this.metrics.finishRun(run.id, currentGenerationSignal()?.aborted ? 'cancelled' : 'failed', start, generatedOutput, currentGenerationSignal()?.aborted ? '已取消生成，留存输出未验收' : error instanceof Error ? error.message : String(error));
+      if (run) this.metrics.finishRun(run.id, currentGenerationSignal()?.aborted ? 'cancelled' : 'failed', start, generatedOutput, currentGenerationSignal()?.aborted ? (currentGenerationSignal()?.reason instanceof GenerationDeadlineExceededError ? generationCancellationReason().message : '已取消生成，留存输出未验收') : error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -362,19 +365,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const contradictions = Array.isArray(value.contradictions) ? value.contradictions : [];
       if (typeof value?.consistent !== 'boolean' || !Array.isArray(value.contradictions)
         || value.consistent !== (contradictions.length === 0)) protocolErrors.push('边界审查结论与问题清单不一致');
-      if (!Array.isArray(value.conditionChecks) || value.conditionChecks.length !== original.length
-        || new Set(value.conditionChecks.map((check: any) => check?.chapter)).size !== original.length
-        || value.conditionChecks.some((check: any) => {
-          const chapter = plan.chapterResponsibilities[Number(check?.chapter) - 1];
-          return !Number.isInteger(check?.chapter) || !chapter
-            || !resolveQualityEvidence(chapter.responsibility, check.taskEvidence).verified
-            || typeof check.reason !== 'string' || check.reason.trim().length < 8
-            || !['supported', 'gap', 'not_required'].includes(check.status)
-            || (check.status === 'gap' && !contradictions.some((finding: any) => finding.chapter === check.chapter))
-            || (check.status === 'supported' && !(Array.isArray(check.bridgeAnchorIds) ? check.anchoredBridgeVerified
-              : resolveQualityEvidence(check.bridgeSource === 'body' ? JSON.stringify(plan)
-                : check.bridgeSource === 'project_context' ? sources : '', check.bridgeEvidence).verified));
-        })) protocolErrors.push('逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported至少需要一个写出实际取得动作的body地址，不能只引用project_context');
+      protocolErrors.push(...chapterConditionReviewIssues(value,plan.chapterResponsibilities,sources,true));
       for (const finding of contradictions) {
         const evidence = [...(finding.anchoredRuleEvidence || []), finding.ruleEvidence, ...quotedText(String(finding.ruleEvidence || '')).map(x => x.text)];
         if (!isEvidencedChapterResponsibilityConflict(finding) || finding.chapter > original.length
@@ -837,6 +828,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   private async generateInternal(request: LLMRequest): Promise<LLMResponse> {
+    request = bindModelRequestClock(request);
     const startTime = Date.now();
     const configuredMaxTokens = request.maxTokens ?? this.getConfiguredMaxTokens(request.scenario || 'daily');
     if (!Number.isInteger(configuredMaxTokens) || configuredMaxTokens <= 0) {
@@ -872,6 +864,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       call: (signal: AbortSignal) => Promise<ModelCallResult>,
       ms: number,
     ): Promise<ModelCallResult> => {
+      ms = Math.min(ms, remainingModelRequestTime(request));
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeoutP = new Promise<never>((_, reject) => {
@@ -893,14 +886,19 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         const signal = userSignal ? AbortSignal.any([controller.signal, userSignal]) : controller.signal;
         let abortHandler: (() => void) | undefined;
         const cancelled = new Promise<never>((_, reject) => {
-          abortHandler = () => reject(new GenerationCancelledError());
+          abortHandler = () => reject(generationCancellationReason(userSignal));
           userSignal?.addEventListener('abort', abortHandler, { once: true });
         });
         try {
           const result = await Promise.race([call(signal), timeoutP, cancelled]);
+          remainingModelRequestTime(request);
           assertGenerationActive();
           return result;
         } finally { if (abortHandler) userSignal?.removeEventListener('abort', abortHandler); }
+      } catch(error) {
+        assertGenerationActive();
+        remainingModelRequestTime(request);
+        throw error;
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -1172,7 +1170,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           internalRetries++;
           // 空内容实测是上游瞬时故障（同 prompt/同模型时好时坏）：立刻重放命中率低，
           // 退避一次再重发，避免一次抖动就把整章质检判失败。
-          await new Promise(resolve => setTimeout(resolve, LLM_TUNABLES.RETRY_BASE_DELAY_MS));
+          await waitForGeneration(LLM_TUNABLES.RETRY_BASE_DELAY_MS);
           continue;
         }
 
@@ -1197,7 +1195,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       if (isNetworkErr) {
         const delays = [1500];
         for (let netRetry = 0; netRetry < delays.length; netRetry++) {
-          await new Promise(r => setTimeout(r, delays[netRetry]));
+          await waitForGeneration(delays[netRetry]);
           this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'daily'}`);
           try {
             const result = await withTimeout(
@@ -1809,4 +1807,3 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     return false;
   }
 }
-

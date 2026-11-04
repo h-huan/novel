@@ -162,3 +162,51 @@ it('keeps conditional prerequisites attached while still inventorying unrelated 
   expect(anchors.some(row=>row.source==='body'&&row.text===text)).toBe(true);
  }
 });
+
+it('does not accept a result-only parent paragraph as its own independent causal bridge',()=>{
+ const body='灯影出现在街口。\n这时候想往回退，已经来不及了。';
+ const audit={status:'evaluated',reason:'逐项核对行动和结果的原文依据',transitions:[{
+  actionAnchorId:'body:p1',resultAnchorId:'body:projection:s2',bridgeAnchorId:'body:p2',
+  actionEvidence:'灯影出现在街口。',resultEvidence:'已经来不及了。',bridgeEvidence:'这时候想往回退，已经来不及了。',
+  basisSource:'body',status:'supported',reason:'收束句已明确写退回去来不及了。'}]};
+ const checked=validateCausalAudit(audit,body,{});
+ expect(checked.verified).toBe(false);expect(checked.errors[0]).toContain('结果自身');
+ expect(checked.issues).toEqual([]);
+ const fixed={...audit,transitions:[{...audit.transitions[0],status:'gap',bridgeEvidence:'',reason:'灯影出现并未建立封堵退路的实际行动条件'}]};
+ expect(validateCausalAudit(fixed,body,{}).issues).toHaveLength(1);
+ const direct={...audit,transitions:[{...audit.transitions[0],actionEvidence:'这时候想往回退，已经来不及了。'}]};
+ // A same-paragraph direct action is not rejected by this address-only check;
+ // its actual causal sufficiency remains the independent semantic duty.
+ expect(validateCausalAudit(direct,body,{}).verified).toBe(true);
+});
+
+it('offers independent condition clauses from narrative and world sources without creating extra result obligations',()=>{
+ const chapters=[{content:'操作员拉下开关。线路失电，触点无法闭合，设备停机。',characterActions:[{action:'拉下开关',result:'设备停机。'}]}];
+ const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({rules:['只有隔离闸断开，才允许检修，现场仍要核对警示灯。']})};
+ const anchors=causalEvidenceAnchors(body,sources);
+ const action=anchors.find(x=>x.path==='0.content'&&x.text==='操作员拉下开关。')!;
+ const bridge=anchors.find(x=>x.path==='0.content'&&x.text==='线路失电，')!;
+ const result=causalChapterResultAnchors(anchors,0);
+ expect(action.id).toBe('body:v1:c1');expect(bridge.id).toBe('body:v1:c2:s1');
+ expect(result).toHaveLength(1);expect(result[0].path).toBe('0.characterActions.0.result');
+ expect(anchors.some(x=>x.source==='project_context'&&x.text==='只有隔离闸断开，才允许检修，')).toBe(true);
+ expect(anchors.some(x=>x.source==='project_context'&&x.text==='只有隔离闸断开，')).toBe(false);
+ const reviewed=materializeCausalAuditAnchors({status:'evaluated',reason:'核对断电条件与当前停机结果的真实来源',transitions:[{
+  actionAnchorId:action.id,resultAnchorId:result[0].id,bridgeAnchorId:bridge.id,status:'supported',reason:'拉下开关使线路失电，触点无法闭合，故设备停机。',
+ }]},body,sources);
+ expect(validateCausalAudit(reviewed,body,sources)).toMatchObject({verified:true,issues:[]});
+ expect(reviewed.transitions[0].bridgeEvidence).toBe('线路失电，');
+ expect(JSON.parse(body)).toEqual(chapters);
+});
+
+it('uses the same fine condition directory for plain prose and structured chapter content',()=>{
+ const text='操作员拉下开关。线路失电，触点无法闭合，设备停机。';
+ const plain=causalEvidenceAnchors(text,{}),structured=causalEvidenceAnchors(JSON.stringify([{content:text}]),{});
+ expect(plain.find(x=>x.id==='body:p1')?.text).toBe(text);
+ for(const clause of ['操作员拉下开关。','线路失电，','触点无法闭合，','设备停机。']){
+  expect(plain.some(x=>x.text===clause)).toBe(true);expect(structured.some(x=>x.text===clause)).toBe(true);
+ }
+ const conditional=causalEvidenceAnchors('只有隔离闸断开，才允许检修，现场仍要核对警示灯。',{});
+ expect(conditional.some(x=>x.text==='只有隔离闸断开，才允许检修，')).toBe(true);
+ expect(conditional.some(x=>x.text==='只有隔离闸断开，')).toBe(false);
+});

@@ -253,7 +253,7 @@ it('memoizes independently approved plan-only corrections without ever skipping 
   const independent=report(pending);
   const checked=independent.payoffChecks!.map((row,index)=>({...row,
     links:[{ref:`S${index+1}.causalPlan[0]`,status:'supported' as const,
-      reason:'主角原有行动已满足每一环节的实际必要条件'}]}));
+      reason:'主角原有行动已满足每一环节的实际必要条件',decisionCheck:{status:'not_required' as const,reason:'该索引复用样例仅有既定动作的直接后果，不涉及外部改判'}}]}));
   expect(premisePayoffReviewIssues({payoffChecks:checked},pending)).toEqual([]);
   return {...baseline,payoffChecks:checked,issues:[],passed:true};
  });

@@ -1,10 +1,13 @@
+import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
+import {chapterConditionReviewIssues} from './chapter-condition-review';
+import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
 import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
 import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
-import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
+import {plannedPreselectionCount,fundedSourceReviewGroups,discoveryDeadlineResult} from './discovery-fulfillment';
 import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
@@ -38,7 +41,7 @@ import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources, foreshadowEnrichmentOutputIssues } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
 import { premiseSourceBatches, mergePremiseSourceBatches, premiseSourceCallBudget } from './premise-source-batches';
-import { withGenerationSignal, generationTasks, assertGenerationActive, currentGenerationSignal } from '../common/generation-cancellation';
+import { withGenerationSignal, generationTasks, assertGenerationActive, currentGenerationSignal, GenerationDeadlineExceededError } from '../common/generation-cancellation';
 import {parseWholeReviewJson} from './review-json';
 import { crossStageRepairDiagnosticPositions, crossStageRepairFocusedAnchors } from './cross-stage-patch';
 import { describeCrossStagePathDesign, crossStagePathReviewInput } from './cross-stage-review';
@@ -196,7 +199,7 @@ import {
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
 import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
-import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
+import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY, IDEA_DISCOVERY_MAX_WALL_MS } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
 import { invalidReaderGoalQuotes, readerGoalQuoteRepairPrompt, applyReaderGoalQuoteRepairs, type ReaderGoalReview } from './reader-goal-review';
@@ -4739,6 +4742,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
     targetAudience?: string;
     discoveryRequestId?: string;
   }) {
+    const requestReceivedAt = Date.now();
     const requestedCount = Number.isInteger(Number(dto.count)) && Number(dto.count) > 0
       ? Math.min(Number(dto.count), 10)
       : 5;
@@ -4859,11 +4863,16 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       this.logger.warn('idea-discover: 相同配置仍在生成，复用当前任务，未重复调用模型');
       return active.task;
     }
-    const discoveryRequestStartedAt = new Date().toISOString();
+    const discoveryRequestStartedAt = new Date(requestReceivedAt).toISOString();
     const task = generationTasks.run('discovery', discoveryRequestId, '', () =>
       discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
       try {
-        const result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
+        let result = await this.runIdeaDiscovery(normalizedDto, requestedCount);
+        const signalReason = currentGenerationSignal()?.reason;
+        const stop = signalReason instanceof GenerationDeadlineExceededError ? signalReason
+          : Date.now() - requestReceivedAt >= IDEA_DISCOVERY_MAX_WALL_MS ? new GenerationDeadlineExceededError('discovery') : undefined;
+        if(stop)
+          result = discoveryDeadlineResult(result,requestedCount,IDEA_DISCOVERY_MAX_WALL_MS,stop.message) as typeof result;
         if (result && typeof result === 'object') {
           Object.defineProperties(result, {
             discoveryRequestId: { value: discoveryRequestId, enumerable: false, configurable: true },
@@ -4880,7 +4889,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         });
         throw error;
       }
-    }));
+    }), {deadlineAt:requestReceivedAt + IDEA_DISCOVERY_MAX_WALL_MS});
     this.ideaDiscoveryInFlight.set(requestKey, {
       task, canonicalRequestId: discoveryRequestId, requestIds: new Set([discoveryRequestId]),
     });
@@ -5750,6 +5759,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           : 'submissionTags 为 []，不得编造未核实的平台投稿标签';
         const cardSchema = JSON.parse(outputSchemaWithAuto);
         delete cardSchema.ideas[0].ending;
+        if(typeof selectedPremise.readerQuestion==='string'&&selectedPremise.readerQuestion.trim())delete cardSchema.ideas[0].noveltyProof.readerQuestion;
         for(const field of PREMISE_CREATION_CHOICE_FIELDS)if(selectedPremise[field]!==undefined)delete cardSchema.ideas[0][field];
         cardSchema.ideas[0].storyCategory = cardCategory;
         if(selectedPremise.submissionTags===undefined)cardSchema.ideas[0].submissionTags = dto.submissionTags.length ? dto.submissionTags : (submission.required ? ['从本分类标签候选选择1-2项'] : []);
@@ -7097,15 +7107,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
         const enoughSharedBudget = !shared
           || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
-        // One optional survivor can be screened before final-card rejection
-        // forces a serial late refill. Reuse the original source/reselection
-        // allowances; never consume the protected final-refill reserve.
-        const canFundScreeningHedge = missingSlots===0 && recoverySlots.length>0
-          && freshPoolCount>0 && !!shared && shared.reselection.remaining>0
-          && shared.reviews.remaining>=minimumReselectionReviewCalls(
-            initial.selected.length,true,recoverySlots.length,
-            recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode);
-        if ((missingSlots === 0 && !canFundScreeningHedge) || !enoughOriginalCandidates || !enoughSharedBudget) {
+        // A screened surplus is not user demand. Keep the existing final-card
+        // refill reserve for a deficit proven by the original full-card Gate.
+        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
           const capacityMet=missingSlots===0;
           this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
             +(capacityMet?' 个已独立复核题材，已满足本次成卡容量；不为可选冗余继续换选。':' 个已独立复核题材；原池候选或共享预算不足，保留真实缺额。'));
@@ -8789,35 +8793,15 @@ ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || 
 ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : ''}
 用户配置的目标总字数为${dto.targetWords}字；创作宪法规定每章${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}字，因此全书章数必须在${minChapters}-${maxChapters}章之间。已确认题材若给出可行的 plannedChapters，优先保持该章数；本次应规划${recommendedChapters}章。章节数量由完整承载这条既定事件链所需的场景和节奏决定，不得改写时代、人物、人物关系、核心冲突、反转和结局，不得新增另一套世界规则。
 【生成前能力边界编译】${chapterResponsibilityPlanningDirective(false)}
-每行一章，格式: 序号|标题|功能|本章唯一推进任务。最后一栏必须说明本章推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复同一次推进任务（含换词重述的同类行动）。功能:${titleFunctionGuide}。禁止全部使用paving，只输出纯文本。`,
+每章必须在同次生成中写明必要条件的来源、取得动作及跨章有效性、时间边界和实际出口状态，再安排本章任务；不是在后审补造成立条件。相邻章节不得重复同一次推进任务。功能:${titleFunctionGuide}。只输出一个合法JSON对象，字段形状：${JSON.stringify(CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE)}。`,
               scenario: 'outline', temperature: 0.7, timeout: LLM_TUNABLES.timeoutSimple(),
               deferQualityGate: true,
+              responseFormat: 'json_object', maxTokens: this.realLLM.getConfiguredMaxTokens('outline'),
               metrics: { projectId, stepKey: 'chapter_responsibility_plan' },
         });
         const titleRawContent = titleResponse.content || '';
-        chapterTitles = [];
-        if (titleRawContent) {
-          for (const line of titleRawContent.split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            const parts = trimmed.split('|');
-            if (parts.length >= 2 && /\d/.test(parts[0])) {
-              const parsedOrder = Math.max(0, (parseInt(parts[0], 10) || chapterTitles.length + 1) - 1);
-              chapterTitles.push({
-                order: parsedOrder,
-                title: parts[1].trim(),
-                func: normalizeOutlineChapterFunction(parts[2], parsedOrder, isShort),
-                brief: parts.slice(3).join('|').trim(),
-              });
-            } else {
-              const m = trimmed.match(/^(\d+)[.\s、]+(.+)/);
-              if (m) {
-                const parsedOrder = Math.max(0, (parseInt(m[1], 10) || chapterTitles.length + 1) - 1);
-                chapterTitles.push({ order: parsedOrder, title: m[2].trim(), func: normalizeOutlineChapterFunction(undefined, parsedOrder, isShort), brief: '' });
-              }
-            }
-          }
-        }
+        chapterTitles = creationChapterContracts(this.safeExtractJson<any>(titleRawContent,null),
+          (value,index)=>normalizeOutlineChapterFunction(value,index,isShort));
         chapterCount = chapterTitles.length;
         if (chapterCount === 0) {
           throw new Error('章节规划未返回任何有效章节。未使用固定章节数或基础标题降级，项目创建已停止。');
@@ -8826,35 +8810,21 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           // 章数不可行：给模型一次明确章数的重规划机会，避免直接失败导致创建循环
           this.logger.warn(`章节规划章数 ${chapterCount} 不在可行区间 ${minChapters}-${maxChapters}，按目标字数重规划一次`);
           try {
-            const retryResponse = await this.llmCallWithRetry<{ chapters: Array<{ order: number; title: string; function: string; responsibility: string }> }>(
+            const retryResponse = await this.llmCallWithRetry<any>(
               '章节数量精确重规划',
               `为${isShort ? '短篇' : '长篇'}规划章节，不能另写同名故事。
 唯一故事基准:${canonicalCreativeBrief}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确认故事闭环:${JSON.stringify(shortStoryCard)}` : ''}
-用户配置的目标总字数为${dto.targetWords}字；创作宪法规定每章${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}字，因此 chapters 数组必须恰好包含 ${recommendedChapters} 项（不得多也不得少），order 必须依次为1到${recommendedChapters}。${chapterResponsibilityPlanningDirective(false)}每项只承担一个不可重复的推进任务，必须说明推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复承担同一推进任务（设定规定为反复发生的机制保留其重复性）。function可用:${titleFunctionGuide}。禁止全部使用paving。只输出JSON对象:{"chapters":[{"order":1,"title":"标题","function":"功能","responsibility":"本章唯一推进任务"}]}。`,
+用户配置的目标总字数为${dto.targetWords}字；创作宪法规定每章${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}字，因此 chapterResponsibilities 数组必须恰好包含 ${recommendedChapters} 项（不得多也不得少），chapter 必须依次为1到${recommendedChapters}。${chapterResponsibilityPlanningDirective(false)}每项只承担一个不可重复的推进任务，必须说明推进哪个既定事件、揭示什么以及结束时造成什么结果；相邻章节不得重复承担同一推进任务（设定规定为反复发生的机制保留其重复性）。function可用:${titleFunctionGuide}。禁止全部使用paving。只输出完整JSON，必要条件、timeline和exitState不得省略：${JSON.stringify(CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE)}。`,
               {
                 scenario: 'outline', temperature: 0.2, timeout: LLM_TUNABLES.timeoutSimple(),
                 projectId, stepKey: 'chapter_responsibility_plan_exact_count',
-                validate: value => Array.isArray((value as any)?.chapters)
-                  && (value as any).chapters.length === recommendedChapters
-                  && (value as any).chapters.every((chapter: any, index: number) => Number(chapter?.order) === index + 1
-                    && Boolean(String(chapter?.title || '').trim())
-                    && Boolean(String(chapter?.function || '').trim())
-                    && Boolean(String(chapter?.responsibility || '').trim())),
-                describeValidation: value => [
-                  `chapters必须恰好为${recommendedChapters}项，当前为${Array.isArray((value as any)?.chapters) ? (value as any).chapters.length : 0}项`,
-                  `order必须严格为1到${recommendedChapters}，且title、function、responsibility均非空`,
-                ],
+                validate: value => {try{return creationChapterContracts(value,(v,i)=>normalizeOutlineChapterFunction(v,i,isShort)).length===recommendedChapters;}catch{return false;}},
+                describeValidation: value => [...describeChapterResponsibilityPlan(value), '章节数量必须恰好为'+recommendedChapters+'，并完整返回进入条件、时间边界及出口状态'],
               },
             );
-            const exactChapters = retryResponse.data?.chapters || [];
-            chapterTitles = exactChapters.map((chapter, index) => ({
-              order: index,
-              title: String(chapter.title).trim(),
-              func: normalizeOutlineChapterFunction(chapter.function, index, isShort),
-              brief: String(chapter.responsibility).trim(),
-            }));
+            chapterTitles = creationChapterContracts(retryResponse.data,(v,i)=>normalizeOutlineChapterFunction(v,i,isShort));
             chapterCount = chapterTitles.length;
           } catch (error: any) {
             this.logger.warn(`章节重规划失败: ${error.message}`);
@@ -8872,7 +8842,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               creativeBrief: canonicalCreativeBrief,
               shortStoryCard,
               worldContinuityDirective,
-              plan,
+              plan, entryExitContract: true,
             }),
             {
               // 全书章节分工边界审查：同样是审查任务，按 review 标准执行（判据同上——daily 零标准注入，
@@ -8882,12 +8852,15 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               validate: value => {
                 const audit = value as any;
                 if (!audit || typeof audit !== "object" || Array.isArray(audit) || !Array.isArray(audit.contradictions)) return false;
+                if (chapterConditionReviewIssues(audit,plan,JSON.stringify({canonicalCreativeBrief,worldContinuityDirective}),false,true).length) return false;
                 if (audit.consistent === true) return audit.contradictions.length === 0;
                 if (audit.consistent !== false) return false;
                 return audit.contradictions.length > 0 && audit.contradictions.every((item: any) => isEvidencedChapterResponsibilityConflict(item));
               },
               describeValidation: value => {
                 const audit = value as any;
+                const conditionIssues=chapterConditionReviewIssues(audit,plan,JSON.stringify({canonicalCreativeBrief,worldContinuityDirective}),false,true);
+                if(conditionIssues.length)return conditionIssues;
                 if (audit?.consistent === true && Array.isArray(audit.contradictions) && audit.contradictions.length > 0) {
                   return ['consistent 为 true 时 contradictions 必须为空数组，不得只报冲突不改 consistent'];
                 }
@@ -8911,12 +8884,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
             .filter(Boolean);
         };
 
-        const initialResponsibilityPlan = chapterTitles.map((chapter, index) => ({
-          chapter: index + 1,
-          title: chapter.title,
-          function: chapter.func,
-          responsibility: chapter.brief || '',
-        }));
+        const initialResponsibilityPlan = creationResponsibilityPlan(chapterTitles);
         let responsibilityIssues = await auditChapterResponsibilities(initialResponsibilityPlan);
         if (responsibilityIssues.length > 0) {
           const repaired = await this.repairChapterResponsibilityPlan({
@@ -8958,11 +8926,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         }> = [];
         const ideaSpan = `${outlineContextPrefix ? `世界观上下文:${outlineContextPrefix}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
         // 叙事节拍来自每章真实职责。章节位置只定义开篇/终章边界，不再按固定章数制造爽点弧。
-        const chapterResponsibilityPlan = buildNarrativeBeatPlan(chapterTitles.map(chapter => ({
-          title: chapter.title,
-          function: chapter.func,
-          responsibility: chapter.brief || '',
-        })));
+        const chapterResponsibilityPlan = buildNarrativeBeatPlan(creationResponsibilityPlan(chapterTitles));
 
         const unwrapChapter = (value: any, chapterLabel?: string, silent = false): Record<string, any> | null => {
           const label = chapterLabel ? `第${chapterLabel}章 ` : '';
@@ -9019,6 +8983,7 @@ ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || 
 ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)}
 【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
+【已通过前置审查的完整本章合同；条件须在实际事件中取得，不是结果自证】${JSON.stringify(creationResponsibilityPlan([expectedChapter]).map(row=>({...row,chapter:order+1}))[0])}
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
 【本章职责的实际完成条件】先按已确认前章事实核对该任务是否已经完成。若前章已通过联名、决定、交付或对手改口实现目标，本章不能再把保管同一文件、重述既有决定写成第二次实现该目标；本章只展开仍未兑现的具体行动、代价、关系变化与独立结果。因上游章职能措辞重复而无法以新行动完成时，保留已确认结果并写出本章实际的后续推进，不伪造前章成果重新发生。content、scenes.outcome、characterActions.result、characterStates及伏笔回收须据同一当前章行动投影。
 【后续章节职责与节拍（本章禁止提前执行）】${JSON.stringify(futureChapterTasks)}
@@ -9291,6 +9256,7 @@ ${(() => {
             ending: chData.ending || '',
             reversals: [],
             wordCountReason,
+            responsibilityContract: creationResponsibilityPlan([expectedChapter]).map(row=>({...row,chapter:order+1}))[0],
           };
           preparedChapters.push({
             oid: uuid(),
@@ -11143,6 +11109,7 @@ ${enrichToneDirective}
         try {
           const scenes = JSON.parse(chOutline.scenes || '{}');
           if (scenes.details) result.outline.chapterDetail = scenes.details;
+          if (scenes.responsibilityContract) result.context.chapterResponsibilityContract = scenes.responsibilityContract;
         } catch {}
       }
 
@@ -12084,6 +12051,7 @@ ${summarizeOutlineConsistency(pending)}`,
           ? JSON.parse(outline.scenes)
           : outline.scenes;
         if (typeof scenes === 'object' && scenes !== null) {
+          if (scenes.responsibilityContract) parts.push('\n本章进入条件、时间与出口合同：'+JSON.stringify(scenes.responsibilityContract));
           if (scenes.conflict)          parts.push(`\n核心冲突：${scenes.conflict}`);
           if (scenes.characterActions)  parts.push(`\n人物行动：${Array.isArray(scenes.characterActions)?scenes.characterActions.map((action:any)=>typeof action==="string"?action:JSON.stringify(action)).join("；"):scenes.characterActions}`);
           if (scenes.highlight)         parts.push(`\n爽点/高潮：${scenes.highlight}`);
@@ -12909,16 +12877,16 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
   }
 
   private async repairChapterResponsibilityPlan(input: {
-    chapterTitles: Array<{ order: number; title: string; func: string; brief: string }>;
+    chapterTitles: CreationChapterContract[];
     initialIssues: string[];
     canonicalCreativeBrief: string;
     shortStoryCard: unknown;
     worldContinuityDirective: string;
     isShort: boolean;
     projectId?: string;
-    audit: (plan: Array<{ chapter: number; title: string; function: string; responsibility: string }>) => Promise<string[]>;
+    audit: (plan: ReturnType<typeof creationResponsibilityPlan>) => Promise<string[]>;
   }): Promise<{
-    chapterTitles: Array<{ order: number; title: string; func: string; brief: string }>;
+    chapterTitles: CreationChapterContract[];
     issues: string[];
   }> {
     const repairDirectives: Record<ChapterResponsibilityRepairStrategy, string> = {
@@ -12944,12 +12912,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     if (auditedPatch.applied.length > 0) {
       const beforePatchIssues = [...issues];
       chapterTitles = auditedPatch.chapterTitles;
-      issues = await input.audit(chapterTitles.map((chapter, index) => ({
-        chapter: index + 1,
-        title: chapter.title,
-        function: chapter.func,
-        responsibility: chapter.brief,
-      })));
+      issues = await input.audit(creationResponsibilityPlan(chapterTitles));
       if (input.projectId) {
         this.generationMetrics?.recordChapterResponsibilityRepairAttempt(
           input.projectId,
@@ -12966,12 +12929,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     for (let round = 1; round <= maxRepairRounds && issues.length > 0; round++) {
       const strategyId = repairStrategies[round - 1];
       const issuesBeforeRepair = [...issues];
-      const currentPlan = chapterTitles.map((chapter, index) => ({
-        chapter: index + 1,
-        title: chapter.title,
-        function: chapter.func,
-        responsibility: chapter.brief,
-      }));
+      const currentPlan = creationResponsibilityPlan(chapterTitles);
       const issueContracts = issues.map((issue, index) => {
         const parsed = parseChapterResponsibilityIssue(issue);
         return parsed ? {
@@ -12985,7 +12943,7 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
       });
       const replanResult = await this.llmCallWithRetry<any>(
         `全书章节分工规则定向修复（策略：${strategyId}）`,
-        `修订当前全书章节分工。${buildChapterResponsibilityRepairPrompt({ includeSharedPolicies: false, strategyDirective: repairDirectives[strategyId], issueContracts, currentPlan, creativeBrief: input.canonicalCreativeBrief, shortStoryCard: input.shortStoryCard, worldContinuityDirective: input.worldContinuityDirective, requiredChapterCount })}`,
+        `修订当前全书章节分工。${buildChapterResponsibilityRepairPrompt({ includeSharedPolicies: false, strategyDirective: repairDirectives[strategyId], issueContracts, currentPlan, creativeBrief: input.canonicalCreativeBrief, shortStoryCard: input.shortStoryCard, worldContinuityDirective: input.worldContinuityDirective, requiredChapterCount, entryExitContract:true })}`,
         {
           // 章节分工定向修复：它是上面那条审查的修复闭环，必须与审查跑在同一份标准下，
           // 否则「按 review 判不合格、按零标准改」会出现改完仍不满足同一判据的重复轮次。
@@ -12998,9 +12956,9 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           projectId: input.projectId,
           stepKey: 'chapter_responsibility_repair',
           validate: value => {
-            const chapters = Array.isArray((value as any)?.chapters) ? (value as any).chapters : [];
+            const chapters = Array.isArray((value as any)?.chapterResponsibilities) ? (value as any).chapterResponsibilities : [];
             const resolutions = Array.isArray((value as any)?.resolutions) ? (value as any).resolutions : [];
-            if (chapters.length !== requiredChapterCount) return false;
+            if (chapters.length !== requiredChapterCount || describeChapterResponsibilityPlan(value).length) return false;
             const coveredIssues = new Set(resolutions
               .filter((resolution: any) => Array.isArray(resolution?.chapters)
                 && resolution.chapters.length > 0
@@ -13009,12 +12967,12 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
                 && String(resolution?.ruleEvidence || resolution?.change || '').trim())
               .map((resolution: any) => Number(resolution.issueIndex)));
             return issuesBeforeRepair.every((_, index) => coveredIssues.has(index + 1))
-              && chapters.every((chapter: any, index: number) => Number(chapter?.order) === index + 1
+              && chapters.every((chapter: any, index: number) => Number(chapter?.chapter) === index + 1
               && String(chapter?.title || '').trim()
               && String(chapter?.responsibility || '').trim());
           },
           describeValidation: value => {
-            const chapters = Array.isArray((value as any)?.chapters) ? (value as any).chapters : [];
+            const chapters = Array.isArray((value as any)?.chapterResponsibilities) ? (value as any).chapterResponsibilities : [];
             const resolutions = Array.isArray((value as any)?.resolutions) ? (value as any).resolutions : [];
             return [
               chapters.length === requiredChapterCount
@@ -13025,19 +12983,8 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
           },
         },
       );
-      const repairedPlan = Array.isArray(replanResult.data?.chapters) ? replanResult.data.chapters : [];
-      chapterTitles = repairedPlan.map((chapter: any, index: number) => ({
-        order: index,
-        title: String(chapter.title).trim(),
-        func: normalizeOutlineChapterFunction(chapter.function, index, input.isShort),
-        brief: String(chapter.responsibility).trim(),
-      }));
-      issues = await input.audit(chapterTitles.map((chapter, index) => ({
-        chapter: index + 1,
-        title: chapter.title,
-        function: chapter.func,
-        responsibility: chapter.brief,
-      })));
+      chapterTitles = creationChapterContracts(replanResult.data,(v,i)=>normalizeOutlineChapterFunction(v,i,input.isShort));
+      issues = await input.audit(creationResponsibilityPlan(chapterTitles));
       if (input.projectId) {
         this.generationMetrics?.recordChapterResponsibilityRepairAttempt(
           input.projectId,

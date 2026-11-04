@@ -117,8 +117,8 @@ it('limits costly preselection reselection to real user delivery deficits plus b
  expect(preselectionRecoveryTarget(5,3)).toEqual({mandatory:2,hedge:2,total:4});
  expect(preselectionRecoveryTarget(5,4)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(5,5)).toEqual({mandatory:0,hedge:0,total:0});
- expect(preselectionRecoveryTarget(5,5,8)).toEqual({mandatory:0,hedge:1,total:1});
- expect(preselectionRecoveryTarget(5,6,8)).toEqual({mandatory:0,hedge:1,total:1});
+ expect(preselectionRecoveryTarget(5,5,8)).toEqual({mandatory:0,hedge:0,total:0});
+ expect(preselectionRecoveryTarget(5,6,8)).toEqual({mandatory:0,hedge:0,total:0});
  expect(preselectionRecoveryTarget(5,8,8)).toEqual({mandatory:0,hedge:0,total:0});
  expect(preselectionRecoveryTarget(5,4,8)).toEqual({mandatory:1,hedge:1,total:2});
  expect(preselectionRecoveryTarget(5,7)).toEqual({mandatory:0,hedge:0,total:0});

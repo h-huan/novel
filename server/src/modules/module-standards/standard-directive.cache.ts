@@ -9,6 +9,7 @@ import {
   SYSTEM_WORKFLOW_RULESET_VERSION,
   SYSTEM_WORKFLOW_PROMPT_RULE_SCOPE_BY_STEP,
   SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP,
+  SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_SCENE,
   activeSystemWorkflowRules,
 } from './system-workflow-rules.registry';
 import type { SystemWorkflowRule } from './system-workflow-rule.types';
@@ -24,7 +25,7 @@ class StandardDirectiveCacheClass {
 
   private format(rule: SystemWorkflowRule, scene: string, stepKey?: string | null): string {
     const lines = [`【系统规则 ${rule.id} · ${rule.level} · ${rule.name}】${rule.summary}`];
-    for (const detail of (stepKey ? SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP[stepKey]?.[rule.id] : undefined) ?? rule.details ?? []) lines.push(`- ${detail}`);
+    for (const detail of (stepKey ? SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP[stepKey]?.[rule.id] : undefined) ?? SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_SCENE[scene]?.[rule.id] ?? rule.details ?? []) lines.push(`- ${detail}`);
     const reviewing = isEvaluationOutput(scene, stepKey);
     const directives = rule.directives;
     if (directives) {
@@ -68,7 +69,7 @@ class StandardDirectiveCacheClass {
         directives: rule.directives ?? null,
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
-    return createHash('sha256').update(JSON.stringify({rules:canonical,promptDetails:SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP})).digest('hex');
+    return createHash('sha256').update(JSON.stringify({rules:canonical,promptDetails:SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_STEP,sceneDetails:SYSTEM_WORKFLOW_PROMPT_DETAIL_SCOPE_BY_SCENE})).digest('hex');
   }
 
   snapshot(scenario: string, enabled = true, stepKey?: string | null) {
