@@ -283,7 +283,7 @@ it('recovers only unique literal result address within its own chapter, retainin
 it('distinguishes missing action quote, result quote and bridge while keeping existing targeted-repair indices',()=>{
  const text='她提交资料。对方收到资料。';
  const row={actionEvidence:'没有发生过的行动',resultEvidence:'对方收到资料。',bridgeEvidence:'',status:'supported',reason:'声称资料已经接收，但未给出可信步骤'};
- const checked=validateCausalAudit({status:'evaluated',reason:'审查缺口',transitions:[row]},text,{});
+ const checked=validateCausalAudit({status:'evaluated',reason:'审查实际因果证据中的缺失和无效引文',transitions:[row]},text,{});
  expect(checked.verified).toBe(false);
  expect(checked.errors.join('；')).toContain('actionEvidence不是正文连续原文');
  expect(checked.errors.join('；')).toContain('supported缺少有效成立条件原文');
