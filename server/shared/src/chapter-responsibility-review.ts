@@ -46,11 +46,9 @@ export function chapterResponsibilityAuditOutputContract(
    bridgeAnchorIds:status==='gap'?[]:['chapter:c1:task'],
    reason:'逐章核对实际取得的行动、条件时效及完整出口结果',
   }:{
-   chapter:1,taskEvidence:'本章responsibility连续逐字原文',
-   exitStateEvidence:'本章exitState连续逐字原文',status,
-   bridgeSource:'body',
-   bridgeEvidence:status==='gap'?'':'本章或前章responsibility中实际完成的动作逐字原文',
-   reason:'逐章核对实际取得的行动、条件时效及完整出口结果',
+   chapter:1,status,
+   bridgeEvidence:status==='gap'?'':'本章或前章responsibility中明确安排执行的条件取得动作逐字原文',
+   reason:'逐章核对条件的可执行取得动作、有效时间及完整出口结果',
   }]
  };
  const conflict=evidenceMode==='anchors'&&entryExitContract?{
@@ -72,10 +70,10 @@ export function chapterResponsibilityAuditOutputContract(
   +(entryExitContract?
    ' conditionChecks必须每章一项（每章恰好一项），包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
    +' 普通自主行动且不依赖外部资格时用not_required并说明，不能为凑supported虚构已取得条件。'
-   +' supported必须引用当章或前章实际执行的取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应contradictions中的真实冲突，不得擅自放行。'
+   +' supported必须引用本章已明确规划执行、或前章规划已完成且在本章仍有效的条件取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应contradictions中的真实冲突，不得擅自放行。'
    +(evidenceMode==='anchors'?
     ' conditionChecks只返回taskAnchorId、bridgeAnchorIds及状态理由，证据编号须从本次服务端目录选择，不返回taskEvidence/bridgeEvidence。'
-    :' conditionChecks只返回taskEvidence、exitStateEvidence、bridgeSource、bridgeEvidence及状态理由，证据必须是本次章节规划中的连续逐字原文，不返回虚构地址。')
+    :' conditionChecks只返回chapter、status、bridgeEvidence、reason；服务器按真实章号绑定responsibility与exitState原文，不需要模型复制这两个字段。bridgeEvidence必须是本次或前章responsibility中可执行的具体取得动作连续原文，不能只列前置条件名称或出口结果。')
    :'');
 }
 export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT=chapterResponsibilityAuditOutputContract();
@@ -177,7 +175,7 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
     `【待审查章节分工】${JSON.stringify(input.plan)}`,
-    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章判断整个exitState是否真能由实际行动、已取得且仍有效的条件产生。prerequisites只是待满足的条件名称，不能充当取得证明；普通自主行动无外部许可依赖时用not_required并说明。涉及他人决定、权限、移交和责任归属必须有原计划的实际桥接；缺少则报告gap及有依据的具体冲突，不得靠结果自证。consistent=true也必须逐章输出conditionChecks。字段JSON形状以本次末尾唯一的协议示例为准，不混用逐字引用与编号引用。' : '',
+    input.entryExitContract ? '本次为尚未展开正文的进入/退出规划合同审查：核对每章责任中明确安排执行的动作能否满足实际取得条件，以及承接前章规划结果时条件是否仍有效。不能要求未写出的正文已经发生，但不能把希望、前置条件名称或出口目标当作已计划的执行动作。逐章判断完整exitState能否由这些可执行的动作与真实资源产生。普通自主行动无外部许可依赖时用not_required并说明；涉及他人决定、权限、移交和归责须有独立实际桥接，缺少则报告gap及有依据的具体冲突。consistent=true也必须逐章输出conditionChecks；JSON字段遵循末尾唯一格式示例。' : '',
     "逐章按下列判据检查：",
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
