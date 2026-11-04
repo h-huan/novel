@@ -33,7 +33,7 @@ import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-ru
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, outlineFactRepairTargetPaths, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS , extractOutlineFactPatch } from './outline-fact-patch';
-import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview } from './premise-payoff-review';
+import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePremisePayoffReview, normalizePremisePayoffGapRoutes } from './premise-payoff-review';
 import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
 import { DiscoveryCardWork, type DiscoveryCardResult } from './discovery-card-work';
@@ -6811,7 +6811,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     standard: string,
     physicalCallBudget: {remaining:number},
   ): Promise<PremiseSelectionReview> {
-    const validate=(value:unknown)=>premisePayoffReviewIssues(value,selection);
+    const validate=(value:unknown)=>premisePayoffReviewIssues(normalizePremisePayoffGapRoutes(value,selection),selection);
     const response=await this.llmCallWithRetry<any>('已核对题材的因果引用定向复核',
       corePremiseReviewStandard(standard)
       +'\n本批仅有causalPlan原文引用与因果索引发生变化；原池storyCore和全部展开叙事字段均未改变。'
@@ -6831,11 +6831,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         retryInstruction:'只补齐payoffChecks的真实因果引用或审查协议字段；不得改动当前题材或把仍缺少样本、权限、行动的gap改成supported。'},
     );
     if(!response.data)throw new Error('变更因果引用的独立兑现复核未完成：'+(response.validationIssues||response.warnings||[]).join('；'));
-    const failures=materializePremisePayoffReview(response.data,selection);
+    const normalized=normalizePremisePayoffGapRoutes(response.data,selection);
+    const failures=materializePremisePayoffReview(normalized,selection);
     // The fast path is entered only after every source field, category and
     // genre already has a completed, reusable independent review. All prior
     // selection_fit issues in this path originated from the OLD causal plan.
-    return {...baseline,payoffChecks:response.data.payoffChecks,issues:failures,
+    return {...baseline,payoffChecks:normalized.payoffChecks,issues:failures,
       passed:failures.length===0};
   }
 
