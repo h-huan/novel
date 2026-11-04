@@ -199,7 +199,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, decodePremisePoolTransport, claimLockedPremiseSlot, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5225,19 +5225,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
         const poolBatchSizes = Array.from({ length: poolBatchCount }, (_, index) => baseBatchSize + (index < extraBatchCount ? 1 : 0));
-        const parseResponse = (content: unknown, label: string): {value:any;partiallyRecovered:boolean} => {
-          const normalized = String(content || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '');
-          try {
-            return {value:JSON.parse(jsonrepair(normalized || '{}')),partiallyRecovered:false};
-          } catch {
-            // No new model call: recover only fully CLOSED JSON objects already
-            // present in the original array, never fabricate a cut-off entry.
-            // Original quality, naming, category and causal checks still run.
-            const complete=recoverClosedPremisePoolObjects(normalized);
-            if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
-            throw new Error(label + '未返回合法JSON，且没有可独立解析的完整候选条目。');
-          }
-        };
+        const parseResponse = decodePremisePoolTransport;
         const prerequisiteError = (parsed: any) => {
           const dimensions = parsed && (parsed.missingRequiredDimensions ?? parsed.missingDimensions);
           const missing = Array.isArray(dimensions) ? dimensions.map(String).join('、') : '';
@@ -5294,6 +5282,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           invalidCategory: number; invalidNaming: number; duplicateCount: number; retained: number; uniqueBeyondTarget: number;
           categoryBindingCounts: Record<string, number>; invalidFieldReasons:Record<string,number>;
         }>();
+        const claimedPoolSlots = new Set<string>();
         const processPoolBatch = (batch: typeof poolBatchResults[number]) => {
           const stats = {
             rawReturned: batch.rawReturned,
@@ -5323,17 +5312,16 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           poolFilterTotals.invalidShape+=screened.invalidShape;
           poolFilterTotals.invalidFields+=screened.invalidFields;
           poolFilterTotals.invalidNaming+=screened.invalidNaming;
+          const lockedSlots=premiseSearchPlan(batch.batchIndex,
+            batch.batchIndex<poolBatchCount?poolBatchCount:poolBatchCount+1,
+            premisePoolSize,batch.requested,discoveryCategories,dto.webNovelGenre);
           for (const item of screened.candidates) {
             const workingTitle = String(item.workingTitle || '').trim();
             const storyCore = String(item.storyCore || '').trim();
             const titleKey = normalizeTitle(workingTitle);
             const coreKey = normalizeTitle(storyCore);
-            if(/^B\d+-P\d+$/.test(String(item.premiseId||''))){
-              const slot=premiseSearchPlan(batch.batchIndex,batch.batchIndex<poolBatchCount?poolBatchCount:poolBatchCount+1,premisePoolSize,batch.requested,discoveryCategories,dto.webNovelGenre)
-                .find(slot=>slot.premiseId===String(item.premiseId||''));
-              if(!slot||slot.storyCategoryId!==String(item.storyCategoryId||'')){
-                stats.invalidCategory++;poolFilterTotals.invalidCategory++;continue;
-              }
+            if(!claimLockedPremiseSlot(item,lockedSlots,claimedPoolSlots)){
+              stats.invalidCategory++;poolFilterTotals.invalidCategory++;continue;
             }
             let storyCategoryId = 'K1';
             let storyCategory = dto.storyCategory;
@@ -6392,23 +6380,42 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                   'title:'+normalizeTitle(seed.workingTitle),'core:'+normalizeTitle(seed.storyCore)]));
                 const newSeedBatches=await independentReviewBatches(seedSizes,reselectionCompletionBudget,
                   IDEA_PREMISE_POOL_BASE_BATCHES,async(size,index,budget)=>{
-                    const answer=await this.realLLM.generate({
-                      prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
-                        batchIndex:index,batchCount,batchSize:size,
-                        failureReasons:rejectedReasons}),
-                      scenario:'idea_generate',responseFormat:'json_object',
-                      timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
-                      physicalCallBudget:budget,
-                      metrics:{stepKey:'idea_premise_pool_refill',attempt:index},
-                    });
-                    const value=JSON.parse(jsonrepair(String(answer.content||'{}')
-                      .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
-                    if(!Array.isArray(value.pool))throw Error('补足候选没有返回pool数组');
-                    return value.pool;
+                    try{
+                      const answer=await this.realLLM.generate({
+                        prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
+                          batchIndex:index,batchCount,batchSize:size,
+                          failureReasons:rejectedReasons}),
+                        scenario:'idea_generate',responseFormat:'json_object',
+                        timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
+                        physicalCallBudget:budget,
+                        metrics:{stepKey:'idea_premise_pool_refill',attempt:index},
+                      });
+                      const decoded=parseResponse(answer.content,'补足候选第'+(index+1)+'批');
+                      if(!Array.isArray(decoded.value?.pool))throw Error('补足候选没有返回pool数组');
+                      return {pool:decoded.value.pool as unknown[],error:null as string|null,
+                        partiallyRecovered:decoded.partiallyRecovered};
+                    }catch(error){
+                      // Preserve healthy sibling batches; no extra physical
+                      // retry, no weakening of the candidate review gates.
+                      return {pool:[] as unknown[],error:error instanceof Error?error.message:String(error),
+                        partiallyRecovered:false};
+                    }
                   });
                 let nextId=1;
                 const refillSeedRejections:Record<string,number>={};
-                for(const batch of newSeedBatches)for(const raw of batch){
+                const claimedRefillSlots=new Set<string>();
+                const expectedRefillSlots=seedSizes.map((size,index)=>
+                  premiseSearchPlan(index,batchCount,premisePoolSize,size,discoveryCategories,dto.webNovelGenre));
+                for(const batch of newSeedBatches)if(batch.error)
+                  refillSeedRejections['补位批次协议或传输失败']=(refillSeedRejections['补位批次协议或传输失败']||0)+1;
+                for(const [refillBatchIndex,batch] of newSeedBatches.entries())for(const raw of batch.pool){
+                  if(!raw||typeof raw!=='object'||Array.isArray(raw)
+                    ||!claimLockedPremiseSlot(raw as Record<string,unknown>,
+                      expectedRefillSlots[refillBatchIndex],claimedRefillSlots)){
+                    refillSeedRejections['补位候选未匹配生成前锁定的分类槽位']=
+                      (refillSeedRejections['补位候选未匹配生成前锁定的分类槽位']||0)+1;
+                    continue;
+                  }
                   // The generator's FIVE storySections are the same wire shape
                   // used by the initial pool. Always normalize and validate at
                   // this one existing boundary before accessing storyCore.
@@ -6451,7 +6458,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 fulfillmentActions.push({phase:'lightweight_pool_refill',
                   requested:seedDeficit,retained:unusedSeeds.length-
                     premiseDiscovery.pool.filter(item=>!previouslySelectedIds.has(String(item.premiseId))).length,
-                  rejectedByContract:refillSeedRejections});
+                  rejectedByContract:refillSeedRejections,
+                  partialTransportRecoveredBatches:newSeedBatches.filter(batch=>batch.partiallyRecovered).length,
+                  failedTransportBatches:newSeedBatches.filter(batch=>!!batch.error).length});
                 }catch(error){
                   // A failed supplementary generation is not permission to turn
                   // previously validated cards into a failed whole request.
