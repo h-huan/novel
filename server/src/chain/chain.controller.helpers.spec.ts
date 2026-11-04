@@ -1782,8 +1782,9 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       for(const [req] of calls){
         expect(req.prompt).toContain('逐项读取下方候选槽位内的categoryRequirement');
         const schema=JSON.parse(req.prompt.split('JSON 结构：')[1]);
-        expect(schema.pool[0].storyCore).toContain('不只写主角能力');
-        expect(schema.pool[0].storyCore).toContain('先写由谁实际执行');
+        expect(schema.pool[0].storySections['必要条件']).toContain('证据如何取得传递');
+        expect(schema.pool[0].storySections['反转兑现']).toContain('由谁实施');
+        expect(schema.pool[0]).not.toHaveProperty('storyCore');
       }
       return;
     }
@@ -1817,7 +1818,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
       && request.prompt.includes('"webNovelGenre":["悬疑推理"]')
       && request.prompt.includes('"plotTags":["调查"]')
-      && request.prompt.includes('【必要条件】')
+      && request.prompt.includes('"storySections":')
     )).toBe(true);
     expect(poolCalls[0][0].prompt).toContain('既有行动全部成立而所称结果仍可能不成立');
     expect(poolCalls[0][0].prompt).not.toContain('私存岗位记录');
