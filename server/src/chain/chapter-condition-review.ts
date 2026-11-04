@@ -1,20 +1,71 @@
 import {resolveQualityEvidence} from '../modules/writing-quality/quality-issue';
-/** Same condition coverage for short and long preflight; unknown never passes. */
-export function chapterConditionReviewIssues(value:any,plan:any[],sources:string,resolveAnchors:false|((check:any)=>boolean)=false,requireExitState=false):string[]{
+/** Server binding is limited to an explicitly cited known chapter.
+ * Never manufacture a check/status/bridge or replace a contradictory quote.
+ * The semantic reviewer still must cover every chapter and provide an actual
+ * acquisition action (or a real gap) to get through the unchanged Gate. */
+export function materializeChapterConditionSources(value:any,plan:readonly any[]):any{
+ if(!value||!Array.isArray(value.conditionChecks))return value;
+ return {...value,conditionChecks:value.conditionChecks.map((row:any)=>{
+  if(!row||typeof row!=='object'||!Number.isInteger(row.chapter)||row.chapter<1||row.chapter>plan.length)return row;
+  const source=plan[row.chapter-1];
+  return {...row,
+   ...(row.taskEvidence===undefined && row.taskAnchorId===`chapter:c${row.chapter}:task`
+     ?{taskEvidence:source.responsibility}:{}),
+   ...(row.exitStateEvidence===undefined&&row.exitStateAnchorId===`chapter:c${row.chapter}:exit`
+     ?{exitStateEvidence:source.exitState}:{})};
+ })};
+}
+
+/** Reuse one exact source directory across the short and long preflight paths. */
+export function chapterConditionTaskAnchors(plan:readonly any[]){
+ return plan.map((row:any)=>({
+  id:`chapter:c${row.chapter}:task`,source:'body',text:String(row.responsibility||''),
+ }));
+}
+
+const CONDITION_ERROR='逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported需要当前计划的实际取得路径，不能只引用世界规则';
+
+/** Same fail-closed semantic contract for short and long preflight. Keep a
+ * precise per-chapter reason so the EXISTING validation retry can correct
+ * transport errors instead of repeating an opaque entire-plan rejection. */
+export function chapterConditionReviewIssues(value:any,plan:any[],sources:string,
+ resolveAnchors:false|((check:any)=>boolean)=false,requireExitState=false):string[]{
  const contradictions=Array.isArray(value?.contradictions)?value.contradictions:[];
  const checks=value?.conditionChecks;
- if(!Array.isArray(checks)||checks.length!==plan.length||new Set(checks.map((row:any)=>row?.chapter)).size!==plan.length)return ['逐章条件核对缺少取得路径、有效性证据或完整覆盖'];
- return checks.some((check:any)=>{
-  const chapter=plan[Number(check?.chapter)-1];
-  return !Number.isInteger(check?.chapter)||!chapter
-   ||!resolveQualityEvidence(chapter.responsibility,check.taskEvidence).verified
-   ||(requireExitState&&!resolveQualityEvidence(chapter.exitState,check.exitStateEvidence).verified)
-   ||typeof check.reason!=='string'||check.reason.trim().length<8
-   ||!['supported','gap','not_required'].includes(check.status)
-   ||(check.status==='gap'&&!contradictions.some((finding:any)=>finding.chapter===check.chapter))
-   ||(check.status==='supported'&&!(Array.isArray(check.bridgeAnchorIds)?typeof resolveAnchors==='function'&&resolveAnchors(check)
-    :check.bridgeSource==='body'&&resolveQualityEvidence(JSON.stringify({chapterResponsibilities:plan.slice(0,check.chapter).map(({responsibility}:any)=>({responsibility}))}),check.bridgeEvidence).verified));
- })?['逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported需要当前计划的实际取得路径，不能只引用世界规则']:[];
+ if(!Array.isArray(checks))return [CONDITION_ERROR,'conditionChecks不是逐章数组，须每章恰好一项'];
+ const details:string[]=[];
+ if(checks.length!==plan.length)details.push(`conditionChecks数量${checks.length}，预期${plan.length}（缺失或多出章节）`);
+ const seen=new Set<number>();
+ for(const check of checks){
+  const n=check?.chapter;
+  if(!Number.isInteger(n)||n<1||n>plan.length){
+   details.push(`conditionChecks中出现无效章号${String(n)}`);continue;
+  }
+  if(seen.has(n))details.push(`第${n}章conditionChecks重复`);
+  seen.add(n);
+  const chapter=plan[n-1];
+  if(!resolveQualityEvidence(chapter.responsibility,check.taskEvidence).verified)
+   details.push(`第${n}章taskEvidence未逐字对应本章responsibility或taskAnchorId不合法`);
+  if(requireExitState&&!resolveQualityEvidence(chapter.exitState,check.exitStateEvidence).verified)
+   details.push(`第${n}章exitStateEvidence未逐字对应完整exitState`);
+  if(typeof check.reason!=='string'||check.reason.trim().length<8)
+   details.push(`第${n}章缺少实际条件取得和出口结果的解释`);
+  if(!['supported','gap','not_required'].includes(check.status))
+   details.push(`第${n}章conditionChecks.status必须是supported、gap或not_required`);
+  if(check.status==='gap'&&!contradictions.some((finding:any)=>finding.chapter===n))
+   details.push(`第${n}章gap未对应有来源证据的contradictions`);
+  if(check.status==='supported'){
+   const valid=Array.isArray(check.bridgeAnchorIds)
+    ?typeof resolveAnchors==='function'&&resolveAnchors(check)
+    :(check.bridgeSource===undefined||check.bridgeSource==='body')
+      &&resolveQualityEvidence(JSON.stringify({
+        chapterResponsibilities:plan.slice(0,n).map(({responsibility}:any)=>({responsibility}))
+      }),check.bridgeEvidence).verified;
+   if(!valid)details.push(`第${n}章supported缺少当前或前章responsibility中已执行的条件取得动作；prerequisites、未来任务、exitState结果与世界许可本身均不构成行动证据`);
+  }
+ }
+ for(let n=1;n<=plan.length;n++)if(!seen.has(n))details.push(`第${n}章缺少conditionChecks`);
+ return details.length?[CONDITION_ERROR,...details]:[];
 }
 
 /** Resolve actual server-owned addresses against the current/past action view.
