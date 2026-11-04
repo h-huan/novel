@@ -27,7 +27,14 @@ export function findChapterOutline(db: ChapterDb, projectId: string, chapterInde
     WHERE c.project_id=? AND ${chapterId ? 'c.id=?' : 'c.chapter_index=?'} AND o.level='chapter' LIMIT 1`)
     .get(projectId, chapterId || chapterIndex);
   if (linked) return linked;
+  // A chapter row with an invalid outline_id must NOT silently borrow the
+  // neighbouring chapter's plan merely because their sort positions match.
+  // The positional fallback is only for the outline editor before any
+  // chapter row with this number exists.
   if (chapterId) throw new Error('当前章节没有有效的章纲绑定，停止生成，禁止按排序猜测另一章');
+  const existingChapter = db.prepare('SELECT id,outline_id FROM chapters WHERE project_id=? AND chapter_index=? LIMIT 1')
+    .get(projectId, chapterIndex);
+  if (existingChapter) throw new Error('第' + chapterIndex + '章的已有正文记录与章纲绑定失效，禁止按章节排序借用另一章章纲');
   return readOrderedChapterOutlines(db, projectId)[chapterIndex - 1];
 }
 
