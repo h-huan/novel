@@ -1227,6 +1227,40 @@ it.each([
  finally{release();await pending;}
 });
 
+it('uses the same corrected causal-plan facts in early approved peers and downstream card scheduling',async()=>{
+  const input=selection();
+  const corrected={...input,selected:input.selected.map((item,index)=>index===0?{
+    ...item,causalPlan:[{action:{field:'activeChoice',quote:premise('A').activeChoice},
+      conditions:[{field:'escalation',quote:premise('A').escalation}],
+      result:{field:'payoff',quote:premise('A').payoff}}],
+  }:item)};
+  const preparation={pendingIds:new Set(['A']),resolve:vi.fn(async()=>corrected)};
+  const controller=Object.create(ChainController.prototype) as any;
+  controller.logger={log:vi.fn(),warn:vi.fn()};
+  controller.reviewPremiseSelection=vi.fn(async(_current:any,_standard:string,mode:string,
+    _allowance:any,_batch:any,_genres:any,_limiter:any,_focus:any,onSource:any,prepared:any)=>{
+    if(mode==='overlap')return {passed:true,issues:[]};
+    const reviewed=await prepared.resolve();
+    const receipt={passed:true,issues:[],sourceChecks:premiseSourceComparisonCatalog(reviewed)
+      .map(row=>({ref:row.ref,status:'preserved',reason:'逐项核对候选实际事实和原池相同'}))};
+    onSource?.(reviewed,receipt);
+    return receipt;
+  });
+  const released:string[]=[];
+  const onApproved=vi.fn((item:any,peers:any[])=>{
+    // The full-card dispatcher uses this exact equality guard in both
+    // regular and refill waves. Never relax it to ID-only matching.
+    expect(peers.find(row=>row.premiseId===item.premiseId)).toEqual(item);
+    if(item.premiseId==='A')expect(item.causalPlan).toEqual(corrected.selected[0].causalPlan);
+    released.push(item.premiseId);
+  });
+  const result=await controller.reconcilePremiseSelection(input,2,3,['悬疑'],'',[],
+    {reviews:{remaining:8},reselection:{remaining:0}},2,onApproved,undefined,preparation);
+  expect(result.selected[0].causalPlan).toEqual(corrected.selected[0].causalPlan);
+  expect(released.sort()).toEqual(['A','B']);
+  expect(preparation.resolve).toHaveBeenCalled();
+});
+
 it('deduplicates identical narrative text losslessly within each review identity, keeping contradictory values distinct',()=>{
  const original=selection().selected.map(item=>({...item,
    protagonistSituation:'她已经明确递出两个包子，数量和交付对象构成同一事件事实，不因后文关系台词而改变。',

@@ -6960,8 +6960,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const ready=new Map<string,Record<string,unknown>>(),notified=new Set<string>();
       const notifyApproved=()=>{
         if(!onApproved||!pairReady)return;
+        // An in-flight causalPlan reference correction may change approved
+        // facts before source partitions finish. The peer snapshot sent to
+        // full-card scheduling must contain those exact independently reviewed
+        // objects; the original selection is only a pending slot template.
+        // The existing deep-equality guard still rejects any other mutation.
+        const approvedPeers=selection.selected.map(peer=>
+          ready.get(String(peer.premiseId))??peer);
         for(const [id,item] of ready)if(!notified.has(id)&&!pairBlockedIds.has(id)){
-          notified.add(id);onApproved(item,selection.selected,limiter);
+          notified.add(id);onApproved(item,approvedPeers,limiter);
         }
       };
       const sourceReviewed:PremiseReviewObserver=(batch,review)=>{
