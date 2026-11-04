@@ -65,7 +65,9 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
     // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
     // missing decisive actors/conditions were being discovered after expensive reselection.
-    expect(source).toContain('既有行动全部成立而所称结果仍可能不成立');
+    expect(source).toContain('原池既有行动全部成立而结局仍可能不成立');
+    expect(source).toContain('就在本次生成调用内改构该槽位');
+    expect(source).toContain('不能把补造条件留到选优、成卡或终审');
     // These constraints now live in the single canonical selection directive,
     // not a fragile controller-side string replacement.
     const selectionDirective = read('idea-discovery-contract.ts');

@@ -131,6 +131,13 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
     if (section.text.replace(/[，。；：、！!？?\s]/g,'').length < 12)
       issues.push('【'+section.name+'】缺少足以进入选优的实际事件或因果条件');
   }
+  // Source provenance and a real causal progression are different claims.
+  // Catch only a literal duplicate of the action, prerequisite or outcome
+  // section; ambiguous semantic validity remains with the existing reviewer.
+  const stateSections=sections.filter(section=>['主动选择','必要条件','反转兑现'].includes(section.name));
+  const normalized=stateSections.map(section=>section.text.replace(/[，,。；;：、！!？?\s]/g,''));
+  if(new Set(normalized).size!==normalized.length)
+    issues.push('候选的主动选择、必要条件和反转兑现重复同一段事实，没有不同的因果状态变化');
   return issues;
 }
 

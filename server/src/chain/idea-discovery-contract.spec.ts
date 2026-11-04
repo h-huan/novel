@@ -737,6 +737,13 @@ describe('candidate seed structural evidence prevents downstream rescue',()=>{
   const valid=front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end;
   expect(premiseSeedFactIssues(valid.replace('【必要条件】','【必要条件】已完成材料查验但尚未取得认可。'+'【必要条件】'))).not.toEqual([]);
   expect(premiseSeedFactIssues('前缀无来源内容'+valid)).not.toEqual([]);
+  const duplicate='【处境触发】普通人被迫处理一份失去关键证据的旧案。'
+    +'【主动选择】主角实际找到当年的原始记录并决定交给能处理的负责人。'
+    +'【必要条件】主角实际找到当年的原始记录并决定交给能处理的负责人。'
+    +'【反转兑现】负责人在核实原始记录后作出决定并将当事人恢复名誉。'
+    +'【分类流派机制】低估主角的人亲眼看到调查结果和决定的真实改变。';
+  expect(premiseSeedFactIssues(duplicate)).toContain('候选的主动选择、必要条件和反转兑现重复同一段事实，没有不同的因果状态变化');
+  expect(premiseSeedFactIssues(valid)).toEqual([]);
  });
 });
 
