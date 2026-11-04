@@ -1,3 +1,4 @@
+import { jsonrepair } from 'jsonrepair';
 import { projectedPremisePromptView, compactRepeatedPremiseText } from './premise-source-bindings';
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
 import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE,premiseSourceSections} from './premise-source-bindings';
@@ -201,6 +202,27 @@ export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unkno
   }
  }
  return result;
+}
+
+/** Original and refill pool transport share one recovery boundary. This only
+ * rescues fully closed authored JSON objects; all existing Gates still run. */
+export function decodePremisePoolTransport(content:unknown,label:string):{value:any;partiallyRecovered:boolean}{
+ const normalized=String(content||'').trim().replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'');
+ try{return {value:JSON.parse(jsonrepair(normalized||'{}')),partiallyRecovered:false};}
+ catch{
+  const complete=recoverClosedPremisePoolObjects(normalized);
+  if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
+  throw new Error(label+'未返回合法JSON，且没有可独立解析的完整候选条目。');
+ }
+}
+
+/** The server must verify every model candidate against its preallocated
+ * identity and category, including refill candidates. No silent renumbering. */
+export function claimLockedPremiseSlot(candidate:Record<string,unknown>,slots:readonly {premiseId:string;storyCategoryId:string}[],claimed:Set<string>):boolean{
+ const id=candidate?.premiseId,category=candidate?.storyCategoryId;
+ if(typeof id!=='string'||typeof category!=='string'||claimed.has(id)
+  ||!slots.some(slot=>slot.premiseId===id&&slot.storyCategoryId===category))return false;
+ claimed.add(id);return true;
 }
 
 /** Deterministic screening runs as soon as each provider batch returns.
