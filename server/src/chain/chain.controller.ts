@@ -6390,7 +6390,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                         physicalCallBudget:budget,
                         metrics:{stepKey:'idea_premise_pool_refill',attempt:index},
                       });
-                      const decoded=parseResponse(answer.content,'补足候选第'+(index+1)+'批');
+                      const decoded=decodePremisePoolTransport(answer.content,'补足候选第'+(index+1)+'批');
                       if(!Array.isArray(decoded.value?.pool))throw Error('补足候选没有返回pool数组');
                       return {pool:decoded.value.pool as unknown[],error:null as string|null,
                         partiallyRecovered:decoded.partiallyRecovered};
