@@ -5145,8 +5145,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
               '主动选择':'主角和对手具体采取什么行动，又如何引发新的局势。',
-              '必要条件':'关键结果需要的已发生事实：证据如何取得传递、有权者何时依据什么决定、谁实际知情和配合。',
-              '反转兑现':'写明由谁实施什么行动、依赖什么已成立条件、真正产生什么结果和代价。',
+              '必要条件':'逐项对应反转/兑现中的每个决定性结果：本人可直接实施什么动作；若依赖他人批准、判决、撤案、赔偿或改口，谁有权决定、材料怎样合法取得与移交、他为何采纳、何时实际决定并执行。不能仅写请求、送检或指控。',
+              '反转兑现':'只写已由前节行动和成立条件真正导致的结果、反击与代价；有权者尚未作决定的事项只能写申请或待定，不能自动写成胜诉、撤案、认罪、获奖、赔偿。不能用新结果反过来证明条件已满足。',
               '分类流派机制':'仅指出前四节已发生的分类流派机制、对手误判及代价；不新增决定性事实。',
             },
           }],
@@ -5598,8 +5598,12 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_empty');
         }
         if (candidatePool.length < premisePoolSize) {
-          this.logger.warn('idea-discover: 并发候选池形成' + candidatePool.length + '/' + premisePoolSize
-            + '个有效候选；继续从实际候选池选优，不用弱题材凑数。');
+          this.logger.warn('idea-discover: 原池可解析且通过结构/字段/身份筛查 ' + candidatePool.length + '/' + premisePoolSize
+            + '；JSON未完整返回批次=' + poolGenerationAudit.parseFailureBatchCount
+            + '、原始条目数量未知批次=' + poolFilterTotals.rawReturnedUnknownBatches
+            + '、已返回项中结构与字段无效=' + poolGenerationAudit.invalidCount
+            + '、去重=' + poolGenerationAudit.duplicateCount
+            + '。仅代表候选传输和基础筛查，不代表弱题材的语义质量结论；后续仍须独立因果、分类及差异复核。');
         }
         // Up to three additional paths from the SAME fixed pool are selected
         // and independently reviewed before card construction, avoiding serial
