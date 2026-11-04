@@ -5142,7 +5142,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
-            storyCore: '【处境触发】本分类的核心人物关系、各自欲望及迫使双方行动的事件。【主动选择】双方围绕本分类核心矛盾实际作出的区别性选择及关系变化。【必要条件】逐项写出下节实际结果依赖的既有事实、行动与人物选择条件，不只写主角能力；有权决定者、知情与配合、证据取得传递、时序和作用范围按真实需要落实。【反转兑现】先写由谁实际执行、凭什么条件改变什么状态，再写由此真正得到的结果、关系变化和取舍，不只宣布胜利。【分类流派机制】只指出前四节已发生的分类与流派事件，不在本节补入新的核心关系、能力或结果。',
+            storySections: {
+              '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
+              '主动选择':'主角和对手具体采取什么行动，又如何引发新的局势。',
+              '必要条件':'关键结果需要的已发生事实：证据如何取得传递、有权者何时依据什么决定、谁实际知情和配合。',
+              '反转兑现':'写明由谁实施什么行动、依赖什么已成立条件、真正产生什么结果和代价。',
+              '分类流派机制':'仅指出前四节已发生的分类流派机制、对手误判及代价；不新增决定性事实。',
+            },
           }],
 
         };
@@ -5161,7 +5167,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、独特局势变化与代价比较本批候选，弱方案在本次生成内重构；输出pool按成熟度由强到弱排序。本批只输出pool，不输出selectedPremises、分数、自评或淘汰过程；该顺序仅供全池选优，不能替代后续独立审核。',
-          'pool数组每项包含premiseId、workingTitle、storyCategoryId、storyCore，以及JSON示例中本次未预选、需要自动确定的创作维度。自动选择先从本次字典确定再落实为故事事件，并随本候选保存；手动选项由服务器绑定，无需重复返回。storyCore用事实密集的简短叙述，优先控制在300—500汉字；不是删减必要条件的硬限。按【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】依次写具体事实，不写评审或自评。先确定人物欲望与当前阻力，再确定主角用什么真实操作改变对手的选择或局面，最后写这项操作实际能产生的结果与代价。每项关键结果都须有原池已写出的执行者、行动及真实必要条件，不把计划、请求、承诺、发现线索或结果断言当成已经执行的桥梁。',
+           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段以及本次需要自动确定的创作维度。只输出storySections，不再输出storyCore；服务器把五节原文按序无损拼接为唯一storyCore，继续使用全部原有审核、因果索引与持久化。五节合计优先控制在300—500汉字，不能为压字数删掉已发生的必要条件；各节必须有具体独立事件，不能把所有事实挤在一节。先确定可兑现结果，再倒查真实行动、证据取得与权限、对手反制和代价。发现异常材料不等于证明具体责任人，客户称赞不等于管理者任命，提交申请不等于主管机关批准；此类实际桥接须在原池写清，不得留到后续补位。',
           '按已注入GEN-002的分类关系、必要条件、内部事实一致与实质差异要求构思。承担结果的人物选择与必要条件须已实际发生。初次生成时先确定可兑现的具体结果，再倒查谁实际执行、影响哪些对象、怎样取得证据或权限、对手为何会配合或反制；把必需的真实条件写在前四节里，不能仅在第五节贴流派标签。安排一次主动选择后的局势变化，再有真实新阻力和不同的第二次变化；普通短篇不必机械凑环节。若仅有被轻视、亮本事、众人服气，或者既有行动全部成立而所称结果仍可能不成立，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
@@ -8952,7 +8958,8 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
               // 全书章节分工边界审查：同样是审查任务，按 review 标准执行（判据同上——daily 零标准注入，
               // review 注入 quality_loop + review；模型/输出上限不变，非降级）。
               scenario: 'review', temperature: 0.1, timeout: LLM_TUNABLES.timeoutMedium(),
-              deferQualityGate: true,
+               projectId, stepKey:'creation_chapter_responsibility_review',
+               deferQualityGate: true,
               validate: value => {
                 const audit = value as any;
                 if (!audit || typeof audit !== "object" || Array.isArray(audit) || !Array.isArray(audit.contradictions)) return false;
@@ -8980,7 +8987,9 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           // 旧实现把「未明确确认通过」伪造成一条冲突丢进修复闭环，白跑三轮语义重规划，
           // 最终在 12 分钟后以一句「仍违反世界规则」失败，且看不出真实原因。
           if (!audit || typeof audit !== "object") {
-            throw new Error('全书章节分工边界审查未返回符合契约的判定（模型未产出可解析JSON）。审查必须给出 consistent:true，或带 CR-1…CR-7 判据编号与逐字 ruleEvidence 的冲突项；系统不会在无判定时默认通过，也不会自造冲突。');
+            throw new Error('全书章节分工边界审查未通过输出契约，已停止下游：'
+               +([...(result.validationIssues||[]),...result.warnings].filter(Boolean).join('；')
+                 || '未产出可解析的完整JSON')+'。缺失逐章conditionChecks或冲突证据不得默认通过。');
           }
           if (audit.consistent === true) return [];
           return (Array.isArray(audit.contradictions) ? audit.contradictions : [])
