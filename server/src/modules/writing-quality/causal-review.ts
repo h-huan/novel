@@ -144,6 +144,27 @@ export function causalChapterResultReviewGroups(
  return {review,aliasesByReview};
 }
 
+/** A model may quote a complete result verbatim while omitting its ID.
+ * Bind only if the literal quote appears exactly ONCE in that chapter's
+ * server-owned review result inventory. Never repair a supplied false ID,
+ * reinterpret a paraphrase, cross chapter, or infer an action or condition. */
+export function bindUniqueCausalResultAnchors(
+ value:any,
+ catalog:readonly {chapterNumber:number;resultAnchorIds:string[]}[],
+ anchors:ReturnType<typeof causalEvidenceAnchors>,
+){
+ if(!value||!Array.isArray(value.transitions))return value;
+ const byId=new Map(anchors.filter(anchor=>anchor.source==='body').map(anchor=>[anchor.id,anchor]));
+ return {...value,transitions:value.transitions.map((row:any)=>{
+  if(!row||typeof row!=='object'||row.resultAnchorId!==undefined
+    ||typeof row.resultEvidence!=='string'||!Number.isInteger(row.chapterNumber))return row;
+  const chapter=catalog.find(item=>item.chapterNumber===row.chapterNumber);
+  if(!chapter)return row;
+  const matches=chapter.resultAnchorIds.filter(id=>byId.get(id)?.text===row.resultEvidence);
+  return matches.length===1?{...row,resultAnchorId:matches[0]}:row;
+ })};
+}
+
 /** Project a complete independent judgment to only identical literal claims.
  * The server re-validates every expanded quote; a missing reviewed identity,
  * missing source address or differing content is an error, never a pass. */
@@ -232,7 +253,14 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     if (!action.verified || !result.verified || !['supported', 'gap', 'planned'].includes(row?.status)
       || typeof row?.reason !== 'string' || row.reason.trim().length < 8
       || (row.status === 'supported' && !bridge.verified)) {
-      errors.push(`第${index + 1}项因果审查缺少可验证行动、结果或成立条件`);
+      const wrong=[
+        !action.verified&&'actionEvidence不是正文连续原文',
+        !result.verified&&'resultEvidence不是正文连续原文',
+        !['supported','gap','planned'].includes(row?.status)&&'status不合法',
+        (typeof row?.reason!=='string'||row.reason.trim().length<8)&&'reason缺少实际说明',
+        row?.status==='supported'&&!bridge.verified&&'supported缺少有效成立条件原文',
+      ].filter(Boolean);
+      errors.push(`第${index + 1}项因果审查缺少可验证行动、结果或成立条件（${wrong.join('、')}）`);
       return;
     }
     // A result and its enclosing paragraph are the same assertion. If that
