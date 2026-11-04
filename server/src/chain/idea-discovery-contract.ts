@@ -753,7 +753,16 @@ export function freezePremiseCreationChoices(raw:Record<string,unknown>,manual:R
  const bound:Record<string,unknown>={};
  for(const field of ['storyTone','writingStyle','webNovelGenre','plotTags'] as const){
   const selected=Array.isArray(manual[field])?manual[field]:[];
-  const value=selected.length?[...selected]:raw[field];
+  const generated=raw[field];
+  // The automatic plotTags are dictionary-only metadata. A generated array
+  // with a valid authorized subset and extra typos must not erase the story:
+  // keep only the model's EXISTING valid choices, never invent a new tag.
+  // Manual choices and all narrative, genre and style Gates stay unchanged.
+  // No surviving canonical tag still fails the original nonempty requirement.
+  const canonicalPlotTags=field==='plotTags'&&!selected.length&&Array.isArray(generated)
+   ?[...new Set(generated.filter((item):item is string=>
+     typeof item==='string'&&(options.plotTags||[]).includes(item)))] :generated;
+  const value=selected.length?[...selected]:field==='plotTags'?canonicalPlotTags:generated;
   if(discoveryDimensionSelectionIssues(value,selected,options[field]||[]).length)throw Error('候选未固定有效创作选项：'+field);
   bound[field]=structuredClone(value);
  }
