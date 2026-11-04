@@ -39,6 +39,20 @@ describe('short and long preflight evidence share an exact chapter source contra
   expect(issues.join('；')).toContain('第1章exitStateEvidence');
   expect(issues).toContain('逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported需要当前计划的实际取得路径，不能只引用世界规则');
  });
+ it('projects only server-owned chapter text when the independent reviewer omits duplicate echo fields',()=>{
+  const minimal={consistent:true,contradictions:[],conditionChecks:plan.map(row=>({
+   chapter:row.chapter,status:'supported',bridgeEvidence:row.responsibility,
+   reason:'逐章核对本章明写的执行动作及当前状态的变化',
+  }))};
+  const bound=materializeChapterConditionSources(minimal,plan);
+  expect(bound.conditionChecks.map((row:any)=>row.taskEvidence)).toEqual(plan.map(row=>row.responsibility));
+  expect(bound.conditionChecks.map((row:any)=>row.exitStateEvidence)).toEqual(plan.map(row=>row.exitState));
+  expect(chapterConditionReviewIssues(bound,plan,'{}',false,true)).toEqual([]);
+  const invalid={...minimal,conditionChecks:minimal.conditionChecks.map((row,index)=>index===0?{
+   ...row,bridgeEvidence:plan[0].prerequisites[0]}:row)};
+  expect(chapterConditionReviewIssues(materializeChapterConditionSources(invalid,plan),plan,'{}',false,true).length).toBeGreaterThan(0);
+  expect(materializeChapterConditionSources({consistent:true,contradictions:[]},plan).conditionChecks).toBeUndefined();
+ });
  it('binds only valid explicit task and exit citations and never supplies a model verdict',()=>{
   const value={consistent:true,contradictions:[],conditionChecks:plan.map(row=>({
    chapter:row.chapter,taskAnchorId:'chapter:c'+row.chapter+':task',
