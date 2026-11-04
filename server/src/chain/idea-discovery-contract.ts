@@ -160,6 +160,49 @@ export function materializePremiseSeedSections(raw:Record<string,unknown>):Recor
  return {...candidate,storyCore};
 }
 
+/** Recover only complete JSON objects already closed inside a truncated
+ * pool array. A JSON syntax/truncation failure must not erase seven genuinely
+ * generated candidates because the eighth object was cut off. Never invent
+ * missing array entries, autoclose an unfinished candidate, or substitute
+ * recovered content for the unchanged structural and semantic quality Gates.
+ * The caller reports the partial transport separately in its batch audit. */
+export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unknown>[] {
+ if(typeof raw!=='string'||!raw.trim())return [];
+ const header=/"pool"\s*:\s*\[/.exec(raw);
+ if(!header)return [];
+ const result:Record<string,unknown>[]=[];
+ let start=-1,depth=0,inString=false,escapeNext=false,expectEntry=true;
+ for(let i=header.index+header[0].length;i<raw.length;i++){
+  const char=raw[i];
+  if(inString){
+   if(escapeNext)escapeNext=false;
+   else if(char==='\\')escapeNext=true;
+   else if(char==='"')inString=false;
+   continue;
+  }
+  if(char==='"'){if(depth)inString=true;else return result;continue;}
+  if(depth===0){
+   if(/\s/.test(char))continue;
+   if(char===']')return result;
+   if(char===','){if(expectEntry)return result;expectEntry=true;continue;}
+   if(char!=='{'||!expectEntry)return result;
+   start=i;depth=1;expectEntry=false;continue;
+  }
+  if(char==='{')depth++;
+  else if(char==='}'){
+   depth--;
+   if(depth===0){
+    let value:any;
+    try{value=JSON.parse(raw.slice(start,i+1));}catch{return result;}
+    if(!value||typeof value!=='object'||Array.isArray(value))return result;
+    result.push(value);
+    start=-1;
+   }
+  }
+ }
+ return result;
+}
+
 /** Deterministic screening runs as soon as each provider batch returns.
  * It is not a semantic review or generator self-score; all later Gates remain. */
 export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
