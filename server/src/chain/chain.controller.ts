@@ -5624,7 +5624,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               metrics: { stepKey: 'idea_premise_selection', attempt: 0 },
             });
             selectionWallMs = Date.now() - selectionStartedAt;
-            parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优');
+            parsedSelection = parseResponse(selectionResponse.content, '固定候选池选优').value;
             if (parsedSelection && (parsedSelection.blocked === true || parsedSelection.status === 'blocked')) {
               throw prerequisiteError(parsedSelection);
             }
