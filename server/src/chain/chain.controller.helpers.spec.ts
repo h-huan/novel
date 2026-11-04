@@ -1575,7 +1575,7 @@ describe('cross-chapter finding partition', () => {
 
 
 describe('idea discovery orchestrator with simulated model responses', () => {
-  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_second_batch_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair', 'dimension_multi_microrepair'])(
+  it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_second_batch_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair', 'dimension_multi_microrepair', 'locked_card_context', 'pool_category_contract'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
     const selected = (id: string, title: string) => ({
       premiseId: id,
@@ -1669,9 +1669,10 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       strongCard.plotTags = ['未授权标签'];
       weakCard.plotTags = ['未授权标签'];
     }
+    if(failure==='locked_card_context')for(const seed of pool)Object.assign(seed,{storyTone:['紧张'],webNovelGenre:['悬疑推理']});
     const requestedCount = failure === 'pool_below_minimum' || failure === 'pool_second_batch_unique' ? 5 : 2;
     const expectedPoolBatchSizes = requestedCount === 5 ? [8, 7] : [4, 3];
-    const mixed = failure === 'category_inheritance';
+    const mixed = ['category_inheritance','pool_category_contract'].includes(failure);
     const topUpPremise = {
       ...selected('P3', '水库账本提前清空'),
       storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
@@ -1756,17 +1757,50 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     controller.db = {
       getDb: () => ({
-        prepare: () => ({ all: () => failure === 'tag_combo_reused' ? [{ label: '紧张' }] : [] }),
+        prepare: () => ({ all: (type:string) => failure === 'locked_card_context' ? (type==='web_novel_genre'?['悬疑推理','扮猪吃虎']:type==='tone_tag'?['紧张','温馨']:[]).map(label=>({label})) : failure === 'tag_combo_reused' ? [{ label: '紧张' }] : [] }),
       }),
     };
 
     const result = await controller.runIdeaDiscovery({
       storyType: 'short_story', platform: 'fanqie', customPlatformNote: '',
-      storyTone: failure === 'tag_combo_reused' ? [] : ['紧张'], writingStyle: ['简洁'], webNovelGenre: ['悬疑推理'],
+      storyTone: ['tag_combo_reused','locked_card_context'].includes(failure) ? [] : ['紧张'], writingStyle: ['简洁'], webNovelGenre: failure==='locked_card_context'?[]:['悬疑推理'],
       submissionTags: ['悬疑'], plotTags: ['调查'], genreFitNote: '', pov: '第一人称',
       targetWords: '20000', storyCategory: '悬疑', targetAudience: '',
       ...(mixed ? { discoveryCategoryOptions: ['悬疑惊悚', '现实生活'] } : {}),
     }, requestedCount);
+    if(failure==='pool_category_contract'){
+      const calls=generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_premise_pool_generation');
+      expect(calls).toHaveLength(2);
+      const slots=calls.flatMap(([req]:any[])=>JSON.parse(req.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]));
+      expect(new Set(slots.map((slot:any)=>slot.storyCategory))).toEqual(new Set(['悬疑惊悚','现实生活']));
+      for(const slot of slots){
+        expect(slot.categoryRequirement.length).toBeGreaterThan(10);
+        expect(slot.requiredGenres).toEqual(['悬疑推理']);
+        expect(slot.storyCategoryId).toBe(slot.storyCategory==='悬疑惊悚'?'K1':'K2');
+        expect(slots.filter((peer:any)=>peer.storyCategoryId===slot.storyCategoryId).every((peer:any)=>peer.categoryRequirement===slot.categoryRequirement)).toBe(true);
+      }
+      for(const [req] of calls){
+        expect(req.prompt).toContain('逐项读取下方候选槽位内的categoryRequirement');
+        const schema=JSON.parse(req.prompt.split('JSON 结构：')[1]);
+        expect(schema.pool[0].storyCore).toContain('不只写主角能力');
+        expect(schema.pool[0].storyCore).toContain('先写由谁实际执行');
+      }
+      return;
+    }
+    if(failure==='locked_card_context'){
+      const cards=generate.mock.calls.filter(([req]:any[])=>req.metrics?.stepKey==='idea_card_structure');
+      expect(cards).toHaveLength(2);
+      for(const [request] of cards){
+        const header=request.prompt.split('硬性要求：')[0];
+        expect(header).toContain('创作流派=悬疑推理');expect(header).toContain('基调=紧张');
+        expect(header).not.toContain('扮猪吃虎');expect(header).not.toContain('创作流派=；');
+        expect(request.prompt).toContain('全部创作选项已固定，不再选择。');
+        expect(request.prompt).not.toContain('webNovelGenre 未预选');
+        expect(JSON.parse(request.prompt.split('JSON 结构（ideas 必须恰好 1 项）：')[1]).ideas[0]).not.toHaveProperty('webNovelGenre');
+      }
+      expect(result.qualifiedIdeas[0]).toMatchObject({webNovelGenre:['悬疑推理'],storyTone:['紧张']});
+      return;
+    }
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
@@ -2548,7 +2582,7 @@ describe('discovery request identity isolation', () => {
 });
 
 
-it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],[5,8,false,true]])('globally selects compact source references for %s requests without batch nomination quotas',async(requestedCount,screenedCount,duplicateSelection,identityOnly)=>{
+it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],[5,8,false,true]])('globally selects compact source references for %s requests (%s screened, duplicate=%s, identityOnly=%s) without batch nomination quotas',async(requestedCount,screenedCount,duplicateSelection,identityOnly)=>{
  const cap=vi.spyOn(discoveryConcurrency,'adaptiveDiscoveryConcurrency').mockImplementation(n=>Math.max(1,Math.min(7,n)));
  try{
   let chosen:any[]=[];
@@ -2561,7 +2595,7 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
     const batch=Number(request.metrics.attempt||0),size=Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1]);
     const schema=JSON.parse(request.prompt.split('JSON 结构：')[1]);expect(Object.keys(schema)).toEqual(['pool']);
     const plan=JSON.parse(request.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]);
-    const definitions=JSON.parse(request.prompt.split('【每项分类核心机制：生成与选优使用与审核相同的标准】')[1].split('\n')[0]);
+    const definitions=plan.map((slot:any)=>({category:slot.storyCategory,standard:slot.categoryRequirement}));
     const directory=['悬疑惊悚','宫斗宅斗','男频脑洞','玄幻仙侠'];
     expect(new Set(definitions.map((row:any)=>row.category))).toEqual(new Set(plan.map((slot:any)=>directory[Number(slot.storyCategoryId.slice(1))-1])));
     const offset=batch===0?0:Math.ceil(Math.max(requestedCount*3,requestedCount+5)/2);
@@ -2581,7 +2615,7 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
   });
   const c=Object.create(ChainController.prototype) as any;
   c.realLLM={assertScenarioModelConfigured:vi.fn(),generate};c.logger={log:vi.fn(),warn:vi.fn(),error:vi.fn(),debug:vi.fn()};
-  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};c.reconcilePremiseSelection=vi.fn(async()=>{throw Error('independent-review-sentinel')});
+  c.db={getDb:()=>({prepare:()=>({all:()=>[]})})};c.reconcilePremiseSelection=vi.fn(async(...args:any[])=>{if(identityOnly){expect(args[10].pendingIds.size).toBe(screenedCount);const prepared=await args[10].resolve();expect(prepared.selected).toHaveLength(screenedCount);expect(prepared.selected.every((item:any)=>Array.isArray(item.causalPlan))).toBe(true);}throw Error('independent-review-sentinel')});
   const result=await c.runIdeaDiscovery({storyType:'short_story',platform:'fanqie',customPlatformNote:'',storyCategory:'悬疑惊悚',discoveryCategoryOptions:['悬疑惊悚','悬疑惊悚','宫斗宅斗','男频脑洞','玄幻仙侠'],storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],submissionTags:['悬疑'],plotTags:['调查'],genreFitNote:'',pov:'第一人称',targetWords:'20000',targetAudience:''},requestedCount);
   expect(generate.mock.calls.filter(([call]:any[])=>call.metrics.stepKey==='idea_premise_pool_generation')).toHaveLength(2);
   expect(generate.mock.calls.filter(([call]:any[])=>call.metrics.stepKey==='idea_premise_selection')).toHaveLength(1);

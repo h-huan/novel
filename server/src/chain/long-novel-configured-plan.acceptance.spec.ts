@@ -113,7 +113,7 @@ describe('configured long novel planning acceptance', () => {
     controller.llmCallWithRetry = vi.fn(async (step: string, prompt: string) => {
       calls.push({ step, prompt });
       expect(prompt).toContain('旧楼'); // actual world facts must reach EVERY downstream stage
-      if (step === '长篇角色架构') return { data: { characters: [{ name: '周砚', identity: '巡查员', arc: '从服从到反抗' }] }, rawContent: '', warnings: [] };
+      if (step === '长篇角色架构') return { data: { characters: [{ name: '周砚', identity: '巡查员', arc: '从服从到反抗', abilities: '只能查看本人巡查记录', goalMotivation: '查明失踪搭档的去向', relationships: [{name:'搭档',relation:'共同巡查'}] }] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [] }, rawContent: '', warnings: [] };
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]) || 1;
       const start = Number(prompt.match(/全书第(\d+)-/)?.[1]) || 1;
@@ -139,6 +139,10 @@ describe('configured long novel planning acceptance', () => {
     expect(calls.find(item => item.step === '长篇角色架构')?.prompt).toContain(STANDARD);
     expect(calls.find(item => item.step === '长篇跨卷伏笔')?.prompt).toContain(STANDARD);
     expect(calls.some(item => /^长篇第\d+卷章纲/.test(item.step) && item.prompt.includes(STANDARD))).toBe(true);
+    for(const item of calls.filter(item=>/^长篇第\d+卷章纲/.test(item.step)||item.step==='长篇跨卷伏笔')){
+      expect(item.prompt).toContain('只能查看本人巡查记录');expect(item.prompt).toContain('查明失踪搭档的去向');expect(item.prompt).toContain('共同巡查');
+    }
+    expect(calls.find(item=>item.step==='长篇跨卷伏笔')?.prompt).toContain('第1章的具体事件链和结果');
     // 回归：不存在第二份"回落口径"。此前 resolvePlatformToneDirective 返空时会另拼一份
     // 宪法+平台基准+三标签，那份必然缺分类/视角/目标读者，等于用降级标准生成地基。
     expect(String(foundationParams.story_setting)).not.toContain('【项目创作宪法 · 必须严格执行】');

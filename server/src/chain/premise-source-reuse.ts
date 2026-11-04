@@ -39,7 +39,7 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
 /** A completed independent verdict is reusable only for the exact story facts and review scope.
  * The same validation applies to full source review and causal-index-only rechecks;
  * no skipped/unknown check or unproved semantic rejection is promoted to approval. */
-function cacheVerifiedSourceReview(
+export function cacheVerifiedSourceReview(
  input:PremiseSelectionResult, review:PremiseSelectionReview, scope:string,
  receipts:PremiseSourceReceipts, requiredGenres:readonly string[],
 ):void {

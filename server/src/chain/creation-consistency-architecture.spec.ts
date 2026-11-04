@@ -269,7 +269,16 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('const confirmedCharacterNames = [');
     expect(controllerSource).toContain('const characterEvidenceLocations = [...new Set(confirmedCharacterNames)]');
     expect(controllerSource).toContain('confirmedStoryFields: Object.entries(dto.selectedIdea || {})');
-    expect(controllerSource).toContain('chapterOrders: generatedChapterContext.filter');
+    expect(controllerSource).not.toContain('chapterOrders: generatedChapterContext.filter');
+    const roleCall=indexOrFail(controllerSource,'await this.prepareCreationCharacters({projectId,dto');
+    const outlinePrompt=indexOrFail(controllerSource,'const chapterPrompt =');
+    const worldDone=indexOrFail(controllerSource,'世界观已完成，先生成角色再规划章纲');
+    expect(roleCall).toBeGreaterThan(worldDone);expect(roleCall).toBeLessThan(outlinePrompt);
+    expect(controllerSource).toContain('const ideaNames = outlineCharacterSources.map');
+    expect(controllerSource).toContain('const ideaSpan = `'+String.fromCharCode(36)+'{worldContinuityDirective}');
+    expect(controllerSource).toContain('不代表全书封闭名单');
+    expect(controllerSource).not.toContain('禁止新增任何不在列的人物或神秘角色');
+    expect(controllerSource).not.toContain('任务A：角色生成（仅当 DB 中无角色时执行）');
     expect(controllerSource).not.toContain('confirmedStoryEvidence: Object.fromEntries');
     expect(controllerSource).not.toContain('chapterEvidence: generatedChapterContext');
     expect(controllerSource).toContain('normalizeGeneratedCharacters(value)');

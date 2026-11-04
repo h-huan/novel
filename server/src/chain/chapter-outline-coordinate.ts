@@ -30,3 +30,19 @@ export function findChapterOutline(db: ChapterDb, projectId: string, chapterInde
   if (chapterId) throw new Error('当前章节没有有效的章纲绑定，停止生成，禁止按排序猜测另一章');
   return readOrderedChapterOutlines(db, projectId)[chapterIndex - 1];
 }
+
+/** Display/depth columns are projections of accepted events, never another story generator. */
+export function projectOutlineDepthFields(row:any):Record<string,string>|null{
+  let plan:any=row.scenes;try{if(typeof plan==='string')plan=JSON.parse(plan);}catch{return null;}
+  if(!plan||typeof plan!=='object'||Array.isArray(plan)||!Array.isArray(plan.scenes))return null;
+  const type=String(row.chapter_function||plan.chapterFunction||plan.responsibilityContract?.function||'');
+  if(!type)return null;
+  const text=(v:unknown):string=>v==null?'':typeof v==='string'?v:JSON.stringify(v);
+  const locations=[...new Set(plan.scenes.map((scene:any)=>typeof scene==='string'?scene:scene?.location||scene?.name||'').filter(Boolean))];
+  const highlights=plan.highlights??plan.highlight??[];
+  return {chapter_type:type,pov_ratio:text(plan.pov_ratio??plan.povRatio),
+    hot_scenes:text(plan.hot_scenes??plan.hotScenes??highlights),setback_scenes:text(plan.setback_scenes??plan.setbackScenes),
+    ending_setup:text(plan.hook),conflict_design:text(plan.conflicts??plan.conflict),
+    system_hints:text(plan.system_hints??plan.systemHints),location_summary:locations.join(' → '),
+    highlight_points:JSON.stringify(Array.isArray(highlights)?highlights:highlights?[highlights]:[])};
+}

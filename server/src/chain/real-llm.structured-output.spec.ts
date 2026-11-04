@@ -868,3 +868,22 @@ it.each([false,true])('uses the persisted output budget at the source-review mod
   fs.rmSync(directory,{recursive:true,force:true});
  }
 });
+
+it.each(['future_task','exit_state','current_task','prior_task'])('checks responsibility bridge addresses in actual preflight: %s',async mode=>{
+ const service=new RealLLMService({} as any);
+ const plan={chapterResponsibilities:[{chapter:1,title:'取得',function:'开篇',responsibility:'甲取得当夜入库授权',prerequisites:[],timeline:'当夜',exitState:'甲已经进入仓库'},{chapter:2,title:'开门',function:'推进',responsibility:'甲持有效授权打开库门',prerequisites:['当夜授权'],timeline:'随后',exitState:'甲在库内'}]};
+ const run={constitution:readConstitution({target_platform:'fanqie',settings:{category:'悬疑',pov:'第一人称'}}),context:JSON.stringify({world:'当夜入库须持有效授权'})};
+ const verdict={consistent:true,contradictions:[],conditionChecks:plan.chapterResponsibilities.map(ch=>({chapter:ch.chapter,taskAnchorId:'chapter:c'+ch.chapter+':task',status:'supported',bridgeAnchorIds:['chapter:c'+(mode==='prior_task'?1:ch.chapter)+':task'],anchoredBridgeVerified:true,reason:'按本章实际行动证明进入条件的取得'}))};
+ const generate=vi.fn(async(request:any)=>{
+  if(mode==='future_task')verdict.conditionChecks[0].bridgeAnchorIds=['chapter:c2:task'];
+  if(mode==='exit_state'){
+   const anchors=JSON.parse(request.prompt.split('【逐字证据地址】')[1].split('\n不要手抄')[0]);
+   verdict.conditionChecks[0].bridgeAnchorIds=[anchors.find((anchor:any)=>anchor.source==='body'&&anchor.path==='chapterResponsibilities.0.exitState').id];
+  }
+  return {content:JSON.stringify(verdict)};
+ });
+ (service as any).generateInternal=generate;vi.spyOn(service as any,'auditPlanningActions').mockResolvedValue({verified:true,errors:[],issues:[]});
+ const task=(service as any).compileVerifiedResponsibilities(run,{},JSON.stringify(plan));
+ if(['future_task','exit_state'].includes(mode)){await expect(task).rejects.toThrow('逐章条件核对');expect(generate).toHaveBeenCalledTimes(2);}
+ else {expect(JSON.parse(await task)).toEqual(plan);expect(generate).toHaveBeenCalledOnce();}
+});

@@ -3,6 +3,18 @@ import {readGenerationBudgets} from '../config/generation-budgets';
 import { type PremiseSelectionResult } from './idea-discovery-contract';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSourceAuditView, type PremiseSelectionReview } from './premise-selection-review';
 
+/** A single existing plan-only correction is shared by just its dependent batches.
+ * Facts/identity never change; unresolved identities are excluded by the existing normalizer. */
+export interface PremiseSourcePreparation {
+  pendingIds: ReadonlySet<string>;
+  resolve: () => Promise<PremiseSelectionResult>;
+}
+export async function readyPremiseSourceBatch(batch:PremiseSelectionResult,preparation?:PremiseSourcePreparation):Promise<PremiseSelectionResult>{
+  if(!preparation||!batch.selected.some(item=>preparation.pendingIds.has(String(item.premiseId))))return batch;
+  const ready=await preparation.resolve(),ids=new Set(batch.selected.map(item=>String(item.premiseId)));
+  return {...batch,selected:ready.selected.filter(item=>ids.has(String(item.premiseId)))};
+}
+
 /** Source/payoff/genre/category reviews are premise-local. Independently review
  * every disjoint group concurrently, keeping cross-card overlap in its separate
  * original Gate. When the remaining shared budget covers exactly one first call

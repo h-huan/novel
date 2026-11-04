@@ -1,4 +1,4 @@
-import {chapterConditionReviewIssues} from './chapter-condition-review';
+import {chapterConditionReviewIssues,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import { bindModelRequestClock, remainingModelRequestTime } from './model-request-clock';
 import {generationOutputBounds} from '../config/generation-budgets';
 import { assertGenerationActive, currentGenerationSignal, generationCancellationReason, GenerationDeadlineExceededError, waitForGeneration } from '../common/generation-cancellation';
@@ -346,11 +346,6 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       }
       for (const check of Array.isArray(value?.conditionChecks) ? value.conditionChecks : []) {
         if (check?.taskAnchorId) check.taskEvidence = check.taskAnchorId === `chapter:c${check.chapter}:task` ? byId.get(check.taskAnchorId)?.text : '';
-        if (Array.isArray(check?.bridgeAnchorIds)) {
-          const picked = check.bridgeAnchorIds.map((id: string) => byId.get(id));
-          check.anchoredBridgeVerified = picked.some((anchor: any) => anchor?.source === 'body') && picked.every((anchor: any) => anchor
-            && resolveQualityEvidence(anchor.source === 'body' ? JSON.stringify(plan) : sources, anchor.text).verified);
-        }
       }
       for (const finding of Array.isArray(value?.contradictions) ? value.contradictions : []) {
         if (finding?.taskAnchorId) finding.task = finding.taskAnchorId === `chapter:c${finding.chapter}:task` ? byId.get(finding.taskAnchorId)?.text : '';
@@ -365,7 +360,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const contradictions = Array.isArray(value.contradictions) ? value.contradictions : [];
       if (typeof value?.consistent !== 'boolean' || !Array.isArray(value.contradictions)
         || value.consistent !== (contradictions.length === 0)) protocolErrors.push('边界审查结论与问题清单不一致');
-      protocolErrors.push(...chapterConditionReviewIssues(value,plan.chapterResponsibilities,sources,true));
+      protocolErrors.push(...chapterConditionReviewIssues(value,plan.chapterResponsibilities,sources,check=>chapterConditionBridgeAnchorsVerified(check,plan.chapterResponsibilities,byId,sources)));
       for (const finding of contradictions) {
         const evidence = [...(finding.anchoredRuleEvidence || []), finding.ruleEvidence, ...quotedText(String(finding.ruleEvidence || '')).map(x => x.text)];
         if (!isEvidencedChapterResponsibilityConflict(finding) || finding.chapter > original.length
@@ -501,6 +496,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
 
   private async evaluateGeneratedRun(run: ReturnType<GenerationMetricsService['beginRun']>, request: LLMRequest, content: string,
     validateCandidate?: (candidate: string) => Promise<unknown>): Promise<string> {
+    request=bindModelRequestClock(request);
     const before = await this.assessGeneratedRun(run, request, content);
     const gate = this.metrics.saveRunScore(run.id, run.projectId!, before);
     const repairIssues=before.issues.filter(isAutomaticQualityRepairIssue);
@@ -591,6 +587,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   private async assessGeneratedRun(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string) {
+    request=bindModelRequestClock(request);
     if (!run.constitution) throw new Error('缺少创作宪法');
     // 判定单元随请求下传：片段调用方（二次加工分块改写、逐段精修、质检局部精修）声明 segment；
     // 整章生成与整章修复不声明，缺省即整章口径 —— 缺省不放宽任何整章级判据。
@@ -623,6 +620,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       let rawResponse = '';
       try {
         const judged = await this.generateInternal({
+          deadlineAt:request.deadlineAt,timeout:request.timeout,
           // A malformed full review has no trustworthy finding list. A
           // dimensions-only completion cannot replace that full review.
           prompt: reviewAttempt === 0 || combinedRaw === null
@@ -665,6 +663,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           rawResponse: rawResponse.slice(0, 12000), responseChars: rawResponse.length });
         if (score.status === 'evaluated') break;
       } catch (error) {
+        remainingModelRequestTime(request);
         assessmentDiagnostics.push({ attempt: reviewAttempt + 1, status: 'failed',
           error: error instanceof Error ? error.message : String(error), missingDimensions: missing,
           rawResponse: rawResponse.slice(0, 12000), responseChars: rawResponse.length });
@@ -726,6 +725,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState'): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
+    request=bindModelRequestClock(request);
     let chapters: any[] = [];
     try { chapters = JSON.parse(content).volumes.flatMap((volume: any) => volume.chapters || [])
       .filter((chapter: any) => ['climax', 'explosion', 'resolution'].includes(chapter.chapterFunction)); } catch {
@@ -767,7 +767,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               || audit?.transitions?.some((row: any) => row.bridgeAnchorId === anchor.id))))
             + '\n未证明的条件不能以未提供的来源或临时假设补齐。',
         } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField);
-        const response = await this.generateInternal({ ...prompt, scenario: 'review', injectStandard: false,
+        const response = await this.generateInternal({ ...prompt, deadlineAt:request.deadlineAt,timeout:request.timeout, scenario: 'review', injectStandard: false,
           systemPrompt: prompt.systemPrompt + '\n独立核对关键场景的必要因果，不评分、不改写场景。',
           prompt: '\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】' + body + '\n'
             + prompt.prompt + '\n每项transitions另带chapterNumber，须覆盖这些关键章：' + JSON.stringify(chapters.map(chapter => chapter.chapterNumber))

@@ -217,5 +217,14 @@ it('keeps discovery scheduling out of confirmed-story generation while retaining
 });
 
 it('injects the same decisive-choice prerequisite before pool generation, selection and either gate',async()=>{
- const rules=await import('../../shared/src/system-workflow-rules.registry');standardDirectiveCache.rebuild(activeSystemWorkflowRules());for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_source_drift_review','idea_presentation_review'])expect(standardDirectiveCache.get('idea_generate',step)).toContain(rules.DECISIVE_CHOICE_CONDITION_POLICY);
+ const rules=await import('../../shared/src/system-workflow-rules.registry');standardDirectiveCache.rebuild(activeSystemWorkflowRules());for(const step of ['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_refill_selection','idea_premise_pool_reselection','idea_premise_source_drift_review','idea_premise_payoff_recheck','idea_card_structure','idea_presentation_review'])expect(standardDirectiveCache.get('idea_generate',step)).toContain(rules.DECISIVE_CHOICE_CONDITION_POLICY);
+});
+
+it('projects one participant-choice condition before candidate creation and through both creation paths',async()=>{
+ const rules=await import('../../shared/src/system-workflow-rules.registry');standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ for(const [scene,step]of [
+  ...['idea_premise_pool_generation','idea_premise_pool_refill','idea_premise_selection','idea_premise_refill_selection','idea_premise_pool_reselection','idea_premise_source_drift_review','idea_premise_payoff_recheck','idea_card_structure','idea_presentation_review'].map(step=>['idea_generate',step]),
+  ['outline','creation_chapter_detail'],['outline','creation_chapter_fact_repair'],['outline','outline'],['writing','writing'],['review','review']]){
+  expect(standardDirectiveCache.get(scene,step),scene+':'+step).toContain(rules.STORY_PARTICIPANT_CHOICE_POLICY);
+ }
 });

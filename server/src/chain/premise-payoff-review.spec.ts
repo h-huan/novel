@@ -251,3 +251,33 @@ it('does not silently discard the fifth unmapped outcome or split an English nam
   expect(focus.some((row:any)=>row.claim.includes('第五家仓库停运'))).toBe(true);
   expect(focus.some((row:any)=>row.claim.includes('联系人Annie当面交给'))).toBe(true);
 });
+
+it.each(['source','plan_only'])('keeps the dispatched %s review JSON schema consistent with the existing admission gate',async(mode)=>{
+ const item={...selection.selected[0],causalPlan:[{action:{field:'activeChoice',quote:selection.selected[0].activeChoice},conditions:[{field:'escalation',quote:selection.selected[0].escalation}],result:{field:'payoff',quote:selection.selected[0].payoff}}]},input={...selection,selected:[item]};
+ const c=Object.create(ChainController.prototype) as any,sentinel=Error('captured_without_model');
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{
+  const json=prompt.split('payoffChecks每个ref恰好一项，形状为')[1]?.split('。证据编号')[0];
+  expect(json).toBeTruthy();const row=JSON.parse(json!);expect(row.links).toHaveLength(item.causalPlan.length);
+  expect(row.links[0].decisionCheck).toMatchObject({status:'supported|gap|unknown|not_required',deciderQuote:expect.any(String),basisQuote:expect.any(String),reason:expect.any(String)});
+  row.status='supported';row.reason='同一实际行动与条件支持本项直接结果';row.links.forEach((link:any)=>{link.status='supported';link.reason='本环节沿实际行动和原有条件产生直接后果';link.decisionCheck={status:'not_required',reason:'本接口样例不要求外部主体改变已有否决决定'};});
+  expect(premisePayoffReviewIssues({payoffChecks:[row]},input)).toEqual([]);
+  delete row.links[0].decisionCheck;expect(premisePayoffReviewIssues({payoffChecks:[row]},input).join('')).toContain('缺少决定者');
+  throw sentinel;
+ });
+ const task=mode==='source'?c.reviewPremiseSelection(input,'','source_drift',{remaining:2},true,[]):c.reviewChangedPremisePayoff(input,{passed:false,issues:[]},'',{remaining:2});
+ await expect(task).rejects.toBe(sentinel);expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+});
+
+it.each(['exact_alias','result_self_proof','different_text'])('handles reversal source aliases without weakening result evidence: %s',mode=>{
+ const text='我把原始文件交给窗口，工作人员核验身份后暂停登记。';
+ const candidate={...selection.selected[0],reversalEffect:text,payoff:mode==='different_text'?'另一个事件：'+text:text,
+  causalPlan:[{action:{field:'reversalEffect',quote:mode==='result_self_proof'?'工作人员核验身份后暂停登记':'我把原始文件交给窗口'},conditions:[],result:{field:'payoff',quote:'工作人员核验身份后暂停登记'}}]};
+ const input={...selection,selected:[candidate]},row={...supported,
+  reversalCheck:{status:'supported',actionEvidenceRef:'S1.reversalEffect',reason:'先交付原始文件，再由窗口实际核验并暂停登记'},
+  links:[{ref:'S1.causalPlan[0]',status:'supported',decisionCheck:{status:'not_required',reason:'本例核验同一已建立操作的引用，不新增外部决定'},reason:'实际交付行动之后才核验并暂停登记'}]};
+ const issues=premisePayoffReviewIssues({payoffChecks:[row]},input);
+ if(mode==='exact_alias'){
+  expect(issues).toEqual([]);
+  expect(quarantineUnprovenReversalEvidence({payoffChecks:[row]},input).payoffChecks[0].status).toBe('supported');
+ }else expect(issues.join('')).toContain('不能用结果自证');
+});
