@@ -289,3 +289,26 @@ it('distinguishes missing action quote, result quote and bridge while keeping ex
  expect(checked.errors.join('；')).toContain('supported缺少有效成立条件原文');
  expect(causalAuditRepairTargets({transitions:[row]},checked.errors)).toEqual([0]);
 });
+
+it('stress: 60 chapter result projections require 20 distinct semantic checks, but every negative field stays rejected',()=>{
+ const results=Array.from({length:20},(_,index)=>'第'+(index+1)+'笔核算已经得到不同的验收结果。');
+ const chapter={chapterNumber:2,content:'核对人员正在核算原始账目，但仍未取得签署权限。',
+  scenes:results.map(outcome=>({outcome})),
+  characterActions:results.map(result=>({result})),
+  characterStates:results.map(stateAfter=>({stateAfter}))};
+ const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+ const all=causalChapterResultAnchors(anchors,0),groups=causalChapterResultReviewGroups(anchors,0);
+ expect(all).toHaveLength(60);
+ expect(groups.review).toHaveLength(20);
+ expect(Object.values(groups.aliasesByReview).flat()).toHaveLength(40);
+ const action=anchors.find(row=>row.path==='0.content'&&row.text===chapter.content)!;
+ const review=materializeCausalAuditAnchors({status:'evaluated',reason:'逐笔核算不等于具有签署或批准资格',
+  transitions:groups.review.map(result=>({chapterNumber:2,actionAnchorId:action.id,resultAnchorId:result.id,
+   bridgeAnchorId:'',status:'gap',reason:'现有核算动作没有建立由有权人员作出批准的必要条件'}))},body,{});
+ const expanded=expandCausalReviewedResultAliases(review,groups.aliasesByReview,body,{});
+ expect(expanded.transitions).toHaveLength(60);
+ const checked=validateCausalAudit(expanded,body,{});
+ expect(checked.verified).toBe(true);
+ expect(checked.issues).toHaveLength(60);
+ expect(checked.issues.every(row=>row.issueType==='causality_gap')).toBe(true);
+});
