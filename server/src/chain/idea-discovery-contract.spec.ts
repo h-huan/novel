@@ -1,5 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
-import { premiseSeedFactIssues, screenPremisePoolBatch } from './idea-discovery-contract';
+import { premiseSeedFactIssues, screenPremisePoolBatch, freezePremiseCreationChoices } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -844,5 +844,32 @@ describe('single lossless five-section pool contract',()=>{
   const raw={workingTitle:'原来那座桥',storyCore};
   expect(screenPremisePoolBatch([raw]).candidates).toEqual([raw]);
   expect(screenPremisePoolBatch([{...raw,storyCore:'只有开头的一段场景'}]).invalidFields).toBe(1);
+ });
+});
+
+describe('automatic plot-tag metadata never discards valid story facts',()=>{
+ const options={storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+  plotTags:['调查','亲情','反击'],pov:['第一人称']};
+ const submission={required:false,options:[] as string[]};
+ const raw={storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+  plotTags:['调查','未在字典中的临时标签','调查','反击'],pov:'第一人称'};
+ it('keeps the model selected valid subset without inventing labels or touching source',()=>{
+  const before=structuredClone(raw);
+  const result=freezePremiseCreationChoices(raw,{},options,submission);
+  expect(result.plotTags).toEqual(['调查','反击']);
+  expect(raw).toEqual(before);
+  expect(result.storyTone).toEqual(['紧张']);
+ });
+ it('still blocks wholly invalid or absent automatic tags',()=>{
+  for(const generated of [['无效标签'],[],undefined]){
+   expect(()=>freezePremiseCreationChoices({...raw,plotTags:generated}, {}, options, submission))
+    .toThrow('候选未固定有效创作选项：plotTags');
+  }
+ });
+ it('manual tags are strictly inherited and cannot be altered by model metadata',()=>{
+  const manual={plotTags:['亲情']};
+  expect(freezePremiseCreationChoices({...raw,plotTags:['完全无效']},manual,options,submission).plotTags).toEqual(['亲情']);
+  expect(()=>freezePremiseCreationChoices({...raw,webNovelGenre:['未知类型']},{},options,submission))
+   .toThrow('候选未固定有效创作选项：webNovelGenre');
  });
 });
