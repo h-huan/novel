@@ -186,6 +186,6 @@ it('does not freeze a prepared refill at a deficit that can still grow before th
  expect(()=>plannedFullCardRefillCount(3,2,0,true)).toThrow();
 });
 
-it('uses ten minutes only as the discovery performance acceptance target',()=>{
- expect(IDEA_DISCOVERY_MAX_WALL_MS).toBe(10*60*1000);
+it('uses eight minutes only as the discovery performance acceptance target',()=>{
+ expect(IDEA_DISCOVERY_MAX_WALL_MS).toBe(8*60*1000);
 });
