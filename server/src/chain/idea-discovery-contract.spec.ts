@@ -1,5 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
-import { premiseSeedFactIssues } from './idea-discovery-contract';
+import { premiseSeedFactIssues, screenPremisePoolBatch } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -737,6 +737,13 @@ describe('candidate seed structural evidence prevents downstream rescue',()=>{
   const valid=front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end;
   expect(premiseSeedFactIssues(valid.replace('【必要条件】','【必要条件】已完成材料查验但尚未取得认可。'+'【必要条件】'))).not.toEqual([]);
   expect(premiseSeedFactIssues('前缀无来源内容'+valid)).not.toEqual([]);
+  const screened=screenPremisePoolBatch([
+   {workingTitle:'确认过事件的职员',storyCore:valid},null,
+   {workingTitle:'无因果故事',storyCore:'发现一个线索就直接胜利。'},
+  ]);
+  expect(screened).toMatchObject({invalidShape:1,invalidFields:1,invalidNaming:0});
+  expect(screened.candidates).toHaveLength(1);
+  expect(screened.candidates[0].storyCore).toBe(valid);
   const duplicate='【处境触发】普通人被迫处理一份失去关键证据的旧案。'
     +'【主动选择】主角实际找到当年的原始记录并决定交给能处理的负责人。'
     +'【必要条件】主角实际找到当年的原始记录并决定交给能处理的负责人。'

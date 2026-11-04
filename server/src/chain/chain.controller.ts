@@ -199,7 +199,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5160,7 +5160,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         // Actual narrative difference remains subject to the independent Gate.
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
-          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；本批只输出pool，不选择、展开或提名，不输出selectedPremises。',
+          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、独特局势变化与代价比较本批候选，弱方案在本次生成内重构；输出pool按成熟度由强到弱排序。本批只输出pool，不输出selectedPremises、分数、自评或淘汰过程；该顺序仅供全池选优，不能替代后续独立审核。',
           'pool数组每项包含premiseId、workingTitle、storyCategoryId、storyCore，以及JSON示例中本次未预选、需要自动确定的创作维度。自动选择先从本次字典确定再落实为故事事件，并随本候选保存；手动选项由服务器绑定，无需重复返回。storyCore用事实密集的简短叙述，优先控制在300—500汉字；不是删减必要条件的硬限。按【处境触发】【主动选择】【必要条件】【反转兑现】【分类流派机制】依次写具体事实，不写评审或自评。先确定人物欲望与当前阻力，再确定主角用什么真实操作改变对手的选择或局面，最后写这项操作实际能产生的结果与代价。每项关键结果都须有原池已写出的执行者、行动及真实必要条件，不把计划、请求、承诺、发现线索或结果断言当成已经执行的桥梁。',
           '按已注入GEN-002的分类关系、必要条件、内部事实一致与实质差异要求构思。承担结果的人物选择与必要条件须已实际发生。初次生成时先确定可兑现的具体结果，再倒查谁实际执行、影响哪些对象、怎样取得证据或权限、对手为何会配合或反制；把必需的真实条件写在前四节里，不能仅在第五节贴流派标签。安排一次主动选择后的局势变化，再有真实新阻力和不同的第二次变化；普通短篇不必机械凑环节。若仅有被轻视、亮本事、众人服气，或者既有行动全部成立而所称结果仍可能不成立，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
@@ -5237,6 +5237,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         const poolBatchResults: Array<{
           batchIndex: number; requested: number; candidates: any[]; durationMs: number; rawReturned: number | null;
           parseFailed: boolean; error?: string; blocked?: any;
+          screened?: ReturnType<typeof screenPremisePoolBatch>;
         }> = await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
           const batchStartedAt = Date.now();
           let rawReturned: number | null = null;
@@ -5257,7 +5258,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             }
             if (!Array.isArray(parsed && parsed.pool)) throw new Error('候选池第' + (batchIndex + 1) + '批未返回pool数组。');
             rawReturned = parsed.pool.length;
-            return { batchIndex, requested: batchSize, candidates: parsed.pool, rawReturned, parseFailed: false, durationMs: Date.now() - batchStartedAt };
+            return { batchIndex, requested: batchSize, candidates: parsed.pool, rawReturned,
+              screened: screenPremisePoolBatch(parsed.pool), parseFailed: false, durationMs: Date.now() - batchStartedAt };
           } catch (error) {
             return {
               batchIndex, requested: batchSize, candidates: [], rawReturned, parseFailed: rawReturned === null,
@@ -5295,30 +5297,20 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           batchFilterStats.set(batch.batchIndex, stats);
           if (batch.rawReturned === null) poolFilterTotals.rawReturnedUnknownBatches += 1;
           else poolFilterTotals.rawReturned += batch.rawReturned;
-          for (const raw of batch.candidates) {
-            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-              stats.invalidShape += 1;
-              poolFilterTotals.invalidShape += 1;
-              continue;
-            }
-            const item = raw as Record<string, unknown>;
+          // Batch-local screening overlapped slower model calls. Preserve the
+          // original batch order for stable IDs and global cross-batch dedup.
+          const screened=batch.screened??screenPremisePoolBatch(batch.candidates);
+          stats.invalidShape=screened.invalidShape;
+          stats.invalidFields=screened.invalidFields;
+          stats.invalidNaming=screened.invalidNaming;
+          poolFilterTotals.invalidShape+=screened.invalidShape;
+          poolFilterTotals.invalidFields+=screened.invalidFields;
+          poolFilterTotals.invalidNaming+=screened.invalidNaming;
+          for (const item of screened.candidates) {
             const workingTitle = String(item.workingTitle || '').trim();
             const storyCore = String(item.storyCore || '').trim();
             const titleKey = normalizeTitle(workingTitle);
             const coreKey = normalizeTitle(storyCore);
-            if (workingTitle.length < 2 || storyCore.length < 20 || !titleKey || !coreKey
-              || premiseSeedFactIssues(storyCore).length) {
-              stats.invalidFields += 1;
-              poolFilterTotals.invalidFields += 1;
-              continue;
-            }
-            // Apply the existing naming Gate before deduplication and paid selection.
-            // A forbidden seed must neither suppress a valid peer nor abort all slots later.
-            if (prohibitedFictionNames({workingTitle,storyCore}).length) {
-              stats.invalidNaming += 1;
-              poolFilterTotals.invalidNaming += 1;
-              continue;
-            }
             if(/^B\d+-P\d+$/.test(String(item.premiseId||''))){
               const slot=premiseSearchPlan(batch.batchIndex,batch.batchIndex<poolBatchCount?poolBatchCount:poolBatchCount+1,premisePoolSize,batch.requested,discoveryCategories,dto.webNovelGenre)
                 .find(slot=>slot.premiseId===String(item.premiseId||''));
@@ -5433,6 +5425,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               rawReturned = parsed.pool.length;
               supplementResult = {
                 batchIndex, requested: poolSupplementRequested, candidates: parsed.pool, rawReturned,
+                screened: screenPremisePoolBatch(parsed.pool),
                 parseFailed: false, durationMs: Date.now() - batchStartedAt,
               };
             }

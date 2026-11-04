@@ -141,6 +141,26 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
   return issues;
 }
 
+/** Deterministic screening runs as soon as each provider batch returns.
+ * It is not a semantic review or generator self-score; all later Gates remain. */
+export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
+ candidates: Record<string,unknown>[]; invalidShape:number; invalidFields:number; invalidNaming:number;
+} {
+ const candidates:Record<string,unknown>[]=[];
+ let invalidShape=0,invalidFields=0,invalidNaming=0;
+ for(const raw of rawCandidates){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)){invalidShape++;continue;}
+  const item=raw as Record<string,unknown>;
+  const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
+  const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
+  if(title.length<2||core.length<20||!normalize(title)||!normalize(core)
+    ||premiseSeedFactIssues(core).length){invalidFields++;continue;}
+  if(prohibitedFictionNames({workingTitle:title,storyCore:core}).length){invalidNaming++;continue;}
+  candidates.push(item);
+ }
+ return {candidates,invalidShape,invalidFields,invalidNaming};
+}
+
 /**
  * 广搜候选数量只改善搜索覆盖，不能当成质量 Gate。
  * 未选中的轻量胚子保留最小事实骨架；独立筛选通过的整组预选项
