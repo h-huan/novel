@@ -1,5 +1,6 @@
 import {describe,expect,it,vi} from 'vitest';
 import {creationChapterContracts,creationResponsibilityPlan} from './creation-chapter-contract';
+import {buildChapterResponsibilityAuditPrompt,chapterResponsibilityAuditOutputContract} from '../../shared/src/chapter-responsibility-review';
 import {buildNarrativeBeatPlan} from './adaptive-narrative';
 import {ChainController} from './chain.controller';
 import {findChapterOutline,creationTimelineFallbackChapters} from './chapter-outline-coordinate';
@@ -72,4 +73,24 @@ it('never assigns a neighbouring outline when a persisted chapter binding has br
   ]);
  });
 
+});
+
+describe('same chapter audit envelope for both creator paths',()=>{
+ const input={executionStandard:'只使用已确认世界规则',creativeBrief:'主人公按原故事推进',
+  shortStoryCard:{ending:'已承诺的结局'},worldContinuityDirective:'保留已有事实',
+  plan:[{chapter:1,responsibility:'当事人出示原来保留的记录',exitState:'记录已经被核对'}]};
+ it('includes every chapter condition check in both consistent and conflicting examples',()=>{
+  const prompt=buildChapterResponsibilityAuditPrompt({...input,entryExitContract:true});
+  const finalContract=prompt.slice(prompt.lastIndexOf('只输出JSON对象：'));
+  expect(finalContract).toContain('{"consistent":true,"contradictions":[],"conditionChecks":');
+  expect(finalContract).toContain('{"consistent":false,"contradictions":');
+  expect(finalContract).toContain('"exitStateEvidence":');
+  expect(finalContract).toContain('conditionChecks必须每章一项');
+  expect(finalContract).toContain('gap必须对应contradictions');
+ });
+ it('keeps generic review callers on the existing ordinary verdict without extra condition fields',()=>{
+  const ordinary=chapterResponsibilityAuditOutputContract(false);
+  expect(ordinary).toContain('{"consistent":true,"contradictions":[]}');
+  expect(ordinary).not.toContain('"conditionChecks"');
+ });
 });
