@@ -11121,7 +11121,11 @@ ${enrichToneDirective}
     if (missing.length > 0) {
       throw new HttpException(`不能直接生成第${chapterIndex}章：第${missing.join('、')}章尚无正文，无法建立连续剧情。请先按大纲生成缺失章节。`, 409);
     }
-    if (rows.length !== chapterIndex - 1) {
+    // Count alone is not continuity: [1,1] has the expected length for
+    // chapter 3, yet chapter 2 is missing. Require the exact accepted
+    // preceding order before using ANY of it as story truth.
+    if (rows.length !== chapterIndex - 1
+      || rows.some((row, index) => !Number.isSafeInteger(row.chapter_index) || row.chapter_index !== index + 1)) {
       throw new HttpException(`不能直接生成第${chapterIndex}章：前文章节与大纲序号不连续，无法保证剧情衔接。`, 409);
     }
     const compactLedger = rows.map(row => {
