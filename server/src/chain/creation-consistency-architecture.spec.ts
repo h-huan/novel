@@ -23,6 +23,19 @@ function indexOrFail(source: string, marker: string): number {
 }
 
 describe('creation consistency architecture invariants', () => {
+  it('refill model transport matches the initially screened pool instead of reading obsolete raw.storyCore',()=>{
+    const initial=indexOrFail(controllerSource,'screenPremisePoolBatch(batch.candidates)');
+    const start=indexOrFail(controllerSource,'const newSeedBatches=await independentReviewBatches');
+    const end=indexOrFail(controllerSource,"fulfillmentActions.push({phase:'lightweight_pool_refill'");
+    const refill=controllerSource.slice(start,end);
+    expect(initial).toBeLessThan(start);
+    expect(refill).toContain('screenPremisePoolBatch([raw])');
+    expect(refill).toContain('const seed=screened.candidates[0]');
+    expect(refill).not.toContain('const seed=raw as Record<string,unknown>');
+    expect(refill).toContain('freezePremiseCreationChoices(seed,');
+    expect(refill).toContain('refillSeedRejections');
+  });
+
   it('treats candidate-pool size as a search target and prohibits paid serial reserve replacement', () => {
     expect(controllerSource).toContain('if (candidatePool.length === 0)');
     expect(controllerSource).not.toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
