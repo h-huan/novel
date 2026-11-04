@@ -70,9 +70,9 @@ export function chapterResponsibilityAuditOutputContract(
   +'。以上仅为字段结构示例，不是对任一章节的事实判定；不得复制示例引用地址或假定全部章节supported。'
   +' criterion必须是已有判据编号，冲突需有真实冻结来源的逐字双边证据。'
   +(entryExitContract?
-   ' conditionChecks必须每章恰好一项，包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
+   ' conditionChecks必须每章一项（每章恰好一项），包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
    +' 普通自主行动且不依赖外部资格时用not_required并说明，不能为凑supported虚构已取得条件。'
-   +' supported必须引用当章或前章实际执行的取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应真实contradictions，不得擅自放行。'
+   +' supported必须引用当章或前章实际执行的取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应contradictions中的真实冲突，不得擅自放行。'
    +(evidenceMode==='anchors'?
     ' conditionChecks只返回taskAnchorId、bridgeAnchorIds及状态理由，证据编号须从本次服务端目录选择，不返回taskEvidence/bridgeEvidence。'
     :' conditionChecks只返回taskEvidence、exitStateEvidence、bridgeSource、bridgeEvidence及状态理由，证据必须是本次章节规划中的连续逐字原文，不返回虚构地址。')
