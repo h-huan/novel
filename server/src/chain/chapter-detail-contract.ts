@@ -17,6 +17,40 @@ export function unwrapSingleChapterEnvelope(value:unknown):unknown {
  return obj;
 }
 
+/** The chapter prompt requests ONE identified chapter. When the provider
+ * returns a list, prefer a unique explicit chapter number, then a unique
+ * frozen title; never silently pick an unrelated first item. This is only
+ * envelope selection, not a semantic-quality shortcut. */
+export function unwrapExpectedChapterEnvelope(value:unknown,chapterNumber:number,expectedTitle:string):unknown {
+ const record=(item:unknown):item is Record<string,any>=>!!item&&typeof item==='object'&&!Array.isArray(item);
+ const explicitNumber=(item:Record<string,any>):number|null=>{
+  const raw=[item.chapterNumber,item.chapterIndex,item.chapter_index,item.chapterNo]
+    .find(n=>n!==undefined&&n!==null&&String(n).trim()!=='');
+  if(raw===undefined)return null;
+  const num=Number(raw);return Number.isSafeInteger(num)?num:NaN;
+ };
+ const root=record(value)?value:null;
+ const shape=(item:Record<string,any>)=>['content','coreContent','summary','plot','scenes','characterActions']
+    .some(key=>Object.prototype.hasOwnProperty.call(item,key));
+ if(root&&shape(root)){
+  const id=explicitNumber(root);
+  return id!==null&&id!==chapterNumber?null:root;
+ }
+ const payload=root?.chapter??root?.chapters??value;
+ const raw=Array.isArray(payload)?payload:[payload];
+ const candidates=raw.filter(record).map(item=>unwrapSingleChapterEnvelope(item)).filter(record);
+ const valid=candidates.filter(item=>{const id=explicitNumber(item);return id===null||id===chapterNumber;});
+ if(valid.length===1)return valid[0];
+ if(valid.length<2)return null;
+ const numbered=valid.filter(item=>explicitNumber(item)===chapterNumber);
+ if(numbered.length===1)return numbered[0];
+ const byTitle=valid.filter(item=>typeof item.title==='string'&&item.title.trim()===expectedTitle.trim());
+ if(byTitle.length===1)return byTitle[0];
+ // Identical repeated transport envelopes are not separate story proposals.
+ const signatures=new Set(valid.map(item=>JSON.stringify(item)));
+ return signatures.size===1?valid[0]:null;
+}
+
 /** The example shown to the model must be valid for the CURRENT chapter.
  * A hardcoded 3500-word example contradicted real 4400-5000-word chapter
  * intervals and caused avoidable schema retries during project creation.
