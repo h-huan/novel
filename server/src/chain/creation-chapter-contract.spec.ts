@@ -40,6 +40,11 @@ it('never assigns a neighbouring outline when a persisted chapter binding has br
    all:()=>[{id:'first-outline'},{id:'second-outline'}],
  })};
  expect(()=>findChapterOutline(db as any,'project',2)).toThrow('章纲绑定失效');
+ const manualDraftWithoutOutline={prepare:(sql:string)=>({
+   get:()=>sql.includes('JOIN outlines')?undefined:{id:'manual-chapter',outline_id:null},
+   all:()=>[],
+ })};
+ expect(findChapterOutline(manualDraftWithoutOutline as any,'project',1)).toBeUndefined();
  const beforeAnyChapter={prepare:(sql:string)=>({
    get:()=>undefined,
    all:()=>[{id:'first-outline'},{id:'second-outline'}],
