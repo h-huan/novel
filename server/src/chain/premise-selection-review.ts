@@ -58,9 +58,11 @@ export function premiseOutcomeCounterfactualReviewIssues(
     if (!['supported', 'gap', 'unknown'].includes(String(row?.status))
       || typeof row?.reason !== 'string' || row.reason.trim().length < 16
       || typeof quote !== 'string' || quote.trim().length < 8
-      || !['escalation','reversalEffect','payoff'].some(field =>
-        typeof item[field] === 'string' && String(item[field]).includes(quote)))
+      || !(typeof item.payoff === 'string' && String(item.payoff).includes(quote)))
       errors.push(id+'的胜负反事实审核缺少实际决定性结果原文、真实状态或具体必要条件理由');
+    // The single mandatory check must address the FINAL payoff, never an
+    // easier intermediate win. Earlier decisive failures are considered in
+    // the same causal reason, but cannot replace the required final claim.
     if (row?.status === 'supported') {
       const prior = row.priorQuote;
       if (typeof prior !== 'string' || prior.trim().length < 8
