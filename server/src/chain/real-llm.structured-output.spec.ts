@@ -403,7 +403,7 @@ describe('decisive planning action proof', () => {
     await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
       JSON.stringify({volumes:[{chapters}]}));
     const prompt=generate.mock.calls[0][0].prompt as string;
-    const catalog=JSON.parse(prompt.split('【章号与本章证据地址对应】')[1].split('。行动、结果证据')[0]);
+    const catalog=JSON.parse(prompt.split('【章号与本章证据地址对应】')[1].split('\n服务器resultAnchorIds目录')[0]);
     expect(catalog).toHaveLength(2);
     expect(catalog[0].anchorIds.length).toBeGreaterThan(0);
     expect(catalog[1].anchorIds.length).toBeGreaterThan(0);
