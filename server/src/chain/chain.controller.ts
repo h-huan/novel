@@ -10,7 +10,7 @@ import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
 import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,cacheVerifiedSourceReview,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues,premiseOverlapPairs} from './premise-selection-review';
@@ -6504,8 +6504,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 // slots. One bad citation in that surplus must not invalidate
                 // other independently reviewable premises. The unchanged
                 // source/causal/genre/full-card Gates still decide quality.
+                // If the fixed original pool already contains enough fully
+                // source-bound candidates for the REAL shortfall, quarantine
+                // optional bad citation identities before spending the only
+                // citation-only model call. Independent quality checks still
+                // determine who is actually good; no story or proof is invented.
+                const citationReady=withPlans.selected.filter(item=>premiseCausalPlanIssues(item).length===0);
+                const sourceForPlan=citationReady.length>=missingAfterFirstGate
+                  ?{...withPlans,selected:citationReady}:withPlans;
                 const planned=await this.completePremiseCausalPlans(
-                  withPlans,reselectionCompletionBudget,missingAfterFirstGate);
+                  sourceForPlan,reselectionCompletionBudget,missingAfterFirstGate);
                 const aligned=normalizePremiseSelectionPayload({
                   pool:unusedSeeds,selectedPremises:planned.selected,
                 },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
