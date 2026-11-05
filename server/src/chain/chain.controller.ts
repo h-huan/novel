@@ -6500,7 +6500,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 const withPlans={...prelim,selected:prelim.selected.map(item=>bindPremiseCausalPlan({
                   ...item,causalPlan:source.find((row:any)=>row?.premiseId===item.premiseId)?.causalPlan,
                 }))};
-                const planned=await this.completePremiseCausalPlans(withPlans,reselectionCompletionBudget);
+                // Refill may contain an OPTIONAL hedge beyond the real missing delivery
+                // slots. One bad citation in that surplus must not invalidate
+                // other independently reviewable premises. The unchanged
+                // source/causal/genre/full-card Gates still decide quality.
+                const planned=await this.completePremiseCausalPlans(
+                  withPlans,reselectionCompletionBudget,missingAfterFirstGate);
                 const aligned=normalizePremiseSelectionPayload({
                   pool:unusedSeeds,selectedPremises:planned.selected,
                 },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
