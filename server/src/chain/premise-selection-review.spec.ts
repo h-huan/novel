@@ -219,7 +219,7 @@ it('does not spend an optional hedge when reselection allowance is unavailable',
    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
  });
 
-it('preserves paid review credits when the actual delivery count is already source-vetted',async()=>{
+it('uses only already-funded preselection hedge slots when the final five cards have not yet been reviewed',async()=>{
  const ids='ABCDEFGHIJK'.split('');
  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
    selectedPremises:ids.slice(0,8).map(premise)},8,15);
@@ -233,17 +233,21 @@ it('preserves paid review credits when the actual delivery count is already sour
    }))},current);
  });
  controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-   expect(prompt).toContain('replacements恰好1项');
-   const data={replacements:[{replacesPremiseId:'F',premise:premise('I')}]};
+   expect(prompt).toContain('replacements恰好2项');
+   const data={replacements:[
+     {replacesPremiseId:'F',premise:premise('I')},
+     {replacesPremiseId:'G',premise:premise('J')},
+   ]};
    expect(options.validate(data)).toBe(true);
    return {data};
  });
  const shared={reviews:{remaining:12},reselection:{remaining:3}};
  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],shared,5);
- expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E']);
- expect(result.selectionAudit.reselectionAttempted).toBe(false);
+ expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I','J']);
+ expect(result.selectionAudit.reselectionAttempted).toBe(true);
  expect(result.selectionAudit.finalReview.passed).toBe(true);
+ // The source, pair and selection Gates all still run from the SAME physical allowance.
  expect(shared.reselection.remaining).toBeLessThanOrEqual(3);
  expect(shared.reviews.remaining).toBeLessThanOrEqual(12);
  expect(input.selected.map((row:any)=>row.premiseId)).toEqual('ABCDEFGH'.split(''));
