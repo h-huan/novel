@@ -321,3 +321,24 @@ it('keeps one invalid numbered citation repairable without throwing away valid p
  const repaired=applyPremiseCausalPlanRepairs({selected:[good,bad]},{plans:[{premiseId:'B',causalPlan:bad.causalPlan}]},1);
  expect(repaired.selected).toEqual([good]);
 });
+
+it('real refill shortfall is two: preserve four grounded peers if the fifth candidate has an invalid causal citation',()=>{
+ const input=selection(['P9','P10','P11','P12','P13']);
+ input.selected[3].causalPlan[0].result.quote='本题材不存在的决定性结果';
+ const raw={plans:[{premiseId:'P12',causalPlan:structuredClone(input.selected[3].causalPlan)}]};
+ expect(()=>applyPremiseCausalPlanRepairs(input,raw)).toThrow('有效候选不足');
+ const kept=applyPremiseCausalPlanRepairs(input,raw,2);
+ expect(kept.selected.map(item=>item.premiseId)).toEqual(['P9','P10','P11','P13']);
+ expect(kept.selected.every(item=>premiseCausalPlanIssues(item).length===0)).toBe(true);
+ // Invalid citation does not become an approved result, but a surplus-slot
+ // error cannot discard the independently reviewable peers.
+ const c=Object.create(ChainController.prototype) as any;
+ c.realLLM={generate:vi.fn(async(request:any)=>{
+  expect(request.physicalCallBudget.remaining).toBe(1);
+  return {content:JSON.stringify(raw)};
+ })};
+ const budget={remaining:1};
+ return expect(c.completePremiseCausalPlans(input,budget,2)).resolves.toMatchObject({
+  selected:kept.selected,
+ });
+});
