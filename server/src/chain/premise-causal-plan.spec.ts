@@ -365,3 +365,27 @@ it('does not spend the refill citation call when grounded candidates already exc
  expect(generate).not.toHaveBeenCalled();
  expect(quota.remaining).toBe(1);
 });
+
+
+it('rejects a generated causal action or condition that embeds its claimed result, without rejecting a distinct prior cause',()=>{
+ const item={
+  protagonistSituation:'她想保住店面，却被迫签下欠款单。',
+  activeChoice:'她交出当日出入库台账，管理员拿起资料核查。',
+  escalation:'管理员核对后确认了错账，随后退回多扣的费用。',
+  payoff:'她取回被扣的费用，也保住了店面。',
+ };
+ const good={action:{field:'activeChoice',quote:'她交出当日出入库台账，'},
+   conditions:[{field:'activeChoice',quote:'管理员拿起资料核查。'}],
+   result:{field:'escalation',quote:'管理员核对后确认了错账，'}};
+ const final={action:{field:'escalation',quote:'管理员核对后确认了错账，'},
+   conditions:[],result:{field:'payoff',quote:'她取回被扣的费用，'}};
+ expect(premiseCausalPlanIssues({...item,causalPlan:[good,final]})).toEqual([]);
+ const maskedAction={...good,action:{field:'escalation',quote:'管理员核对后确认了错账，随后退回多扣的费用。'},
+  result:{field:'escalation',quote:'随后退回多扣的费用。'}};
+ expect(premiseCausalPlanIssues({...item,causalPlan:[maskedAction,final]}).join('；'))
+   .toContain('引文已包含结果断言');
+ const maskedCondition={...good,conditions:[{field:'escalation',quote:'管理员核对后确认了错账，随后退回多扣的费用。'}],
+  result:{field:'escalation',quote:'随后退回多扣的费用。'}};
+ expect(premiseCausalPlanIssues({...item,causalPlan:[maskedCondition,final]}).join('；'))
+   .toContain('引文已包含结果断言');
+});
