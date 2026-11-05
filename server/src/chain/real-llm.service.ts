@@ -9,6 +9,8 @@ import { applyLocalPatches, compareRepair, repairRejectionDetails } from '../mod
 import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidenceSources, verifySemanticEvidence, resolveExactCausalBasisSource, resolveQualityEvidence, qualityIssue, qualityGate } from '../modules/writing-quality/quality-issue';
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
+import { boundedDiscoveryMap } from './bounded-discovery-map';
+import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
@@ -734,11 +736,15 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     if (!chapters.length) return { verified: true, errors: [], issues: [], audit: null };
     // Bound the input window, not the number of actual decisive outcomes that must be checked.
     if (chapters.length > 3) {
-      const batches = [];
-      for (let index = 0; index < chapters.length; index += 3) {
-        batches.push(await this.auditPlanningActions(run, request,
-          JSON.stringify({ volumes: [{ chapters: chapters.slice(index, index + 3) }] }), resultField));
-      }
+      // Disjoint chapter groups share one immutable context and do not write
+      // Canon. Schedule existing groups under host headroom, not serially;
+      // keep every original call, proof requirement and deadline unchanged.
+      const groups=Array.from({length:Math.ceil(chapters.length/3)},(_,index)=>chapters.slice(index*3,index*3+3));
+      const results=await boundedDiscoveryMap(groups,adaptiveDiscoveryConcurrency(groups.length),
+        group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),resultField));
+      const failure=results.find(result=>result.status==='rejected') as PromiseRejectedResult|undefined;
+      if(failure)throw failure.reason;
+      const batches=results.map(result=>(result as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
       return { verified: batches.every(batch => batch.verified), errors: batches.flatMap(batch => batch.errors),
         issues: batches.flatMap(batch => batch.issues), audit: batches.map(batch => batch.audit) };
     }
@@ -756,7 +762,8 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         :causalChapterResultReviewGroups(bodyAnchors,index);
       Object.assign(resultAliasesByReview,resultReview.aliasesByReview);
       return {chapterNumber:chapter.chapterNumber,
-        anchorIds:bodyAnchors.filter(anchor => resolveQualityEvidence(JSON.stringify(chapter), anchor.text).verified).map(anchor => anchor.id),
+        anchorIds:bodyAnchors.filter(anchor => anchor.path?.startsWith(index+'.')
+          &&resolveQualityEvidence(JSON.stringify(chapter), anchor.text).verified).map(anchor => anchor.id),
         resultAnchorIds:resultReview.review.map(anchor=>anchor.id)};
     });
     let audit: any = null;
@@ -776,9 +783,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField);
         const response = await this.generateInternal({ ...prompt, deadlineAt:request.deadlineAt,timeout:request.timeout, scenario: 'review', injectStandard: false,
           systemPrompt: prompt.systemPrompt + '\n独立核对关键场景的必要因果，不评分、不改写场景。',
-          prompt: '\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】' + body + '\n'
+          prompt: (attempt===0||countercheck
+              ?'\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】'+body+'\n'
+              :'\n【引用合同纠错】原章纲全部原文及路径已在下方证据目录；本次只修点名行，不重复传输整份章纲。\n')
             + prompt.prompt + '\n每项transitions另带chapterNumber，须覆盖这些关键章：' + JSON.stringify(chapters.map(chapter => chapter.chapterNumber))
-            + '。行动、结果证据必须实际属于声明的本章，不能以其它章节的结果代替。\n【章号与本章证据地址对应】' + JSON.stringify(chapterEvidenceCatalog)
+            + '。行动、结果证据必须实际属于声明的本章，不能以其它章节的结果代替。行动仅从本章anchorIds选地址，结果仅从本章resultAnchorIds选地址；原文由服务器按编号回填，不得自编、拼接或转述引文。\n【章号与本章证据地址对应】' + JSON.stringify(chapterEvidenceCatalog)
             + '\n服务器resultAnchorIds目录中的每一项均须单独核查并返回对应transitions，不能自行抽样；同一行动在场景结果、人物结果、冲突解决、状态、亮点、伏笔回收中的不同断言也分别核对。先一次收齐全部已有缺口，再交给同一次局部修复。普通动作直接结果可引用其实际行动，真实未来安排按planned核实，不为凑缺口强加额外手续。'
             + (resultField ? '\n本次核对出口状态目录：对应章resultAnchorIds逐项各有一条transitions，不抽样、不合并多个结果为一项。resultAnchorId必须来自该目录。先阅读完整responsibility中的事件先后，再核对该结果全部必要环节，而非仅证明最容易成立的一环；reason须交代行动前状态、必要条件是否实际满足。尤其不能从结果倒推尚有未完成任务，或把进入权限当成剥夺对手原有能力。prerequisites是待满足条件，字段名及同义复述不证明已满足。普通直接结果不追加程序；未来安排、线索埋设使用planned及实际理由，无需bridge，不得配成已兑现结果或报gap；心理选择按原文直接核对。' : '')
             + (resultField ? '\n每条transitions（及纠错repairs）还必须填写beforeStateAnchorId（本章行动前完整状态的body地址，允许与actionAnchorId相同以保留同句先后）、requiredCondition（该结果成立所需的最小实际条件）。bridgeAnchorId只选实际满足此条件的原文，无则gap且留空。先输出这两项，再判断status。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？不要用已完成目标或结果断言回答必要条件已满足。planned的beforeStateAnchorId可选择叙事安排原文，requiredCondition说明未到期，不追加程序。' : '')

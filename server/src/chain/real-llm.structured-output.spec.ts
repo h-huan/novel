@@ -393,6 +393,51 @@ describe('full field coverage from unique literal chapter outcome reviews',()=>{
 });
 
 describe('decisive planning action proof', () => {
+  it('keeps identical quotes in separate chapters bound to their actual chapter IDs',async()=>{
+    const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',
+      content:'养马人提交了验马记录。',scenes:[{outcome:'负责人登记了验马结果。'}]}));
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'严格检查章内记录引用是否真正满足成立条件',transitions:[]}})});
+    (service as any).generateInternal=generate;
+    await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+      JSON.stringify({volumes:[{chapters}]}));
+    const prompt=generate.mock.calls[0][0].prompt as string;
+    const catalog=JSON.parse(prompt.split('【章号与本章证据地址对应】')[1].split('。行动、结果证据')[0]);
+    expect(catalog).toHaveLength(2);
+    expect(catalog[0].anchorIds.length).toBeGreaterThan(0);
+    expect(catalog[1].anchorIds.length).toBeGreaterThan(0);
+    expect(catalog[0].anchorIds.filter((id:string)=>catalog[1].anchorIds.includes(id))).toEqual([]);
+    expect(catalog[0].resultAnchorIds.filter((id:string)=>catalog[1].resultAnchorIds.includes(id))).toEqual([]);
+    expect(prompt).toContain('行动仅从本章anchorIds选地址');
+  });
+  it('schedules disjoint groups concurrently and merges their results in chapter order',async()=>{
+    const concurrency=await import('./discovery-concurrency');
+    const spy=vi.spyOn(concurrency,'adaptiveDiscoveryConcurrency').mockReturnValue(2);
+    try {
+      const chapters=[1,2,3,4].map(n=>({chapterNumber:n,chapterFunction:'climax',content:'第'+n+'章发生行动'}));
+      const service=new RealLLMService({} as any);
+      const original=(service as any).auditPlanningActions.bind(service);
+      const started:number[]=[];
+      let release!:()=>void;
+      const hold=new Promise<void>(resolve=>{release=resolve;});
+      (service as any).auditPlanningActions=vi.fn(async (_run:any,_request:any,content:string)=>{
+        const rows=JSON.parse(content).volumes[0].chapters;
+        started.push(rows[0].chapterNumber);
+        if(rows[0].chapterNumber===1)await hold;
+        return {verified:true,errors:[],issues:[],audit:{first:rows[0].chapterNumber}};
+      });
+      const pending=original({id:'r',context:'{}'}, {},
+        JSON.stringify({volumes:[{chapters}]}));
+      await Promise.resolve();
+      expect(started).toEqual([1,4]);
+      release();
+      const result=await pending;
+      expect(result).toMatchObject({verified:true,audit:[{first:1},{first:4}]});
+      expect((service as any).auditPlanningActions).toHaveBeenCalledTimes(2);
+    } finally {spy.mockRestore();}
+  });
+
   it('在交给小说修复前补齐场景漏查项，保留首轮已举证缺口，不另开模型循环', async () => {
     const chapter = {chapterNumber:4,chapterFunction:'climax',content:'他把编号写在本子上。',scenes:[{outcome:'老人手里有了记录。'},{outcome:'证人没有离开。'}],characterActions:[{action:'他把编号写在本子上。',result:'记录登记完成。'}]};
     const body=JSON.stringify([chapter]);
@@ -410,6 +455,8 @@ describe('decisive planning action proof', () => {
     expect(result.audit.transitions.find((row:any)=>row.resultAnchorId===missing.id)).toMatchObject({chapterNumber:4,status:'gap'});
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[1][0].prompt).toContain('不能重审');
+    expect(generate.mock.calls[1][0].prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+    expect(generate.mock.calls[1][0].prompt).not.toContain('【完整章节结构，先按字段与事件顺序理解，后选择引文地址】');
   });
   const bad = { chapterNumber: 4, chapterFunction: 'climax', content: '他关上门。对手无法开门。' };
   const run = { id: 'r', context: JSON.stringify({ rule: '门外插销落下后，只能从门外移开。' }) };

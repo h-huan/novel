@@ -2623,6 +2623,8 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
   let chosen:any[]=[];
   const generate=vi.fn(async(request:any)=>{
    if(identityOnly&&request.metrics?.stepKey==='idea_premise_causal_plan_contract'){
+    expect(request.prompt).toContain('sameTextAs');
+    expect(request.prompt).toContain('必须按该字段展开后逐字核对');
     request.physicalCallBudget.remaining--;
     return {content:JSON.stringify({plans:chosen.map(item=>({premiseId:item.premiseId,causalPlan:item.causalPlan}))})};
    }

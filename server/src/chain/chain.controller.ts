@@ -7,7 +7,7 @@ import { indexedPremiseSourcePool } from './premise-source-bindings';
 import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
-import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices} from './premise-source-bindings';
+import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremiseText} from './premise-source-bindings';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
 import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
@@ -6863,7 +6863,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     if (!targets.length) return selection;
     const response = await this.realLLM.generate({
       prompt: PREMISE_CAUSAL_SEQUENCE_DIRECTIVE + '\n只补全点名题材的causalPlan引用索引，不修改或补造任何故事字段、条件、身份与结果。逐环节引用下方本题材已有的实际行动、条件与结果，覆盖主线payoff；条件未写时不得编造，普通直接因果可为空。修好索引后仍须独立审查真实因果，不能自行声明通过。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
-        + JSON.stringify(premiseCausalPlanExample()) + '}]}；恰好覆盖全部点名ID，不返回其它字段。\n【不可修改的实际故事字段与索引问题】' + JSON.stringify(targets),
+        + JSON.stringify(premiseCausalPlanExample()) + '}]}；恰好覆盖全部点名ID，不返回其它字段。sameTextAs仅表示本题材内与指向字段完全相同的既有原文，必须按该字段展开后逐字核对；这只压缩重复传输，不改变可引用事实。\n【不可修改的实际故事字段与索引问题】' + JSON.stringify(targets.map(compactRepeatedPremiseText)),
       scenario: 'idea_generate', responseFormat: 'json_object', temperature: 0.1,
       timeout: LLM_TUNABLES.timeoutComplex(), maxEmptyRetries: 0, physicalCallBudget: budget,
       metrics: { stepKey: 'idea_premise_causal_plan_contract', attempt: 0 },
