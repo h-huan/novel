@@ -262,6 +262,14 @@ export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
  * （允许超过用户交付数）都须保留完整来源/因果证据并进入并发成卡，
  * 最终交付数量只在完整卡审核之后截取。
  */
+/** The LLM may return more ranked IDs than the already-funded review slots.
+ * Bound transport only; admitted IDs still pass the unchanged identity,
+ * evidence, source, overlap and final-card review gates. */
+export function capRankedPremiseSelections(rows:unknown,limit:number):unknown {
+  if(!Number.isSafeInteger(limit)||limit<1)throw Error('选优预算数量无效');
+  return Array.isArray(rows)?rows.slice(0,limit):rows;
+}
+
 export function normalizePremiseSelectionPayload(
   payload: unknown,
   requestedCount: number,
@@ -397,6 +405,7 @@ export function ideaPremiseSelectionDirective(
 ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同与选优淘汰标准执行。'}
 ${fixedPoolRule}
 ${selectionQuantityRule}
+按核对后的成熟程度由高到低排列selectedPremises，不得默认按原池编号或分类顺序排列；超额时仍只会保留已付款审核容量内的优先候选，其余留在原池备用。排名不能代替独立复审，不能给原池增加事实。
 ${storyTypeRule}
 必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
 ${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}
