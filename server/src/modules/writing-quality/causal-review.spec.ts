@@ -556,7 +556,7 @@ it('limits a targeted missing-result correction to the matching chapter while re
  const review={status:'evaluated',transitions:[{chapterNumber:2,resultAnchorId:missing.id}]};
  const reason=['第1项因果审查缺少该出口结果的行动及成立条件'];
  const prompt=causalAuditRepairPrompt(review,reason,body,{project_context:JSON.stringify({worldRules:'窗口收到申请不等于审批通过。'})}).prompt;
- const segment=prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\\n本次仅纠正编号')[0];
+ const segment=prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\n本次仅纠正编号')[0];
  const choices=JSON.parse(segment);
  expect(choices.some((a:any)=>a.id===missing.id)).toBe(true);
  expect(choices.some((a:any)=>a.text.includes('她向窗口提交申请'))).toBe(true);
