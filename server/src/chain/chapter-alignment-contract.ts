@@ -160,7 +160,7 @@ export function chapterMissingItemTexts(rows:any[]) {
  * exposing them while asking for paragraph IDs made the model invent
  * unsupported body:p locations. Do not use a second numbering system. */
 function chapterObligationParagraphAnchors(body:string){
- return causalEvidenceAnchors(body,{}).filter(row=>/^body:p[1-9]\\d*$/.test(row.id))
+ return causalEvidenceAnchors(body,{}).filter(row=>/^body:p[1-9]\d*$/.test(row.id))
    .map(({id,text})=>({id,text}));
 }
 export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string) {
