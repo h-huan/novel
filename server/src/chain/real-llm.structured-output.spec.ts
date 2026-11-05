@@ -7,7 +7,7 @@ import { dimensionBasis } from '../test/quality-review.fixture';
 import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors } from '../modules/writing-quality/causal-review';
 import { createServer } from 'node:http';
 
-it.each(['project_context:p1', 'project_context:p999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
+it.each(['project_context:v1', 'project_context:v999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
   const service = new RealLLMService({} as any);
   const constitution = readConstitution({ target_platform: 'fanqie', settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], genreFitNote: '现实城市职业与人际冲突推动人物选择', pov: '第三人称限知' } });
   const content = '真实规划：他进入锁住的屋子。';
@@ -21,8 +21,8 @@ it.each(['project_context:p1', 'project_context:p999'])('completes issue citatio
   expect(generate.mock.calls[1][0].prompt).toContain('repairs');
   expect(score.issues).toHaveLength(1);
   expect(score.issues[0].severity).toBe('medium');
-  expect(score.issues[0].evaluation).toBe(basisAnchorId.endsWith('p1') ? 'evidenced' : 'insufficient_evidence');
-  expect(score.status).toBe(basisAnchorId.endsWith('p1') ? 'evaluated' : 'partial');
+  expect(score.issues[0].evaluation).toBe(basisAnchorId.endsWith('v1') ? 'evidenced' : 'insufficient_evidence');
+  expect(score.status).toBe(basisAnchorId.endsWith('v1') ? 'evaluated' : 'partial');
 });
 
 it('preserves all findings when normalizing the observed review hierarchy and refuses incomplete values', () => {
