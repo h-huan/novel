@@ -363,3 +363,23 @@ it('does not reclassify missing supported bridge as a pass; it becomes a documen
  expect(quarantineUnprovedCausalBridges({...audit,transitions:[{...evidence,actionEvidence:'不存在的申请。'}]},
   ['第1项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）'],body,{})).toEqual({...audit,transitions:[{...evidence,actionEvidence:'不存在的申请。'}]});
 });
+
+it('recovers only a unique literal condition address without changing the independent supported verdict',()=>{
+ const body='她递交了原始合同。\n\n柜台职员登记接收了原件。\n\n经正式核验后申请获批。';
+ const row={actionAnchorId:'body:p1',resultAnchorId:'body:p3',status:'supported',
+  bridgeEvidence:'柜台职员登记接收了原件。',reason:'收到原件是实际核验并作出决定前已经发生的条件'};
+ const reviewed=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'逐项核对实际行动及完成结果',transitions:[row]},body,{});
+ expect(reviewed.transitions[0].bridgeAnchorId).toBe('body:p2');
+ expect(reviewed.transitions[0].bridgeEvidence).toBe('柜台职员登记接收了原件。');
+ expect(validateCausalAudit(reviewed,body,{})).toMatchObject({verified:true,errors:[]});
+ const wrong=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'拒绝以不存在的原文编号替代证明',transitions:[{...row,bridgeAnchorId:'body:p999'}]},body,{});
+ expect(wrong.transitions[0].bridgeEvidence).toBe('');
+ expect(validateCausalAudit(wrong,body,{}).verified).toBe(false);
+ const repeated=body+'\n\n柜台职员登记接收了原件。';
+ const ambiguous=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'重复原文不能猜测是哪个独立执行动作',transitions:[row]},repeated,{});
+ expect(ambiguous.transitions[0].bridgeAnchorId).toBeUndefined();
+ expect(validateCausalAudit(ambiguous,repeated,{}).verified).toBe(false);
+});
