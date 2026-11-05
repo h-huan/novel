@@ -1717,6 +1717,8 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         expect(request.prompt).toContain('不能共享一条低职位忍让');
         expect(request.prompt).toContain('不能只是道具加动作的意象暂名');
         expect(request.prompt).toContain('不能用补造事件、剧透最终结果替代点击动机');
+        expect(request.prompt).toContain('五节合计优先300—450汉字');
+        expect(request.prompt).toContain('不得附加向创作者或审稿者征求意见的元评论');
         // New work remains in the already funded source-generation prompt:
         // separately prove each final decision instead of deferring to full-card rejection.
         expect(request.prompt).toContain('抓人、撤销停职、撤股、赔偿');
