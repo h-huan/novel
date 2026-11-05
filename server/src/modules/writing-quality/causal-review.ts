@@ -221,7 +221,7 @@ export function causalChapterEvidenceCatalog(
  * required for its individual result proof.
  */
 export function causalPlanningProofGroups(
- chapters:readonly Record<string,unknown>[],maxSinglePassResults=52,
+ chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
 ):Record<string,unknown>[][]{
  if(chapters.length<2)return [[...chapters]];
  const burden=chapters.map(chapter=>{
