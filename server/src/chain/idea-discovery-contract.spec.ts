@@ -697,6 +697,9 @@ it('packs local repair standards losslessly with per-card facts and all pending 
 it('fixed-pool selection uses the canonical single-output contract without obsolete runtime substitutions', () => {
  const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
  expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
+ expect(rule).toContain('主角须凭选择取得可感知的关系');
+ expect(rule).toContain('不能只让旁观者获益');
+ expect(rule).toContain('能否排除其它合理解释');
  expect(rule).toContain('【服务器实际字段与原池分节映射】');
  expect(rule).toContain('"escalation":["必要条件","反转兑现"]');
  expect(rule).toContain('不存在necessaryConditions字段');

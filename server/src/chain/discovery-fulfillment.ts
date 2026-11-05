@@ -134,27 +134,24 @@ export function minimumReselectionReviewCalls(
  return sourceCalls+(forcesNewIdentity&&selectedCount>1?1:0);
 }
 
-/** One scoped preselection repair wave: optional screening surplus is not
- * a delivery deficit. Only actual missing delivery slots are mandatory.
- * A small model-reviewed hedge remains for full-card rejection, without
- * filling every failed optional screening slot through serial reselection. */
+/** Replenish the already-funded screened shortlist before slow full cards.
+ * A reviewed 5/5 preselection is not 5/5 independently accepted full cards.
+ * Reuse one existing original-pool correction wave; the caller trims optional
+ * candidates against remaining source/pair review credits and real identities.
+ * Never increase call budgets, promise weak approval or add a second wave. */
 export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number,screeningTarget=deliveryCount):{mandatory:number;hedge:number;total:number}{
  if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0
    ||!Number.isInteger(screeningTarget)||screeningTarget<deliveryCount)
    throw Error('预选交付容量参数无效');
  const mandatory=Math.max(0,deliveryCount-retainedApproved);
- // One optional source-vetted survivor avoids a slow post-final-card refill
- // when the initial shortlist had proven rejections. The caller must still
- // fund reselection and every independent review from the original allowance.
- // A shortlist which merely reaches the delivery floor is not a delivery.
- // If the source review already rejected candidates and the screening target
- // still has space, use up to two OPTIONAL existing replacement positions.
- // The caller must fund the very same fixed-pool reselection/source/pair gates;
- // this never grants additional calls or promotes a weak candidate.
+ // The original screening capacity was funded to absorb final semantic
+ // rejections. Do not throw away its unused positions merely because the
+ // minimum delivery count is reached. Optional positions require the SAME
+ // existing independent source and overlap credits, checked at the call site.
  const remainingScreeningSlots=Math.max(0,screeningTarget-retainedApproved);
- const hedge=mandatory>0
-   ?Math.min(remainingScreeningSlots,2,Math.max(1,Math.ceil(mandatory*3/4)))
-   :Math.min(2,remainingScreeningSlots);
+ const hedge=screeningTarget>deliveryCount
+   ?Math.max(0,remainingScreeningSlots-mandatory)
+   :mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
  return {mandatory,hedge,total:mandatory+hedge};
 }
 

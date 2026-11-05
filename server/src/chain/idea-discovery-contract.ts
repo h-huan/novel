@@ -116,6 +116,12 @@ export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
 }
 
 
+/** ONE shared authoring/selection contract. Editorial quality is formed
+ * while generating and ranking the existing pool, before independent Gates.
+ * It does not grant a semantic pass or add a model request. */
+export const PREMISE_READER_VALUE_DIRECTIVE =
+ '【首稿竞争力与可兑现的读者回报】首屏必须有具体反常事件、眼前的利益/关系压力与主角实际承担风险的选择；暂名要提炼事件里尚未揭晓的后果，不能只写道具、职业、身份或普通动作。中段主角的选择必须引发对手有动机的反制和真实局势升级；结局不必胜利，但主角须凭选择取得可感知的关系、筹码、自由或有代价的认知变化，不能只让旁观者获益、本人无力地受损，再用“下一次怎么办”的空问句充当阅读回报。用户已选扮猪吃虎等流派，隐藏优势须驱动不可替代的主动操作及真正的胜负或关系变化；仅装傻、发现线索、把线索交给他人还不算兑现。反向核对最重要的结果：证据究竟能证明什么，能否排除其它合理解释；对手为何照此反应，谁真正有权决定，决定与执行是否已发生。无法证明的归责、处罚、封停、赔偿或诬告不能跳步写成既成事实；普通直接行动不必虚构额外手续。各题材的卖点、推进路径和代价必须来自实际不同的事件，不能用平台标签、自评新颖、普通程序解释或华丽标题替代。';
+
 /** The source pool must contain the real causal and category facts needed to
  * shortlist a story. This is a structural gate; semantic review is unchanged. */
 export const PREMISE_SEED_FACT_LABELS = PREMISE_SOURCE_SECTIONS;
@@ -404,6 +410,7 @@ export function ideaPremiseSelectionDirective(
   if(fixedPoolSelection)return `【原池事实引用式提名】从服务器已经固定的原池选择${selectedCountText}个真实ID。
 ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同与选优淘汰标准执行。'}
 ${fixedPoolRule}
+${PREMISE_READER_VALUE_DIRECTIVE}
 ${selectionQuantityRule}
 按核对后的成熟程度由高到低排列selectedPremises，不得默认按原池编号或分类顺序排列；超额时仍只会保留已付款审核容量内的优先候选，其余留在原池备用。排名不能代替独立复审，不能给原池增加事实。
 ${storyTypeRule}
