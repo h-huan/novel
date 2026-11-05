@@ -243,10 +243,10 @@ it('flags an unanchored separate outcome for independent review without inventin
 });
 
 it('does not duplicate identical payoff and reversal claims while retaining every distinct result',()=>{
- const shared='资料已提交。负责人仍可拒绝。法院最终作出决定。';
+ const shared='原始资料已经提交。负责人仍可拒绝。法院最终作出决定。';
  const input:any={selected:[{premiseId:'P5',reversalEffect:shared,payoff:shared,causalPlan:[]}]};
  const focused=premiseUnmappedOutcomeClaims(input);
- expect(focused.map((row:any)=>row.claim)).toEqual(['资料已提交','负责人仍可拒绝','法院最终作出决定']);
+ expect(focused.map((row:any)=>row.claim)).toEqual(['原始资料已经提交','负责人仍可拒绝','法院最终作出决定']);
  expect(focused.every((row:any)=>row.ref==='S1.reversalEffect')).toBe(true);
  const directive=premisePayoffReviewDirective(input);
  expect(directive).toContain('法院最终作出决定');
