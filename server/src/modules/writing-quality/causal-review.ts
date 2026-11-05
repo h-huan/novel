@@ -192,6 +192,36 @@ export function causalChapterEvidenceCatalog(
  return {entries,aliasesByReview};
 }
 
+/** Partition a large planning proof by actual chapter-result workload,
+ * not by an arbitrary chapter count. The original audit was allowed an
+ * initial call and one correction. Two *single-pass* independent shards
+ * use at most that same two-call envelope, while each reviewer still sees
+ * full scenes, states, actions and every mandatory result in its chapters.
+ *
+ * Distinct result assertions are never dropped or merged to hit a quota.
+ * A chapter remains indivisible: cross-field/cross-scene chronology is
+ * required for its individual result proof.
+ */
+export function causalPlanningProofGroups(
+ chapters:readonly Record<string,unknown>[],maxSinglePassResults=52,
+):Record<string,unknown>[][]{
+ if(chapters.length<2)return [[...chapters]];
+ const burden=chapters.map(chapter=>{
+   const body=JSON.stringify([chapter]);
+   const anchors=causalEvidenceAnchorOptions(body,{});
+   return causalChapterResultReviewGroups(anchors,0).review.length;
+ });
+ const total=burden.reduce((a,b)=>a+b,0);
+ if(total<=maxSinglePassResults)return [[...chapters]];
+ let cut=1, best=Number.POSITIVE_INFINITY;
+ for(let i=1;i<chapters.length;i++){
+   const left=burden.slice(0,i).reduce((a,b)=>a+b,0);
+   const score=Math.max(left,total-left);
+   if(score<best){best=score;cut=i;}
+ }
+ return [[...chapters.slice(0,cut)],[...chapters.slice(cut)]];
+}
+
 /** A single contract for every provider-facing causal address.
  * An absent ID may be recovered ONLY from one exact, server-owned quotation
  * in the same declared chapter (or uniquely in a permitted bridge source).
