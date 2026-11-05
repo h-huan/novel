@@ -146,8 +146,15 @@ export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved
  // One optional source-vetted survivor avoids a slow post-final-card refill
  // when the initial shortlist had proven rejections. The caller must still
  // fund reselection and every independent review from the original allowance.
- const hedge=mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4)))
-   :0;
+ // A shortlist which merely reaches the delivery floor is not a delivery.
+ // If the source review already rejected candidates and the screening target
+ // still has space, use up to two OPTIONAL existing replacement positions.
+ // The caller must fund the very same fixed-pool reselection/source/pair gates;
+ // this never grants additional calls or promotes a weak candidate.
+ const remainingScreeningSlots=Math.max(0,screeningTarget-retainedApproved);
+ const hedge=mandatory>0
+   ?Math.min(remainingScreeningSlots,2,Math.max(1,Math.ceil(mandatory*3/4)))
+   :Math.min(2,remainingScreeningSlots);
  return {mandatory,hedge,total:mandatory+hedge};
 }
 
