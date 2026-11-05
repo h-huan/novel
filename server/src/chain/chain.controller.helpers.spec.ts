@@ -1706,6 +1706,11 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       if (step === 'idea_premise_pool_generation') {
         expect(request.prompt).toContain('自动选择的storyTone含浪漫');
         expect(request.prompt).toContain('不能共享一条低职位忍让');
+        // New work remains in the already funded source-generation prompt:
+        // separately prove each final decision instead of deferring to full-card rejection.
+        expect(request.prompt).toContain('抓人、撤销停职、撤股、赔偿');
+        expect(request.prompt).toContain('实际执行者与结果对象');
+        expect(request.prompt).toContain('不能把结果反当成立依据');
         poolBatchCallsStarted += 1;
         if (poolBatchCallsStarted >= 2) releasePoolBatches();
         // A barrier makes the test fail if pool generation is changed back to serial awaits.
