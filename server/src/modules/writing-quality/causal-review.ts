@@ -169,6 +169,29 @@ export function bindUniqueCausalResultAnchors(
  })};
 }
 
+/** Recover only a missing action address from an EXACT, unique quotation
+ * in the declared chapter's immutable evidence catalog. Other chapters may
+ * contain identical prose; a global text match could silently cross-bind an
+ * action and wrongly pass the citation protocol. Supplied IDs, partial quotes,
+ * duplicates, missing chapters and paraphrases remain unchanged (fail closed).
+ * This is an address lookup, never a causal-quality judgment or fact repair. */
+export function bindUniqueCausalActionAnchors(
+ value:any,
+ catalog:readonly {chapterNumber:number;anchorIds:string[]}[],
+ anchors:ReturnType<typeof causalEvidenceAnchors>,
+) {
+ if(!value||!Array.isArray(value.transitions))return value;
+ const bodyById=new Map(anchors.filter(anchor=>anchor.source==='body').map(anchor=>[anchor.id,anchor]));
+ return {...value,transitions:value.transitions.map((row:any)=>{
+  if(!row||typeof row!=='object'||row.actionAnchorId!==undefined
+    ||typeof row.actionEvidence!=='string'||!Number.isInteger(row.chapterNumber))return row;
+  const chapter=catalog.find(entry=>entry.chapterNumber===row.chapterNumber);
+  if(!chapter)return row;
+  const matches=chapter.anchorIds.filter(id=>bodyById.get(id)?.text===row.actionEvidence);
+  return matches.length===1?{...row,actionAnchorId:matches[0]}:row;
+ })};
+}
+
 /** Project a complete independent judgment to only identical literal claims.
  * The server re-validates every expanded quote; a missing reviewed identity,
  * missing source address or differing content is an error, never a pass. */

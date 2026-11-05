@@ -12,7 +12,7 @@ import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, bindUniqueCausalActionAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -801,7 +801,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         // when unique in the same chapter. Unknown, paraphrased or conflicting
         // IDs remain invalid; no causal proof or outcome is supplied by code.
         audit=materializeCausalAuditAnchors(
-          bindUniqueCausalResultAnchors(rawVerdict,chapterEvidenceCatalog,evidenceAnchors),body,sources);
+          bindUniqueCausalActionAnchors(
+            bindUniqueCausalResultAnchors(rawVerdict,chapterEvidenceCatalog,evidenceAnchors),
+            chapterEvidenceCatalog,evidenceAnchors),body,sources);
         checked = validateCausalAudit(audit, body, sources);
         if (Array.isArray(audit?.transitions)) audit.transitions.forEach((row: any, index: number) => {
           const chapter = chapters.find(candidate => candidate.chapterNumber === row.chapterNumber);

@@ -393,6 +393,24 @@ describe('full field coverage from unique literal chapter outcome reviews',()=>{
 });
 
 describe('decisive planning action proof', () => {
+  it('avoids a second paid action-address repair when the first verdict quotes a unique literal chapter action',async()=>{
+    const chapter={chapterNumber:2,chapterFunction:'climax',
+      content:'养马人将旧马交到军营验收处。',
+      scenes:[{outcome:'军营登记了旧马。'}]};
+    const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+    const outcome=causalChapterResultAnchors(anchors,0)[0];
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'记录提交与登记的真实因果关系',
+      transitions:[{chapterNumber:2,actionEvidence:chapter.content,resultAnchorId:outcome.id,
+        bridgeAnchorId:'',status:'gap',reason:'提交并不保证军营已经完成正式验收'}]}})});
+    (service as any).generateInternal=generate;
+    const result=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+      JSON.stringify({volumes:[{chapters:[chapter]}]}));
+    expect(result).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(result.audit.transitions[0].actionAnchorId).toBe(anchors.find(row=>row.path==='0.content')!.id);
+  });
   it('keeps identical quotes in separate chapters bound to their actual chapter IDs',async()=>{
     const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',
       content:'养马人提交了验马记录。',scenes:[{outcome:'负责人登记了验马结果。'}]}));
