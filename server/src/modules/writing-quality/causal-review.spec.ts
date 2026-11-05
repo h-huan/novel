@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -485,4 +485,43 @@ it('repair prompt identifies the exact missing result without claiming its causa
  expect(prompt).toContain('遗漏结果尚未经语义审核');
  expect(prompt).toContain('resultAnchorId可省略');
  expect(prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+});
+
+
+it('binds an actually reviewed exact same-chapter alias to its advertised result without another model call',()=>{
+ const chapters=[{chapterNumber:9,content:'她当面交出了登记簿。',
+  scenes:[{outcome:'管理员收下登记簿。'}],
+  characterActions:[{action:'她当面交出了登记簿。',result:'管理员收下登记簿。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ const representative=entries[0].resultAnchorIds[0];
+ const alias=aliasesByReview[representative][0];
+ const action=anchors.find(row=>row.source==='body'&&row.path==='0.content')!;
+ const row={chapterNumber:9,resultAnchorId:alias,actionAnchorId:action.id,
+   status:'gap',reason:'仅提交登记簿还不能证明管理员已正式登记或赋予效力'};
+ const normalized=normalizeReviewedCausalResultAliases({status:'evaluated',reason:'保留原语义判断',
+   transitions:[row]},aliasesByReview,anchors);
+ expect(normalized.transitions[0]).toMatchObject({resultAnchorId:representative,status:'gap',actionAnchorId:action.id});
+ const expanded=expandCausalReviewedResultAliases(normalized,aliasesByReview,body,{});
+ expect(expanded.transitions.map((x:any)=>x.resultAnchorId)).toEqual([representative,alias]);
+ expect(expanded.transitions.every((x:any)=>x.status==='gap')).toBe(true);
+ const withIndependentRepresentative=normalizeReviewedCausalResultAliases({
+  transitions:[{...row,resultAnchorId:representative,status:'supported'},row]
+ },aliasesByReview,anchors);
+ // Independent contradictory review rows remain available to the strict
+ // validator; the helper never overwrites an actual verdict to force success.
+ expect(withIndependentRepresentative.transitions.map((x:any)=>x.resultAnchorId))
+   .toEqual([representative,alias]);
+ expect(withIndependentRepresentative.transitions.map((x:any)=>x.status))
+   .toEqual(['supported','gap']);
+});
+
+it('never aliases same words across different chapters or changed assertions',()=>{
+ const chapters=[{chapterNumber:2,scenes:[{outcome:'账目已经核查。'}]},
+  {chapterNumber:3,scenes:[{outcome:'账目已经核查。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ expect(Object.keys(aliasesByReview)).toHaveLength(0);
+ const foreign={transitions:[{chapterNumber:3,resultAnchorId:entries[0].resultAnchorIds[0],status:'gap'}]};
+ expect(normalizeReviewedCausalResultAliases(foreign,aliasesByReview,anchors)).toEqual(foreign);
 });
