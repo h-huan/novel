@@ -926,3 +926,11 @@ describe('shared premise transport and preallocated slot validation',()=>{
   expect(claimLockedPremiseSlot({premiseId:'B1-P2',storyCategoryId:'K2'},slots,claimed)).toBe(true);
  });
 });
+
+it('full-card structuring must preserve the original proof material and its actual usability',()=>{
+ const prompt=ideaCardStructuringDirective({premiseId:'P1',workingTitle:'从原始账册当众核对',
+  storyCore:'主角保住原始账册并在有权人员面前核对。'},[],false);
+ expect(prompt).toContain('重要原始证据的可用状态必须跨字段保持一致');
+ expect(prompt).toContain('scopeBreakdown');
+ expect(prompt).toContain('不能在description或scopeBreakdown新增');
+});
