@@ -137,10 +137,16 @@ export function premiseCausalPlanIssues(item: Record<string, unknown>): string[]
     // containment only; do not infer chronology or causality from keywords,
     // and leave all actual causal sufficiency to the independent reviewer.
     const resultText=foldQuotation(link.result.quote);
-    const selfProof=[link.action,...link.conditions].some((row:PremiseCausalAnchor)=>
-      foldQuotation(row.quote).includes(resultText));
-    if(selfProof)
+    const proofAnchors=[link.action,...link.conditions] as PremiseCausalAnchor[];
+    const identical=proofAnchors.some(row=>foldQuotation(row.quote)===resultText);
+    const embedded=proofAnchors.some(row=>foldQuotation(row.quote).includes(resultText));
+    if(identical) {
+      // Keep the established error contract used by both the selection
+      // admission path and its regression tests; equality was already blocked.
+      errors.push(ref + '不能用同一结果断言自证行动或条件');
+    } else if(embedded) {
       errors.push(ref + '行动或条件引文已包含结果断言，不能用结果自证其成立；请缩至实际先行动作或必要条件');
+    }
     const key = JSON.stringify(link);
     if (seen.has(key)) errors.push(ref + '重复同一因果环节');
     seen.add(key);
