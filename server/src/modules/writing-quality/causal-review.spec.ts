@@ -100,6 +100,8 @@ it('corrects only invalid causal evidence while retaining a different valid chai
  expect(causalAuditRepairTargets(original,errors)).toEqual([0]);expect(causalAuditRepairPrompt(original,errors,body,{}).prompt).toContain('本次仅纠正编号[0]');
  expect(causalAuditRepairPrompt(original,errors,body,{}).systemPrompt).toContain('只修复因果审查的引用合同');
  expect(causalAuditRepairPrompt(null,[],body,{}).systemPrompt).toContain('独立审查行动');
+ expect(causalAuditRepairPrompt(original,errors,body,{}).prompt).not.toContain('"actionAnchorId":"目录中的真实行动编号"');
+ expect(causalAuditRepairPrompt(null,[],body,{}).prompt).not.toContain('"resultAnchorId":"目录中的真实结果编号"');
  expect(causalAuditRepairPrompt(null,[],body,{}).systemPrompt).not.toContain('只修复因果审查的引用合同');
  const repaired=applyCausalAuditRepair(original,errors,{repairs:[{index:0,actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p2',status:'supported',reason:'实际收到命令后停止执行，无需新增事件'}]});const materialized=materializeCausalAuditAnchors(repaired,body,{});
  expect(materialized.transitions[1]).toEqual(valid);expect(materialized.transitions[2]).toEqual(gap);expect(validateCausalAudit(materialized,body,{})).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
