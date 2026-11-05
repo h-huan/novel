@@ -123,9 +123,24 @@ jobs:
           fi
           window_visible=0
           for attempt in $(seq 1 15); do
-            if xwininfo -name "AI写作平台 - 欢迎" 2>/dev/null | grep -q 'Map State: IsViewable'; then
-              window_visible=1
-              break
+            # Resolve the actual Unicode-titled launcher from X11's window
+            # tree, then inspect THAT window. Piping xwininfo into grep -q
+            # under pipefail can return SIGPIPE even after a correct match,
+            # reporting a visible launcher as missing.
+            window_tree="$(xwininfo -root -tree 2>/dev/null || true)"
+            window_id=""
+            while IFS= read -r entry; do
+              if [[ "$entry" == *'"AI写作平台 - 欢迎"'* ]]; then
+                read -r window_id _ <<< "$entry"
+                break
+              fi
+            done <<< "$window_tree"
+            if [[ "$window_id" =~ ^0x[0-9a-fA-F]+$ ]]; then
+              window_info="$(xwininfo -id "$window_id" 2>/dev/null || true)"
+              if [[ "$window_info" == *'Map State: IsViewable'* ]]; then
+                window_visible=1
+                break
+              fi
             fi
             sleep 1
           done
