@@ -56,7 +56,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -6956,7 +6956,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const validateReview = (value: unknown) => mode === 'source_drift' ? (() => { const reviewed=quarantineIncompletePremiseReviews(completePremiseSourceProof(value,selection),selection,requiredGenres); return [...premiseSourceReviewIssues(reviewed, selection),...premiseGenreFitIssues(reviewed,selection,requiredGenres),...premiseCategoryFitIssues(reviewed,selection),...premisePayoffReviewIssues(reviewed,selection)]; })() : [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
-      ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
+      ...premiseOverlapScopeIssues(value,selection,overlapFocusIds),
+      ...premiseOutcomeCounterfactualReviewIssues(value,selection,overlapFocusIds)];
     const runReview=reviewLimiter||(<T>(task:()=>Promise<T>)=>task());
     // Overlap is a separate pairwise structural comparison. Category and
     // genre definitions are already independently audited by the source
@@ -6973,8 +6974,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       reviewStandard + '\n按已注入GEN-002锁定前继承与差异规则执行。'
       + (mode === 'source_drift'
         ? '\n当前是锁定前多项独立结论的同次审核，只审查，不修改或重选。必须分别完成causalPlan每个关键结果的必要条件与整体反转兑现核对、原池来源继承、分类机制和手动流派落实；原池与展开同样漏写关键成立条件也须返回gap，来源忠实与结局完整都不能代替因果成立。还要核对物证的物理来源与样本取得链、法律关系及权利主体是否前后一致、承诺的主角行动是否真的执行，不能靠结局断言让前文缺失的条件自动成立。对已存在的临时阻断要核对其被撤销以后直到复核/决定前的可用性；对涉及不同机关的结果要分别核对授权、受理和生效；对reversalEffect与payoff实际声称的每一项归责、资格、金钱处置和其他决定性结果先做反事实核对：证明违规装置存在不等于已证明特定责任人实施；揭发对手不等于自己获得录取或名额；机构能够调取账目不等于有权冻结个人账户。必须找到本题材此前已建立的相应归责证据、分配决定、法定权限与实际行动；若仍存在合理的不成立情形，按既有兑现审核返回gap，不能由结局断言或因果索引自证。然后完成既有来源、分类和流派核查，不新增审核轮次。'
-        : '\n当前是锁定前独立同构复核：只比较本批故事的主动策略、行动升级、胜负转换机制和代价，不重复执行来源、逐环节因果成立、分类或流派审核；这些由另一个独立Gate负责。此输入不包含causalPlan索引，比较依据为已选故事中实际发生的行动与结果。')
-      + (mode === 'source_drift' ? '本次来源继承这一部分逐项核对每个已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；同批重合由另一个独立Gate审核，本次仍须完成上文因果兑现、分类与流派结论。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移。共同主题、正常类型元素不单独判重合，但不得因职业、地点或证据道具不同就漏掉真实的结构同构。逐项比较行动的策略、行动引发的升级、反转改变的胜负条件及最终代价；须证明作者共同要求和正常类型承诺之外，双方实际选择如何导致同样的对手反应、升级与胜负转换，并产生同构后果；仅共享一种代价、某个公开场景、男方协助或作者已选流派不足以证明整条因果链同构。具体职业或道具不同也不能掩盖实际相同的链条。引用两处各自真实的原文并给具体因果理由；普通扮猪吃虎类型外壳本身不构成同构。')
+        : '\n当前是锁定前同构与终局反事实双核对：仍逐对比较主动策略、行动升级、胜负转换机制和代价；另逐题材独立核对一个决定性的真实胜负结果，不重复来源/逐环节因果计划/分类/流派审核长表。保持对手已写出的目标、成本和权限不变，假定主角前述行动都成功：对手为何仍可拒绝、补救、替换资源或坚持原目标？故事此前实际哪个条件排除这些合理路径？不能把有决定权、撤走小障碍、查出另件错事、口头道谢、结果声称答应当作充分依据；普通直接因果不强求程序。必须用原文回答，未排除的关键结果标gap/unknown；不为补证发明新事实、不增加模型调用。')
+      + (mode === 'source_drift' ? '本次来源继承这一部分逐项核对每个已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；同批重合由另一个独立Gate审核，本次仍须完成上文因果兑现、分类与流派结论。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次不审来源偏移，逐对比较行动策略、升级、胜负及代价。共同主题、正常类型元素不单独判同构，但职业、地点或证据道具不同不能掩盖相同的选择—反制—兑现链。引用双方原文说明真实同构；普通流派外壳本身不算重复。独立胜负反事实按另列outcomeChecks逐题材检查，不重复来源与逐环节因果计划长表。')
       + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
       + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds)
         + '\n【本次必须独立比较的无序题材配对】' + JSON.stringify(premiseOverlapPairs(selection,overlapFocusIds))
@@ -6990,16 +6991,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           + '\n【精简逐项说明】每个ref仍须独立核对并返回状态与至少8字的比较理由。preserved只指出本字段与原池对应的关键事实如何相容，通常8—30字足够，不重述两侧全文；drift和unknown必须写清真实事实冲突与缺口，不限制必要证据长度。不要输出思考过程、自评分或重复引文。'
           + (premiseGenreFitCatalog(selection,requiredGenres).length ? '\n【额外必返genreChecks】'+JSON.stringify(premiseGenreFitCatalog(selection,requiredGenres))+'；每个ref返回status=fulfilled|missing|unknown、reason至少8字。fulfilled须返回evidenceRef，选择下方同一S编号的已选展开证据，服务器回填field与quote，不要抄写引文，不要引用原池storyCore。证明该流派定义所需的人物与行动机制，不可只引用标签名。每卡须全部落实所有手动流派，不得按卡分摊；未落实返回missing，未知返回unknown。此检查独立于来源忠实度，不得以preserved代替流派适配。\n【流派证据目录：只含已选展开】'+JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({id,premiseId,field})=>({id,premiseId,field})))+'\n【genreChecks单项形状】{"ref":"S1.genre1","status":"fulfilled|missing|unknown","evidenceRef":"S1.protagonistSituation","reason":"按实际流派定义与所选故事证据解释，不预设通过"}，missing或unknown可省略evidenceRef。' : '')
           + '\n只输出一个JSON对象，包含sourceChecks数组、必返payoffChecks数组、上方要求的categoryChecks数组及genreChecks数组（未指定分类可省略categoryChecks，未手动选流派可省略genreChecks）。来源、兑现条件、分类与流派分别判断，不以来源兼容代替结果成立、分类或流派落实。sourceChecks每项为{"ref":"实际目录编号","status":"preserved|drift|unknown","reason":"原池约束与该字段实际事实的比较理由，至少8字"}。所有要求的目录均须覆盖全部编号，不能用整体passed或空issues替代；不重写题材，不自行抄写或拼接引文，服务器按ref绑定原文。'
-        : '\n当前审查类型=overlap\n只输出JSON:{"passed":true,"issues":[]}。有已举证问题则passed=false，issues项为'
-          + '{"kind":"overlap","premiseId":"需处理的已选ID","referencePremiseId":"另一已选ID","quote":"该已选项连续原文至少8字","referenceQuote":"对照项连续原文至少8字","reason":"具体因果理由至少8字"}。不要求猜测未明写细节。'),
+        : '\n当前审查类型=overlap。只返回JSON对象，包含passed、issues、outcomeChecks三项。passed/issues只代表成对同构是否成立；outcomeChecks的负面结论由服务器另行阻断，不能伪造overlap配对。issues为{"kind":"overlap","premiseId":"实际ID","referencePremiseId":"另一已选ID","quote":"本卡连续原文至少8字","referenceQuote":"参考卡连续原文至少8字","reason":"至少8字具体同构理由"}；无成对同构时passed=true、issues=[]。'
+          + '\n【本次须独立复核胜负的实际题材ID】'+JSON.stringify(overlapFocusIds.length?overlapFocusIds:selection.selected.map(item=>String(item.premiseId)))
+          + '\n每个ID恰好返回一项outcomeChecks；即使没有同构也不可遗漏：{"premiseId":"本次真实ID","status":"supported|gap|unknown","claimQuote":"本卡escalation/reversalEffect/payoff中最关键的结果连续原文至少8字","priorQuote":"仅supported必填：本卡实际存在、与结果断言不同的先行条件连续原文至少8字","reason":"至少16字，说明在既有条件下对手仍可能拒绝、补救或坚持原目标的路径是否真正排除"}。supported必须引用真实且独立于结果的条件；有权限或道歉不足以自动证明愿意改变另一项胜负目标。关键中间结果可引用escalation；gap/unknown如实记录缺口，不新造事实或换故事。'),
       { scenario: 'idea_generate', stepKey: 'idea_premise_' + mode + '_review', temperature: 0.1, timeout: LLM_TUNABLES.timeoutComplex(), physicalCallBudget,
         validate: value => validateReview(value).length === 0,
         describeValidation: value => validateReview(value),
-        retryInstruction: '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks的gap必须返回真实路由与原池存在条件的引用，区分计划错绑和原池真实缺条件，不得默认强制换题；逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
+        retryInstruction: mode==='overlap'
+          ? '保留已核实的同构issues及反事实gap/unknown；只补实际ID遗漏或错引的outcomeChecks字段。supported必须有不同于结果断言的真实先行条件，不得为修复JSON把真实缺口改为supported。不能改写故事、改身份或放宽质量要求。'
+          : '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks的gap必须返回真实路由与原池存在条件的引用，区分计划错绑和原池真实缺条件，不得默认强制换题；逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
     if(!result.data)throw Error('锁定前题材复核协议未完成：'+(result.validationIssues||result.warnings||['缺少合法审核结果']).join('；'));
     const issues = validateReview(result.data);
     if (issues.length) throw new Error('锁定前题材复核协议错误，未完成请求交付：' + issues.join('；'));
-    if(mode!=='source_drift')return result.data;
+    if(mode!=='source_drift')return materializePremiseOutcomeCounterfactualReview(result.data,selection,overlapFocusIds);
     const reviewedData=quarantineIncompletePremiseReviews(completePremiseSourceProof(result.data,selection),selection,requiredGenres);
     const review=materializePremiseSourceReview(reviewedData,selection);
     review.issues.push(...materializePremiseGenreFit(reviewedData,selection,requiredGenres));
@@ -7084,7 +7088,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               const errors=premiseSelectionReviewIssues(review,pairSelection);
               if(errors.length)throw Error('同构审查未完成：'+errors.join('；'));
               for(const issue of review.issues)pairBlockedIds.add(blockedPairIdentity(issue));
-              pairReady=review.passed||review.issues.every(issue=>issue.kind==='overlap');
+              pairReady=review.passed||review.issues.every(issue=>issue.kind==='overlap'||issue.origin==='outcome_counterfactual');
               notifyApproved();return review;}));}
       catch(error){throw new Error('锁定前独立审查未完成，未完成请求交付：'+String(error));}
       selection=sourceSelection;
