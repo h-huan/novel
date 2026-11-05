@@ -40,13 +40,29 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
     ?[...selectable.filter(anchor=>lockedMissingResults.some(row=>row.resultAnchorId===anchor.id)),
       ...selectable.filter(anchor=>!lockedMissingResults.some(row=>row.resultAnchorId===anchor.id))]
     :selectable;
+  // The initial outline call already carries the unabridged chapter JSON.
+  // Do not retransmit its non-result prose in a second evidence list. The
+  // original text is located by the SAME path and ID in that JSON. Keep
+  // every required outcome's exact text (including punctuation-level IDs)
+  // and keep all external world/planning text. Full evidence remains on the
+  // server for the unchanged literal validator, with no semantic shortcuts.
+  const requiredResultIds=compactPlanningProof&&chapterRows.length
+    ?new Set(causalChapterEvidenceCatalog(chapterRows,visibleAnchors.filter(a=>a.source==='body'))
+        .entries.flatMap(entry=>entry.resultAnchorIds))
+    :new Set<string>();
+  const promptAnchors=compactPlanningProof
+    ?focusedAnchors.map(anchor=>
+      anchor.source==='body'&&!requiredResultIds.has(anchor.id)
+        ?{id:anchor.id,source:anchor.source,...(anchor.path?{path:anchor.path}:{})}
+        :anchor)
+    :focusedAnchors;
   return {
     systemPrompt: (lockedMissingResults.length ? '对服务器已锁定编号但尚未审查的结果，首次独立核对其真实行动、前置状态及必要条件；严格保留缺口，不得仅修正编号或假设该结果已通过。' : targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
     prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(targets.length&&Array.isArray((audit as any)?.transitions)
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(focusedAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好6项，按顺序为[chapterNumber,resultAnchorId,actionAnchorId,bridgeAnchorId,status,reason]。这是完整因果审核的短传输格式，不是抽样或统一判定。所有结果编号都必须逐一出现；章号为数字；前三个引用编号须来自实际目录，bridgeAnchorId在supported时填实际有效编号，gap/planned时填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好6项，按顺序为[chapterNumber,resultAnchorId,actionAnchorId,bridgeAnchorId,status,reason]。这是完整因果审核的短传输格式，不是抽样或统一判定。所有结果编号都必须逐一出现；章号为数字；前三个引用编号须来自实际目录，bridgeAnchorId在supported时填实际有效编号，gap/planned时填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
