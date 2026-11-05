@@ -3,13 +3,17 @@ import { STORY_CAUSAL_REVIEW_POLICY } from '../../../shared/src/system-workflow-
 
 export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false) {
   const targets=causalAuditRepairTargets(audit,errors);
+  // This is the SAME selectable catalog used by the citation resolver. For
+  // structured outline JSON its addresses are body:v... and clause IDs,
+  // not prose-only body:p... IDs. Never ask for an ID absent from the list.
+  const visibleAnchors=causalEvidenceAnchorOptions(content,sources);
   return {
-    systemPrompt: (targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。选择原文段落编号，系统提取原文，禁止重写引文。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
+    systemPrompt: (targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
     prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(targets.length&&Array.isArray((audit as any)?.transitions)
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n可选原文段落：${JSON.stringify(causalEvidenceAnchorOptions(content,sources))}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。返回JSON:{"repairs":[{"index":"点名编号", "actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字实际依据"}]}。` : '只输出JSON:{"causalAudit":{"status":"evaluated|not_applicable","reason":"至少8字说明","transitions":[{"actionAnchorId":"body段落编号","resultAnchorId":"body段落编号","bridgeAnchorId":"成立条件所在编号；gap可为空","status":"supported|gap|planned","reason":"至少8字说明"}]}}。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit)}\n校验错误：${errors.join('；')}\n可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(visibleAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。返回JSON:{"repairs":[{"index":"点名编号", "actionAnchorId":"目录中的真实行动编号","resultAnchorId":"目录中的真实结果编号","bridgeAnchorId":"目录中的真实成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字实际依据"}]}。` : '只输出JSON:{"causalAudit":{"status":"evaluated|not_applicable","reason":"至少8字说明","transitions":[{"actionAnchorId":"目录中的真实行动编号","resultAnchorId":"目录中的真实结果编号","bridgeAnchorId":"目录中的真实成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字说明"}]}}。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
