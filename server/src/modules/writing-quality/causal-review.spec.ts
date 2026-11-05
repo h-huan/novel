@@ -545,6 +545,15 @@ it('splits a hundred independent final-scene claims into two complete-chapter au
  expect(distributed).toBe(original);
  expect(causalPlanningProofGroups(chapters.slice(0,1))).toEqual([chapters.slice(0,1)]);
  expect(causalPlanningProofGroups(chapters.slice(0,2),1000)).toEqual([chapters.slice(0,2)]);
+ // If one chapter alone carries too many distinct assertions, partitioning
+ // by whole chapter cannot make either single-pass reviewer reliable. Preserve
+ // the prior correction opportunity rather than falsely advertising a fix.
+ const dominated=[{
+   chapterNumber:10,scenes:Array.from({length:85},(_,i)=>({outcome:`第十章独立结果${i}已经成立。`}))
+  },{chapterNumber:11,scenes:[{outcome:'另一章完成登记。'}]},
+    {chapterNumber:12,scenes:[{outcome:'末章撤回通知。'}]}];
+ expect(causalPlanningProofGroups(dominated)).toEqual([dominated]);
+ expect(causalPlanningProofGroups(dominated.slice(0,1))).toEqual([dominated.slice(0,1)]);
 });
 
 it('limits a targeted missing-result correction to the matching chapter while retaining global world evidence',()=>{
