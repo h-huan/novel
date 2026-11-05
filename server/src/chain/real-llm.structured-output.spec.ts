@@ -393,6 +393,27 @@ describe('full field coverage from unique literal chapter outcome reviews',()=>{
 });
 
 describe('decisive planning action proof', () => {
+  it('rejects a supplied cross-chapter action ID even when both chapters have identical prose',async()=>{
+    const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',
+      content:'她把验收材料递交给负责人。',
+      scenes:[{outcome:'负责人签收了材料。'}]}));
+    const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+    const wrongAction=anchors.find(a=>a.path==='0.content')!;
+    const ownResult=causalChapterResultAnchors(anchors,1)[0];
+    const bridge=anchors.find(a=>a.path==='1.content')!;
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'审查两章先后操作',
+      transitions:[{chapterNumber:2,actionAnchorId:wrongAction.id,
+        resultAnchorId:ownResult.id,bridgeAnchorId:bridge.id,
+        status:'supported',reason:'第二章有真实递交与签收行为'}]}})});
+    (service as any).generateInternal=generate;
+    const review=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+      JSON.stringify({volumes:[{chapters}]}));
+    expect(review.verified).toBe(false);
+    expect(review.errors.join('；')).toContain('行动编号未绑定本章');
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
   it('avoids a second paid action-address repair when the first verdict quotes a unique literal chapter action',async()=>{
     const chapter={chapterNumber:2,chapterFunction:'climax',
       content:'养马人将旧马交到军营验收处。',

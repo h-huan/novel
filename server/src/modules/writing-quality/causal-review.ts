@@ -106,12 +106,16 @@ export function causalEvidenceAnchorOptions(content: string, sources: Record<str
 }
 
 /** A frozen exit field owns its result inventory; the reviewer cannot choose a sample. */
-export function causalExitResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>, exitState: unknown) {
-  if (typeof exitState !== 'string') return [];
-  const encoded = JSON.stringify(exitState).slice(1, -1);
-  const parent = anchors.find(anchor => anchor.source === 'body' && anchor.text === encoded);
-  if (!parent) return [];
-  return completeResultAnchors(anchors,parent);
+export function causalExitResultAnchors(
+ anchors: ReturnType<typeof causalEvidenceAnchors>, exitState: unknown, chapterIndex?: number,
+) {
+ if(typeof exitState!=='string')return [];
+ const encoded=JSON.stringify(exitState).slice(1,-1);
+ // For multi-chapter outlines identical exit text is NOT the same address.
+ // The chapter's serialized path, not its words, establishes ownership.
+ const parent=anchors.find(anchor=>anchor.source==='body'&&anchor.text===encoded
+   &&(chapterIndex===undefined||anchor.path===chapterIndex+'.exitState'));
+ return parent?completeResultAnchors(anchors,parent):[];
 }
 
 /** The server owns the complete result inventory, including scene outcomes and
@@ -148,48 +152,110 @@ export function causalChapterResultReviewGroups(
  return {review,aliasesByReview};
 }
 
-/** A model may quote a complete result verbatim while omitting its ID.
- * Bind only if the literal quote appears exactly ONCE in that chapter's
- * server-owned review result inventory. Never repair a supplied false ID,
- * reinterpret a paraphrase, cross chapter, or infer an action or condition. */
-export function bindUniqueCausalResultAnchors(
- value:any,
- catalog:readonly {chapterNumber:number;resultAnchorIds:string[]}[],
+
+export interface CausalChapterEvidenceEntry {
+ chapterNumber:number;anchorIds:string[];resultAnchorIds:string[];
+}
+/** One authoritative chapter index for provider prompts, literal binding and
+ * server validation. Never infer ownership from identical text in another chapter. */
+export function causalChapterEvidenceCatalog(
+ chapters: readonly Record<string,unknown>[],
  anchors:ReturnType<typeof causalEvidenceAnchors>,
-){
- if(!value||!Array.isArray(value.transitions))return value;
- const byId=new Map(anchors.filter(anchor=>anchor.source==='body').map(anchor=>[anchor.id,anchor]));
- return {...value,transitions:value.transitions.map((row:any)=>{
-  if(!row||typeof row!=='object'||row.resultAnchorId!==undefined
-    ||typeof row.resultEvidence!=='string'||!Number.isInteger(row.chapterNumber))return row;
-  const chapter=catalog.find(item=>item.chapterNumber===row.chapterNumber);
-  if(!chapter)return row;
-  const matches=chapter.resultAnchorIds.filter(id=>byId.get(id)?.text===row.resultEvidence);
-  return matches.length===1?{...row,resultAnchorId:matches[0]}:row;
- })};
+ resultField?:'exitState',
+):{entries:CausalChapterEvidenceEntry[];aliasesByReview:Record<string,string[]>}{
+ const aliasesByReview:Record<string,string[]>={};
+ const entries=chapters.map((chapter,index)=>{
+  const own=anchors.filter(a=>a.source==='body'&&a.path?.startsWith(index+'.'));
+  const review=resultField
+    ?{review:causalExitResultAnchors(anchors,chapter[resultField],index),
+      aliasesByReview:{} as Record<string,string[]>}
+    :causalChapterResultReviewGroups(anchors,index);
+  Object.assign(aliasesByReview,review.aliasesByReview);
+  return {chapterNumber:Number(chapter.chapterNumber),anchorIds:own.map(a=>a.id),
+    resultAnchorIds:review.review.map(a=>a.id)};
+ });
+ return {entries,aliasesByReview};
 }
 
-/** Recover only a missing action address from an EXACT, unique quotation
- * in the declared chapter's immutable evidence catalog. Other chapters may
- * contain identical prose; a global text match could silently cross-bind an
- * action and wrongly pass the citation protocol. Supplied IDs, partial quotes,
- * duplicates, missing chapters and paraphrases remain unchanged (fail closed).
- * This is an address lookup, never a causal-quality judgment or fact repair. */
-export function bindUniqueCausalActionAnchors(
+/** A single contract for every provider-facing causal address.
+ * An absent ID may be recovered ONLY from one exact, server-owned quotation
+ * in the same declared chapter (or uniquely in a permitted bridge source).
+ * An explicit ID, even incorrect, is never rewritten. Duplicate text or
+ * paraphrase never generates an inferred action, cause, or verdict. */
+export function bindCausalReviewEvidenceAddresses(
  value:any,
- catalog:readonly {chapterNumber:number;anchorIds:string[]}[],
+ catalog:readonly CausalChapterEvidenceEntry[],
  anchors:ReturnType<typeof causalEvidenceAnchors>,
-) {
+ resultField?:'exitState',
+){
  if(!value||!Array.isArray(value.transitions))return value;
- const bodyById=new Map(anchors.filter(anchor=>anchor.source==='body').map(anchor=>[anchor.id,anchor]));
+ const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ const unique=(ids:readonly string[],quote:unknown):string|undefined=>{
+  if(typeof quote!=='string'||!quote.trim())return undefined;
+  const matches=ids.filter(id=>byId.get(id)?.text===quote);
+  return matches.length===1?matches[0]:undefined;
+ };
+ const bodyIds=anchors.filter(a=>a.source==='body').map(a=>a.id);
  return {...value,transitions:value.transitions.map((row:any)=>{
-  if(!row||typeof row!=='object'||row.actionAnchorId!==undefined
-    ||typeof row.actionEvidence!=='string'||!Number.isInteger(row.chapterNumber))return row;
-  const chapter=catalog.find(entry=>entry.chapterNumber===row.chapterNumber);
-  if(!chapter)return row;
-  const matches=chapter.anchorIds.filter(id=>bodyById.get(id)?.text===row.actionEvidence);
-  return matches.length===1?{...row,actionAnchorId:matches[0]}:row;
+  if(!row||typeof row!=='object')return row;
+  const next={...row};
+  const chapter=Number.isInteger(row.chapterNumber)
+    ?catalog.find(entry=>entry.chapterNumber===row.chapterNumber):undefined;
+  if(chapter){
+   for(const [key,quote,ids] of [
+    ['actionAnchorId','actionEvidence',chapter.anchorIds],
+    ['beforeStateAnchorId','beforeStateEvidence',chapter.anchorIds],
+    ['resultAnchorId','resultEvidence',resultField
+       ?chapter.resultAnchorIds:chapter.resultAnchorIds.length?chapter.resultAnchorIds:chapter.anchorIds],
+   ] as const){
+    if(next[key]!==undefined)continue;
+    const bound=unique(ids,next[quote]);
+    // Some valid optional results are in a chapter's direct event prose rather
+    // than dedicated outcome fields; mandatory result inventory remains intact.
+    const fallback=key==='resultAnchorId'&&!resultField&&!bound
+      ?unique(chapter.anchorIds,next[quote]):undefined;
+    if(bound||fallback)next[key]=bound||fallback;
+   }
+  }
+  if(next.bridgeAnchorId===undefined&&next.status==='supported'
+    &&typeof next.bridgeEvidence==='string'&&next.bridgeEvidence.trim().length>=8){
+   const ids=next.basisSource===undefined?anchors.map(a=>a.id)
+     :next.basisSource==='body'?bodyIds
+       :anchors.filter(a=>a.source===next.basisSource).map(a=>a.id);
+   const bound=unique(ids,next.bridgeEvidence);
+   if(bound)next.bridgeAnchorId=bound;
+  }
+  return next;
  })};
+}
+/** Reject cross-chapter or unaddressed proof even if the same words are found
+ * somewhere else in the complete JSON. Role checks share the exact catalog
+ * used to instruct the reviewer; every negative quality verdict is retained. */
+export function causalChapterEvidenceAddressIssues(
+ value:any,catalog:readonly CausalChapterEvidenceEntry[],resultField?:'exitState',
+):string[]{
+ if(!Array.isArray(value?.transitions))return [];
+ const duplicated=new Set<number>(),seen=new Set<number>();
+ for(const chapter of catalog){
+  if(seen.has(chapter.chapterNumber))duplicated.add(chapter.chapterNumber);
+  seen.add(chapter.chapterNumber);
+ }
+ return value.transitions.flatMap((row:any,index:number)=>{
+  const msg=(part:string)=>'第'+(index+1)+'项因果审查'+part;
+  if(!row||!Number.isInteger(row.chapterNumber)
+    ||duplicated.has(row.chapterNumber))return [msg('的章号不存在或不唯一')];
+  const chapter=catalog.find(entry=>entry.chapterNumber===row.chapterNumber);
+  if(!chapter)return [msg('的章号不存在于当前审查分组')];
+  const errors:string[]=[];
+  if(!chapter.anchorIds.includes(row.actionAnchorId))
+    errors.push(msg('的行动编号未绑定本章原文'));
+  if(!chapter.anchorIds.includes(row.resultAnchorId)
+    ||(resultField&&!chapter.resultAnchorIds.includes(row.resultAnchorId)))
+    errors.push(msg('的结果编号未绑定本章'+(resultField?'实际出口状态':'原文')));
+  if(row.beforeStateAnchorId!==undefined&&!chapter.anchorIds.includes(row.beforeStateAnchorId))
+    errors.push(msg('的行动前状态编号未绑定本章原文'));
+  return errors;
+ });
 }
 
 /** Project a complete independent judgment to only identical literal claims.
@@ -231,23 +297,14 @@ export function materializeCausalAuditAnchors(value: any, content: string, sourc
   if (!value || !Array.isArray(value.transitions)) return value;
   const allAnchors=causalEvidenceAnchors(content,sources);
   const anchors=new Map(allAnchors.map(x=>[x.id,x]));
-  return {...value,transitions:value.transitions.map((row:any)=>{
-    if(!['actionAnchorId','resultAnchorId','bridgeAnchorId'].some(key=>Object.prototype.hasOwnProperty.call(row,key)))return row;
+  const bound=bindCausalReviewEvidenceAddresses(value,[],allAnchors);
+  return {...bound,transitions:bound.transitions.map((row:any)=>{
+    if(!['actionAnchorId','resultAnchorId','bridgeAnchorId','beforeStateAnchorId'].some(key=>Object.prototype.hasOwnProperty.call(row,key)))return row;
     const action=anchors.get(row?.actionAnchorId);
     const result=anchors.get(row?.resultAnchorId);
-    // Some independent reviews return a literal, exact condition quote but
-    // omit ONLY its address. Bind it without a model retry iff it names one
-    // unique original source anchor. An explicitly wrong ID, a paraphrase or
-    // repeated text MUST remain invalid; this is citation recovery, not an
-    // inferred prerequisite or automatic quality approval.
-    const literalBridge=typeof row?.bridgeEvidence==='string'&&row.bridgeEvidence.trim().length>=8
-      ?allAnchors.filter(anchor=>anchor.text===row.bridgeEvidence
-        &&(row.basisSource===undefined||row.basisSource===anchor.source)):[];
-    const rawBridge=row?.bridgeAnchorId===undefined&&row?.status==='supported'&&literalBridge.length===1
-      ?literalBridge[0]:undefined;
-    const bridge=anchors.get(row?.bridgeAnchorId)||rawBridge;
+    const bridge=anchors.get(row?.bridgeAnchorId);
     const before=anchors.get(row?.beforeStateAnchorId);
-    return {...row,...(rawBridge?{bridgeAnchorId:rawBridge.id}:{}),
+    return {...row,
       // An exact raw quote can be server-bound to a unique result ID without
       // inventing an action address. Preserve the raw action ONLY when no
       // actionAnchorId was supplied; a false provided ID must still fail shut.

@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, bindUniqueCausalActionAnchors } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -278,58 +278,64 @@ it('only sends failed causal rows to the existing repair call and keeps all pres
  expect(patched.transitions.slice(0,40)).toEqual(original.transitions.slice(0,40));
 });
 
-it('recovers only one exact action quotation inside its declared chapter, not another chapter or a paraphrase',()=>{
+it('server-owned chapter catalog binds all address roles consistently and blocks same-text cross-chapter IDs',()=>{
  const chapters=[
-  {chapterNumber:3,content:'养马人当面提交了验马册。',scenes:[{outcome:'都尉登记了战马。'}]},
-  {chapterNumber:4,content:'养马人当面提交了验马册。',scenes:[{outcome:'都尉拒收了战马。'}]},
+  {chapterNumber:3,content:'养马人当面提交了验马册。',exitState:'都尉登记了战马。',
+   scenes:[{outcome:'都尉登记了战马。'}]},
+  {chapterNumber:4,content:'养马人当面提交了验马册。',exitState:'都尉登记了战马。',
+   scenes:[{outcome:'都尉登记了战马。'}]},
  ];
- const text=JSON.stringify(chapters),anchors=causalEvidenceAnchors(text,{});
- const catalog=chapters.map((chapter,index)=>({chapterNumber:chapter.chapterNumber,
-  anchorIds:anchors.filter(anchor=>anchor.source==='body'&&anchor.path?.startsWith(index+'.')).map(anchor=>anchor.id)}));
- const action=anchors.find(anchor=>anchor.path==='1.content')!;
- const raw={status:'evaluated',reason:'核对同章真实行动与其后实际结果',transitions:[
-  {chapterNumber:4,actionEvidence:chapters[1].content,resultEvidence:chapters[1].scenes[0].outcome,
-   status:'gap',reason:'提交验马册未证明都尉已经接受了战马'},
- ]};
- const bound=bindUniqueCausalActionAnchors(raw,catalog,anchors);
- expect(bound.transitions[0].actionAnchorId).toBe(action.id);
- expect(bound.transitions[0].actionAnchorId).not.toBe(anchors.find(anchor=>anchor.path==='0.content')!.id);
- const noChapter=bindUniqueCausalActionAnchors({...raw,transitions:[{...raw.transitions[0],chapterNumber:5}]},catalog,anchors);
- expect(noChapter.transitions[0].actionAnchorId).toBeUndefined();
- const paraphrased=bindUniqueCausalActionAnchors({...raw,transitions:[{...raw.transitions[0],actionEvidence:'养马人提交了验马记录。'}]},catalog,anchors);
- expect(paraphrased.transitions[0].actionAnchorId).toBeUndefined();
- const falseAddress=bindUniqueCausalActionAnchors({...raw,transitions:[{...raw.transitions[0],actionAnchorId:'body:v999'}]},catalog,anchors);
- expect(falseAddress.transitions[0].actionAnchorId).toBe('body:v999');
- const doubled={...chapters[1],characterActions:[{action:chapters[1].content}]};
- const duplicatedText=JSON.stringify([doubled]),duplicates=causalEvidenceAnchors(duplicatedText,{});
- const duplicateCatalog=[{chapterNumber:4,anchorIds:duplicates.filter(anchor=>anchor.source==='body'&&anchor.path?.startsWith('0.')).map(anchor=>anchor.id)}];
- const ambiguous=bindUniqueCausalActionAnchors(raw,duplicateCatalog,duplicates);
- expect(ambiguous.transitions[0].actionAnchorId).toBeUndefined();
+ const source=JSON.stringify(chapters),anchors=causalEvidenceAnchors(source,{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors,'exitState');
+ expect(entries).toHaveLength(2);
+ expect(entries[0].resultAnchorIds[0]).not.toBe(entries[1].resultAnchorIds[0]);
+ const quote='养马人当面提交了验马册。';
+ const raw={status:'evaluated',reason:'逐章核实提交验马册后的真实结果',transitions:[{
+  chapterNumber:4,actionEvidence:quote,beforeStateEvidence:quote,
+  resultEvidence:chapters[1].exitState,bridgeEvidence:quote,status:'supported',
+  reason:'当面提交记录作为审查的真实行动和初始状态',
+ }]};
+ const bound=bindCausalReviewEvidenceAddresses(raw,entries,anchors,'exitState');
+ const action=anchors.find(a=>a.path==='1.content')!.id;
+ expect(bound.transitions[0].actionAnchorId).toBe(action);
+ expect(bound.transitions[0].beforeStateAnchorId).toBe(action);
+ expect(bound.transitions[0].resultAnchorId).toBe(entries[1].resultAnchorIds[0]);
+ // The bridge quote is in two chapters and cannot be inferred by its words.
+ expect(bound.transitions[0].bridgeAnchorId).toBeUndefined();
+ expect(causalChapterEvidenceAddressIssues(bound,entries,'exitState')).toEqual([]);
+ const cross={...bound,transitions:[{...bound.transitions[0],actionAnchorId:anchors.find(a=>a.path==='0.content')!.id}]};
+ expect(causalChapterEvidenceAddressIssues(cross,entries,'exitState').join('；')).toContain('行动编号未绑定本章');
+ const wrongResult={...bound,transitions:[{...bound.transitions[0],resultAnchorId:entries[0].resultAnchorIds[0]}]};
+ expect(causalChapterEvidenceAddressIssues(wrongResult,entries,'exitState').join('；')).toContain('结果编号未绑定本章');
+ const wrongBefore={...bound,transitions:[{...bound.transitions[0],beforeStateAnchorId:anchors.find(a=>a.path==='0.content')!.id}]};
+ expect(causalChapterEvidenceAddressIssues(wrongBefore,entries,'exitState').join('；')).toContain('行动前状态编号未绑定本章');
+ const wrongProvided={...raw,transitions:[{...raw.transitions[0],actionAnchorId:'body:v999'}]};
+ expect(bindCausalReviewEvidenceAddresses(wrongProvided,entries,anchors,'exitState').transitions[0].actionAnchorId).toBe('body:v999');
+ const paraphrased={...raw,transitions:[{...raw.transitions[0],actionEvidence:'养马人提交了验马记录。'}]};
+ expect(bindCausalReviewEvidenceAddresses(paraphrased,entries,anchors,'exitState').transitions[0].actionAnchorId).toBeUndefined();
+ const duplicate={...chapters[1],characterActions:[{action:quote}]};
+ const dupAnchors=causalEvidenceAnchors(JSON.stringify([duplicate]),{});
+ const dupEntries=causalChapterEvidenceCatalog([duplicate],dupAnchors,'exitState').entries;
+ expect(bindCausalReviewEvidenceAddresses(raw,dupEntries,dupAnchors,'exitState').transitions[0].actionAnchorId).toBeUndefined();
+});
+it('locates an identical exit result only through the declared chapter index',()=>{
+ const chapters=[{chapterNumber:1,exitState:'通知已生效。'},{chapterNumber:2,exitState:'通知已生效。'}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const first=causalExitResultAnchors(anchors,chapters[0].exitState,0);
+ const second=causalExitResultAnchors(anchors,chapters[1].exitState,1);
+ expect(first).toHaveLength(1);expect(second).toHaveLength(1);
+ expect(first[0].id).not.toBe(second[0].id);
+ expect(first[0].path).toBe('0.exitState');expect(second[0].path).toBe('1.exitState');
+});
+it('preserves a valid explicit body ID and rejects a duplicate chapter number in the same audit',()=>{
+ const chapters=[{chapterNumber:3,content:'甲完成交付。'},{chapterNumber:3,content:'乙完成复核。'}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const entries=causalChapterEvidenceCatalog(chapters,anchors).entries;
+ const row={chapterNumber:3,actionAnchorId:anchors.find(x=>x.path==='0.content')!.id,
+  resultAnchorId:anchors.find(x=>x.path==='0.content')!.id};
+ expect(causalChapterEvidenceAddressIssues({transitions:[row]},entries).join('；')).toContain('章号不存在或不唯一');
 });
 
-it('recovers only unique literal result address within its own chapter, retaining an exact action quotation',()=>{
- const chapter={chapterNumber:2,content:'职员当面接收该份材料。',scenes:[{outcome:'职员确认收到该份材料。'}]};
- const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
- const inventory=causalChapterResultReviewGroups(anchors,0).review;
- expect(inventory).toHaveLength(1);
- const raw={status:'evaluated',reason:'已核对当面交接与实际收件两个动作',transitions:[{
-  chapterNumber:2,actionEvidence:chapter.content,resultEvidence:chapter.scenes[0].outcome,
-  bridgeAnchorId:anchors.find(row=>row.path==='0.content')!.id,
-  status:'supported',reason:'当面递交与确认收件属于同一个可验证的完成过程',
- }]};
- const result=bindUniqueCausalResultAnchors(raw,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors);
- expect(result.transitions[0].resultAnchorId).toBe(inventory[0].id);
- const materialized=materializeCausalAuditAnchors(result,body,{});
- expect(materialized.transitions[0].actionEvidence).toBe(chapter.content);
- expect(validateCausalAudit(materialized,body,{})).toMatchObject({verified:true,issues:[]});
- const invented={...raw,transitions:[{...raw.transitions[0],resultAnchorId:'body:v999'}]};
- expect(bindUniqueCausalResultAnchors(invented,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors)
-  .transitions[0].resultAnchorId).toBe('body:v999');
- expect(validateCausalAudit(materializeCausalAuditAnchors(invented,body,{}),body,{}).verified).toBe(false);
- const wrongChapter={...raw,transitions:[{...raw.transitions[0],chapterNumber:3}]};
- expect(bindUniqueCausalResultAnchors(wrongChapter,[{chapterNumber:2,resultAnchorIds:inventory.map(row=>row.id)}],anchors)
-  .transitions[0].resultAnchorId).toBeUndefined();
-});
 it('distinguishes missing action quote, result quote and bridge while keeping existing targeted-repair indices',()=>{
  const text='她提交资料。对方收到资料。';
  const row={actionEvidence:'没有发生过的行动',resultEvidence:'对方收到资料。',bridgeEvidence:'',status:'supported',reason:'声称资料已经接收，但未给出可信步骤'};
