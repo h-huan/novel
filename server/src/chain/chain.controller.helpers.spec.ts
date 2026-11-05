@@ -2625,6 +2625,9 @@ it.each([[1,2,false,false],[2,3,false,false],[5,8,false,false],[5,8,true,false],
    if(identityOnly&&request.metrics?.stepKey==='idea_premise_causal_plan_contract'){
     expect(request.prompt).toContain('sameTextAs');
     expect(request.prompt).toContain('必须按该字段展开后逐字核对');
+    expect(request.prompt).toContain('【原池分句编号（与首次选优同一来源）】');
+    expect(request.prompt).toContain('sourceRef');
+    expect(request.prompt).not.toContain('主角实际发起第一项行动的连续原文');
     request.physicalCallBudget.remaining--;
     return {content:JSON.stringify({plans:chosen.map(item=>({premiseId:item.premiseId,causalPlan:item.causalPlan}))})};
    }
