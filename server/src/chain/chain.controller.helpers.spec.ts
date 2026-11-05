@@ -31,6 +31,7 @@ import { GateRejectionError, classifyGateFailure } from '../modules/writing-qual
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
 import { STANDARD_PRECONDITIONS } from '../acceptance/test-standards';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
+import { DECISIVE_CHOICE_CONDITION_POLICY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/执行标准';
 
 /**
  * 单测替身：以下用例只验证 prompt 拼装与守卫流程本身，不验证执行标准解析。生产代码现在要求
@@ -83,6 +84,14 @@ function applyStandardsStub(controller: any) {
   controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   return controller;
 }
+
+it('keeps multi-result decision ownership and person-only extraction in canonical standards, not a second world patch rule',()=>{
+ expect(DECISIVE_CHOICE_CONDITION_POLICY).toContain('抓人不等于撤销停职');
+ expect(DECISIVE_CHOICE_CONDITION_POLICY).toContain('各结果分别需要与其对应的决定主体');
+ expect(STORY_ENTITY_MODELING_POLICY).toContain('谁必须本人取得原件');
+ expect(STORY_ENTITY_MODELING_POLICY).toContain('factions.protagonistRelation');
+ expect(STORY_ENTITY_MODELING_POLICY).toContain('不得把限定本人执行的动作改写成另一人替其执行');
+});
 
 describe('idea discovery execution settings', () => {
   it('uses the confirmed story when a framework request omits a new setting, while preserving an explicit request', async () => {
