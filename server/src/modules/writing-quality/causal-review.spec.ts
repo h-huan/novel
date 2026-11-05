@@ -613,6 +613,7 @@ it('losslessly reviews 105 independent chapter outcomes through compact tuples w
 
 it('compact initial proof removes repeated body prose but retains all result and world evidence and protocol failures',()=>{
  const chapters=[{chapterNumber:1,content:'她提交了核对清单。',
+   supportingNotes:Array.from({length:40},(_,i)=>'第'+i+'项已有独立核验记录但最终批准权限仍属于管理员。'),
    scenes:[{outcome:'管理员暂时受理申请，最终是否批准尚不确定。'}]}];
  const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({worldRules:'受理申请不等于准许最终登记。'})};
  const base=causalAuditRepairPrompt(null,[],body,sources,false,false);
