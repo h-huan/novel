@@ -110,6 +110,17 @@ it('offers only canonical paragraph IDs and does not send unrelated fixed-action
    [{ref:'M1',status:'covered',evidenceAnchorIds:['body:p99']}],old,
    ['M1行动证据不能定位实际正文'],body)).toThrow(/body:p99/);
 });
+it('uses one evidence-address protocol and keeps only the targeted original chapter actions',()=>{
+ const body='李先生拿起台账核验。\n\n负责人当场签收了原件。';
+ const old=[{ref:'M1',status:'covered',reason:'核验和签收均已发生',evidence:['不连续的转述']}];
+ const catalog=[{ref:'M1',source:'拿起台账并完成核验签收'},{ref:'M2',source:'另一项尚未开始的行动'}];
+ const prompt=chapterObligationEvidencePrompt(old,['M1'],['M1行动证据不能定位实际正文'],body,catalog);
+ expect(prompt).toContain('拿起台账并完成核验签收');
+ expect(prompt).not.toContain('另一项尚未开始的行动');
+ expect(prompt).toContain('evidenceAnchorIds');
+ expect(prompt).toContain('body:p2');
+});
+
 it('accepts exact short result evidence with action context while retaining location and context gates',()=>{
  const catalog=[{ref:'M1',source:'接听电话后挂断'}],body='她接起电话，让对方别再打来。\n\n挂断。';
  const row={ref:'M1',status:'covered',reason:'接听与拒绝之后挂断，行动和结果已有原文依据。',evidence:['她接起电话，让对方别再打来。','挂断。']};
