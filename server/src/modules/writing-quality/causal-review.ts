@@ -13,7 +13,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(visibleAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。返回JSON:{"repairs":[{"index":"点名编号", "actionAnchorId":"目录中的真实行动编号","resultAnchorId":"目录中的真实结果编号","bridgeAnchorId":"目录中的真实成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字实际依据"}]}。` : '只输出JSON:{"causalAudit":{"status":"evaluated|not_applicable","reason":"至少8字说明","transitions":[{"actionAnchorId":"目录中的真实行动编号","resultAnchorId":"目录中的真实结果编号","bridgeAnchorId":"目录中的真实成立条件编号；gap可为空","status":"supported|gap|planned","reason":"至少8字说明"}]}}。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit)}\n校验错误：${errors.join('；')}\n可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(visibleAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。禁止输出模板占位编号。` : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
