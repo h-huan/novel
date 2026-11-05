@@ -10,7 +10,7 @@ import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidence
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalExitResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, bindUniqueCausalResultAnchors, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -846,6 +846,23 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       } catch (error) { checked = { verified: false,
         errors: [...(attempt ? checked.errors : []), error instanceof Error ? error.message : String(error)],
         issues: attempt ? checked.issues : [] }; }
+    }
+    // Once the existing one correction has failed ONLY because the model
+    // omitted a supported bridge, retain its grounded action and outcome
+    // as a real BLOCKING causal gap. Never approve the chapter by default.
+    // This makes the same original fact-repair path actionable instead of
+    // restarting the chapter on a reviewer citation-protocol error.
+    if(!resultField&&!checked.verified){
+      const quarantined=quarantineUnprovedCausalBridges(audit,checked.errors,body,sources);
+      if(quarantined!==audit){
+        try{
+          const expanded=Object.keys(resultAliasesByReview).length
+            ?expandCausalReviewedResultAliases(quarantined,resultAliasesByReview,body,sources)
+            :quarantined;
+          const validated=validateCausalAudit(expanded,body,sources);
+          if(validated.verified){audit=expanded;checked=validated;}
+        }catch{/* Ambiguous or conflicting same-text aliases stay blocked. */}
+      }
     }
     return { ...checked, issues: checked.issues.map(issue => ({ ...issue,
       chapterNumber: audit?.transitions?.find((row: any) => row.status === 'gap' && row.reason === issue.summary)?.chapterNumber })), audit };
