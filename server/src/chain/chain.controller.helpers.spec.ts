@@ -1704,6 +1704,8 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       if(request.physicalCallBudget)request.physicalCallBudget.remaining--;
       const step = request.metrics?.stepKey;
       if (step === 'idea_premise_pool_generation') {
+        expect(request.prompt).toContain('自动选择的storyTone含浪漫');
+        expect(request.prompt).toContain('不能共享一条低职位忍让');
         poolBatchCallsStarted += 1;
         if (poolBatchCallsStarted >= 2) releasePoolBatches();
         // A barrier makes the test fail if pool generation is changed back to serial awaits.
