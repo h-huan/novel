@@ -441,3 +441,48 @@ it('recovers only a unique literal condition address without changing the indepe
  expect(ambiguous.transitions[0].bridgeAnchorId).toBeUndefined();
  expect(validateCausalAudit(ambiguous,repeated,{}).verified).toBe(false);
 });
+
+
+it('locks a server-owned omitted result even at the 112th audit row; only its cause may be reviewed',()=>{
+ const retained=Array.from({length:111},(_,index)=>({
+   chapterNumber:4,resultAnchorId:'body:v'+(index+1),actionAnchorId:'body:v1',
+   status:'gap',reason:'此前已经逐项独立审定的真实缺口不能因漏审修复而被覆盖'}));
+ const missed={chapterNumber:4,resultAnchorId:'body:v56:s3'};
+ const original={status:'evaluated',reason:'逐项审核',transitions:[...retained,missed]};
+ const errors=['结构化结果逐项核对未完整覆盖：body:v56:s3',
+   '第112项因果审查缺少该出口结果的行动及成立条件'];
+ expect(causalAuditRepairTargets(original,errors)).toEqual([111]);
+ const repair={index:111,actionAnchorId:'body:v2',bridgeAnchorId:'',
+   status:'gap',reason:'此结果尚无独立可核验的执行动作与必要条件'};
+ const fixed=applyCausalAuditRepair(original,errors,{repairs:[repair]});
+ expect(fixed.transitions).toHaveLength(112);
+ expect(fixed.transitions.slice(0,111)).toEqual(retained);
+ expect(fixed.transitions[111]).toMatchObject({
+   chapterNumber:4,resultAnchorId:'body:v56:s3',actionAnchorId:'body:v2',status:'gap'});
+ expect(()=>applyCausalAuditRepair(original,errors,{repairs:[
+   {...repair,resultAnchorId:'body:v12'}]})).toThrow('不能改动服务器锁定的结果编号');
+ expect(()=>applyCausalAuditRepair(original,errors,{repairs:[
+   {...repair,chapterNumber:5}]})).toThrow('不能改变点名行章号');
+ // Existing invalid references are not locked: only appended missing-result
+ // placeholders have no prior action, status or evidence.
+ const invalid={transitions:[{chapterNumber:4,actionAnchorId:'body:v1',
+   resultAnchorId:'invalid:result',status:'gap',reason:'引用编号有误'}]};
+ const corrected=applyCausalAuditRepair(invalid,['第1项因果审查结果编号无效'],
+   {repairs:[{index:0,actionAnchorId:'body:v1',resultAnchorId:'body:v2',
+     status:'gap',reason:'源文本结果仍缺必要条件'}]});
+ expect(corrected.transitions[0].resultAnchorId).toBe('body:v2');
+});
+
+it('repair prompt identifies the exact missing result without claiming its causality was reviewed',()=>{
+ const chapters=[{chapterNumber:4,content:'她向掌柜递交证据。',scenes:[{outcome:'掌柜收到证据。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const outcome=causalChapterResultAnchors(anchors,0)[0];
+ const original={status:'evaluated',transitions:[{chapterNumber:4,resultAnchorId:outcome.id}]};
+ const prompt=causalAuditRepairPrompt(original,['第1项因果审查缺少该出口结果的行动及成立条件'],body,{}).prompt;
+ expect(prompt).toContain('服务器锁定的漏审结果');
+ expect(prompt).toContain(outcome.id);
+ expect(prompt).toContain('掌柜收到证据');
+ expect(prompt).toContain('遗漏结果尚未经语义审核');
+ expect(prompt).toContain('resultAnchorId可省略');
+ expect(prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+});
