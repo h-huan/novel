@@ -672,7 +672,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     const c=Object.create(ChainController.prototype) as any;
     const prompts:string[]=[];
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,_options:any)=>{
-      prompts.push(prompt);return {data:{passed:true,issues:[]}};
+      prompts.push(prompt);return {data:{passed:true,issues:[],outcomeChecks:['A','B'].map(premiseId=>({premiseId,status:'supported',claimQuote:premise(premiseId).payoff,priorQuote:premise(premiseId).activeChoice,reason:'由先前明确实际主动行动造成的结果仍需接受其它独立审查完整核验'}))}};
     });
     const input=selection();
     const overlap=await c.reviewPremiseSelection(input,standard,'overlap');
