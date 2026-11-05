@@ -313,8 +313,8 @@ export function quarantineUnprovedCausalBridges(
  audit:any,errors:readonly string[],content:string,sources:Record<string,string>,
 ){
  if(audit?.status!=='evaluated'||!Array.isArray(audit?.transitions)||!errors.length
-   ||errors.some(error=>!/^第[1-9]\\d*项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）$/.test(error)))return audit;
- const indices=[...new Set(errors.map(error=>Number(error.match(/^第(\\d+)项/)?.[1])-1))];
+   ||errors.some(error=>!/^第[1-9]\d*项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）$/.test(error)))return audit;
+ const indices=[...new Set(errors.map(error=>Number(error.match(/^第(\d+)项/)?.[1])-1))];
  if(indices.some(index=>!Number.isInteger(index)||index<0||index>=audit.transitions.length))return audit;
  const selected=new Set(indices);
  const transitions=audit.transitions.map((row:any,index:number)=>{
