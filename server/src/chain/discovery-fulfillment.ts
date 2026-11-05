@@ -172,23 +172,19 @@ export function retainValidStructuredIdeaTitle<T extends {title?:unknown;alterna
 
 /** Optional screening surplus must fit the entire original review allowance.
  * Never reduce the actual user demand or borrow from the final refill reserve. */
-export function preferFineSourceReview(count:number,batchSize:number,concurrency:number,groupingMode=0):boolean{
- return groupingMode===0&&count>batchSize&&concurrency>=Math.ceil(count/2)+1;
-}
 export function plannedPreselectionCount(requested:number,desired:number,credits:number,batchSize:number,groupingMode:number,concurrency:number):number{
  if(!Number.isInteger(requested)||requested<1||!Number.isInteger(concurrency)||concurrency<1)throw Error('选优容量参数无效');
  const mandatory=Math.min(requested,desired);
  const count=affordableReviewedPremiseCount(desired,credits,batchSize,groupingMode,mandatory);
  if(count<mandatory)return 0;
  // Screening surplus must not be traded for unaffordable extra partitions.
- // The scheduler below funds fine partitions only after a whole correction.
+ // The scheduler keeps an independently audited response for each actual premise.
  return count;
 }
 export function fundedSourceReviewGroups(count:number,batchSize:number,credits:number,concurrency:number,groupingMode=0):number{
  const minimum=premiseReviewCallFloor(count,batchSize,groupingMode)-(count>1?1:0);
  if(!Number.isInteger(credits)||credits<0||!Number.isInteger(concurrency)||concurrency<1)throw Error('来源审核容量无效');
  if(!count||credits<minimum)return 0;
- const correctionFloor=premiseReviewCallFloor(count,batchSize,groupingMode);
  // Never spend the last correction credits merely to make the first audit
  // narrower. An independently rejected premise still needs replacement and
  // a new source/overlap verdict inside the same allowance.
@@ -202,7 +198,6 @@ export function fundedSourceReviewGroups(count:number,batchSize:number,credits:n
  // NOT more independent evidence; every check already has its own identity.
  // The existing output-capacity fallback may still partition a genuinely
  // oversized response using the original shared correction allowance.
- void concurrency;void correctionFloor;
  return minimum;
 }
 
