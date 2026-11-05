@@ -510,7 +510,7 @@ describe('decisive planning action proof', () => {
     (service as any).generateInternal = generate;
     const result = await (service as any).auditPlanningActions(run, {}, JSON.stringify({ volumes: [{ chapters: [chapter] }] }), 'exitState');
     expect(result.verified).toBe(false);
-    expect(result.errors.join('；')).toContain('实际exitState');
+    expect(result.errors.join('；')).toContain('实际出口状态');
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[0][0].prompt).toContain('resultAnchorIds');
     expect(generate.mock.calls[0][0].prompt).toContain('完整章节结构');
@@ -610,7 +610,7 @@ describe('decisive planning action proof', () => {
     (service as any).generateInternal = generate;
     const result = await (service as any).auditPlanningActions(run, {}, JSON.stringify({ volumes: [{ chapters: [bad, other] }] }));
     expect(result.verified).toBe(false);
-    expect(result.errors.join('；')).toContain('第3项因果审查的章号');
+    expect(result.errors.join('；')).toContain('第3项因果审查的结果编号未绑定本章原文');
     expect(generate.mock.calls[0][0].prompt).toContain('章号与本章证据地址对应');
     expect(generate).toHaveBeenCalledTimes(2);
   });

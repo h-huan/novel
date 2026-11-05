@@ -295,11 +295,19 @@ export function expandCausalReviewedResultAliases(value:any,aliasesByReview:Reco
 /** IDs resolve to exact source paragraphs; no fuzzy quote correction or invented bridge. */
 export function materializeCausalAuditAnchors(value: any, content: string, sources: Record<string,string>) {
   if (!value || !Array.isArray(value.transitions)) return value;
-  const allAnchors=causalEvidenceAnchors(content,sources);
+  // The advertised catalog is also the only catalog accepted by the server.
+  // A JSON whole-paragraph address is NOT offered when the canonical source
+  // has fine-grained body:v fields; do not accept a hidden fallback address.
+  const allAnchors=causalEvidenceAnchorOptions(content,sources);
   const anchors=new Map(allAnchors.map(x=>[x.id,x]));
   const bound=bindCausalReviewEvidenceAddresses(value,[],allAnchors);
-  return {...bound,transitions:bound.transitions.map((row:any)=>{
-    if(!['actionAnchorId','resultAnchorId','bridgeAnchorId','beforeStateAnchorId'].some(key=>Object.prototype.hasOwnProperty.call(row,key)))return row;
+  return {...bound,transitions:bound.transitions.map((row:any,index:number)=>{
+    const originallyAddressed=['actionAnchorId','resultAnchorId','bridgeAnchorId','beforeStateAnchorId']
+      .some(key=>Object.prototype.hasOwnProperty.call(value.transitions[index],key));
+    // Previously completed literal-quote audits with no address protocol
+    // must remain byte-for-byte unchanged. Only addressed audits can receive
+    // a unique omitted bridge ID; standalone legacy verdicts are not upgrades.
+    if(!originallyAddressed)return value.transitions[index];
     const action=anchors.get(row?.actionAnchorId);
     const result=anchors.get(row?.resultAnchorId);
     const bridge=anchors.get(row?.bridgeAnchorId);
