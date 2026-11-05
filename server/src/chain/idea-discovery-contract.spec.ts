@@ -530,7 +530,7 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('不得按关键词数量或固定信号个数凑 Gate');
     expect(contract).toContain('不预先讲完最后胜利、处罚和所有证据');
     expect(contract).toContain('不能把关键行动/选择只藏在 description 里');
-    const fixed=ideaPremiseSelectionDirective('short_story',5,15,false,3,true,true);
+    const fixed=ideaPremiseSelectionDirective('short_story',5,15,false,3,true);
     expect(fixed).toContain('不得写成“一个某职业的人如何逆袭”');
     expect(fixed).toContain('不允许提前泄露终局');
     const structuring=ideaCardStructuringDirective({...selectedPremise('P1'),storyCategory:'男频脑洞'},[]);
