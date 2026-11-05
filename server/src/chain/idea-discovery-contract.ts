@@ -401,7 +401,7 @@ ${storyTypeRule}
 必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
 ${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}
 ${PREMISE_SOURCE_REFERENCE_DIRECTIVE}
-本次一次完成全池比较、选择已有身份及这些身份的因果引用索引，绝不重写故事。每项只输出premiseId、storyCategoryId、readerQuestion和causalPlan；readerQuestion只能追问已有事实，不引入新事件。不要返回sourceBindings或另一份叙事字段。
+本次一次完成全池比较、选择已有身份及这些身份的因果引用索引，绝不重写故事。每项只输出premiseId、storyCategoryId、readerQuestion和causalPlan；readerQuestion要承接原池开局已经发生的关系冲突或关键选择，点出读者接下来最想知道的具体后果；不得写成“一个某职业的人如何逆袭”“他能不能成功”等泛化故事概要，也不允许提前泄露终局或引入新事件。不要返回sourceBindings或另一份叙事字段。
 【服务器实际字段与原池分节映射】${JSON.stringify(SOURCE_BINDING_EXAMPLE)}。映射的值是实际字段按顺序拼接的原池分节；sourceRef只定位对应分节的连续原文，由服务器还原field和quote，模型不重复推测字段名。使用更短的{field,quote}引文时才按此表选择实际字段。“必要条件”是原池分节，不存在necessaryConditions字段，应按上表引用实际承载该原文的字段。行动、条件和结果的因果角色仍由实际事件决定，不能由字段名代替判断。
 服务器先从固定原池五节原样投影事实，再逐项校验causalPlan的field和quote是否逐字指向投影后的既有行动、条件及结果；由实际故事决定环节数量，普通直接因果可以只有一环。选优响应中已有有效索引就直接进入原有独立来源、因果、分类、全部流派及同构审核，不再付费重复装配索引；仅索引缺失或引用无效才动用原有同一共享预算内的因果索引纠错，不允许新增故事事实或调用额度。原池有真实缺口必须在本次比较中淘汰，不能因后续可纠错而留待补造。
 逐对比较真实主动策略、升级、反转与代价，不因为绑定来源就跳过选优。
@@ -794,9 +794,9 @@ export function applyOrderedIdeaRepairPatches(
 export function ideaHookRequirement(storyType: IdeaStoryType): string {
   const storyFirst = '题材已经通过完整题材卡创建前的轻量候选池筛选；这里只把该题材最有吸引力的起始事件准确压缩成 hook，不再重新选题、换题或为了命中 Gate 关键词改造故事。异常/信息差不等于超能力，可以来自现实利益冲突、关系反常、制度困境、隐藏事实或超常现象';
   if (storyType === 'short_story') {
-    return `35-80字；${storyFirst}；必须让读者看见主角正在做什么或明确选择什么，并自然给出至少一个来自本故事自身的继续阅读理由，例如现实代价、关系冲突、资源争夺、信息差、迫近后果或未解问题。不得按关键词数量或固定信号个数凑 Gate，也不能把关键行动/选择只藏在 description 里`;
+    return `35-80字；${storyFirst}；只表现真实开局的一次异常、压迫或关系反转，以及主角此刻无法回避的具体选择；让读者当场理解为什么继续看，留下尚未兑现的后果。可用现实代价、关系冲突、资源争夺、信息差、迫近后果或未解问题，不预先讲完最后胜利、处罚和所有证据，不写从起因到结局的缩略梗概。必须看得见主角正在做什么或明确选择什么；不得按关键词数量或固定信号个数凑 Gate，也不能把关键行动/选择只藏在 description 里`;
   }
-  return `35-80字；${storyFirst}；直接写出现实压力或代价、主角下一步具体行动，并留下可持续追问；不能只有设定说明`;
+  return `35-80字；${storyFirst}；直接写出现实压力或代价、主角下一步具体行动，并留下可持续追问；只暴露当前必须作出的选择和下一层风险，不在钩子里概括整个长篇结局或全部底牌，不能只有设定说明`;
 }
 
 
