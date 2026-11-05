@@ -237,6 +237,13 @@ export function causalPlanningProofGroups(
    const score=Math.max(left,total-left);
    if(score<best){best=score;cut=i;}
  }
+ // A two-shard plan spends BOTH physical calls on independent first passes.
+ // If either chapter-complete shard still exceeds the per-call review limit,
+ // sharding would remove the only correction opportunity WITHOUT reducing the
+ // actual overload. Retain the established first-pass + targeted-repair path
+ // rather than silently turning one unbalanced chapter into a fragile single
+ // pass. No result is omitted and the two-call allowance is unchanged.
+ if(best>maxSinglePassResults)return [[...chapters]];
  return [[...chapters.slice(0,cut)],[...chapters.slice(cut)]];
 }
 
