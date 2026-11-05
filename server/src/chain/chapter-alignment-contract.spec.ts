@@ -89,7 +89,7 @@ it('repairs a paraphrased dialogue quote using actual paragraph IDs and preserve
 });
 
 it('offers only canonical paragraph IDs and does not send unrelated fixed-action receipts again',()=>{
- const body='老李拿起台账，叫来负责人核验。随后锁上房门。\\n\\n负责人核对了签名，当场签收原件。';
+ const body='老李拿起台账，叫来负责人核验。随后锁上房门。\n\n负责人核对了签名，当场签收原件。';
  const old=[{ref:'M1',status:'covered',reason:'已经发生了核验动作',evidence:['非原文引文']},
             {ref:'M2',status:'missing',reason:'另一项任务尚未完成',evidence:[]}];
  const prompt=chapterObligationEvidencePrompt(old,['M1'],['M1行动证据不能定位实际正文'],body);
