@@ -208,12 +208,17 @@ export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unkno
  * rescues fully closed authored JSON objects; all existing Gates still run. */
 export function decodePremisePoolTransport(content:unknown,label:string):{value:any;partiallyRecovered:boolean}{
  const normalized=String(content||'').trim().replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'');
+ try{return {value:JSON.parse(normalized||'{}'),partiallyRecovered:false};}catch{}
+ // jsonrepair can auto-close a half-written eighth object, turning model
+ // truncation into an invented "candidate". Only original CLOSED objects
+ // can be recovered from a pool transport. Other status envelopes retain
+ // the legacy repair compatibility.
+ const complete=recoverClosedPremisePoolObjects(normalized);
+ if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
+ if(/"pool"\s*:\s*\[/.test(normalized))
+  throw new Error(label+'候选JSON不完整，没有可独立解析的完整候选条目。');
  try{return {value:JSON.parse(jsonrepair(normalized||'{}')),partiallyRecovered:false};}
- catch{
-  const complete=recoverClosedPremisePoolObjects(normalized);
-  if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
-  throw new Error(label+'未返回合法JSON，且没有可独立解析的完整候选条目。');
- }
+ catch{throw new Error(label+'未返回合法JSON，且没有可独立解析的完整候选条目。');}
 }
 
 /** The server must verify every model candidate against its preallocated
