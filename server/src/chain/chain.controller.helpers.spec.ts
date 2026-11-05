@@ -1574,6 +1574,20 @@ describe('cross-chapter finding partition', () => {
 });
 
 
+/** Test generators must answer with the exact immutable slots supplied by
+ * the production prompt. The returned story facts and intended invalid
+ * categories are not repaired or silently reclassified. */
+function bindMockPoolToPromptSlots(request:any,pool:readonly Record<string,any>[]){
+ const raw=String(request.prompt||'').split('【生成前锁定的候选槽位】')[1]?.split('\n')[0]||'[]';
+ const unclaimed=(JSON.parse(raw) as {premiseId:string;storyCategoryId:string}[]).slice();
+ return pool.map(item=>{
+  const category=String(item.storyCategoryId||'K1');
+  const match=unclaimed.findIndex(slot=>slot.storyCategoryId===category);
+  const slot=unclaimed.splice(match>=0?match:0,1)[0];
+  return slot?{...item,premiseId:slot.premiseId,storyCategoryId:category}:item;
+ });
+}
+
 describe('idea discovery orchestrator with simulated model responses', () => {
   it.each(['patch_protocol', 'repair_network', 'card_network', 'card_shape', 'category_inheritance', 'review_protocol', 'parallel_order', 'review_budget', 'preselection_shortfall', 'pool_below_minimum', 'pool_second_batch_unique', 'tag_combo_reused', 'pool_naming', 'dimension_microrepair', 'dimension_multi_microrepair', 'locked_card_context', 'pool_category_contract'])(
     'preserves passed cards when another candidate fails: %s', async failure => {
@@ -1695,14 +1709,14 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         // A barrier makes the test fail if pool generation is changed back to serial awaits.
         await bothPoolBatchesStarted;
         if (failure === 'pool_second_batch_unique' && request.metrics?.attempt === 1) {
-          return { content: JSON.stringify({ pool: [...pool, {
+          return { content: JSON.stringify({ pool: bindMockPoolToPromptSlots(request,[...pool, {
             workingTitle: '水库账本提前清空',
             storyCore: '【处境触发】山区供水站的账本突然显示水库已被提前放空。【主动选择】维修员主动核验泵站记录并通知村民保留原件。【必要条件】记录送到有权调查的水务人员手里后经核对才能认定原因。【反转兑现】承包商关闭备用管线导致村民被迫做出选择，维修员也面临失业代价。【分类流派机制】山区悬疑调查和真实水源控制权推动冲突升级并改变人物关系。',
             storyCategoryId: 'K1',
-          }] }) };
+          }]) }) };
         }
-        return { content: JSON.stringify({ pool: failure==='tag_combo_reused'?pool.map(seed=>({...seed,storyTone:['紧张']})):failure==='pool_naming'&&request.metrics?.attempt===0
-          ? [{...pool[0],workingTitle:'禁止命名的前置候选',storyCore:pool[0].storyCore+'宠物豆包被接回家。'},...pool] : pool }) };
+        return { content: JSON.stringify({ pool: bindMockPoolToPromptSlots(request,failure==='tag_combo_reused'?pool.map(seed=>({...seed,storyTone:['紧张']})):failure==='pool_naming'&&request.metrics?.attempt===0
+          ? [{...pool[0],workingTitle:'禁止命名的前置候选',storyCore:pool[0].storyCore+'宠物豆包被接回家。'},...pool] : pool) }) };
       }
       if (step === 'idea_premise_selection') return { content: JSON.stringify({ selectedPremises: selectedForBatch }) };
       if (step === 'idea_card_structure') {
@@ -2219,7 +2233,7 @@ it.each(['complete','late_protocol_failure','early_terminal','early_generation',
     const step=request.metrics?.stepKey;
     if(step==='idea_premise_pool_generation'){
       const batch=Number(request.metrics?.attempt||0);
-      return {content:JSON.stringify({pool:entries.slice(batch===0?0:8,batch===0?8:15)})};
+      return {content:JSON.stringify({pool:bindMockPoolToPromptSlots(request,entries.slice(batch===0?0:8,batch===0?8:15))})};
     }
     if(step==='idea_premise_selection')
       return {content:JSON.stringify({selectedPremises:Array.from({length:8},(_,i)=>selectionFields('P'+(i+1)))})};
@@ -2402,7 +2416,7 @@ it('fills a failed final-card delivery slot from unused lightweight seeds withou
     const step=request.metrics?.stepKey;
     if(step==='idea_premise_pool_generation'){
       const batch=Number(request.metrics?.attempt||0);
-      return {content:JSON.stringify({pool:seeds.slice(batch===0?0:2,batch===0?2:4)})};
+      return {content:JSON.stringify({pool:bindMockPoolToPromptSlots(request,seeds.slice(batch===0?0:2,batch===0?2:4))})};
     }
     if(step==='idea_premise_selection')
       return {content:JSON.stringify({selectedPremises:['P1','P2'].map(expand)})};
@@ -2488,11 +2502,11 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
         const size = Number(request.prompt.match(/只生成恰好\s+(\d+)\s+个轻量题材胚子/)?.[1] || 0);
         if (!size) throw new Error('test fixture could not resolve the fixed pool batch size');
         const attempt = Number(request.metrics?.attempt || 0);
-        return { content: JSON.stringify({ pool: Array.from({ length: size }, (_, index) => ({
+        return { content: JSON.stringify({ pool: bindMockPoolToPromptSlots(request,Array.from({ length: size }, (_, index) => ({
           workingTitle: `原池候选-${attempt}-${index + 1}`,
           storyCore: diversePoolStories[attempt * Math.ceil(Math.max(count*3,count+5)/2) + index],
           storyCategoryId: 'K1',
-        })).filter(row=>row.storyCore) }) };
+        })).filter(row=>row.storyCore)) }) };
       }
       if (step === 'idea_premise_selection') {
         return { content: JSON.stringify({ blocked: true, missingRequiredDimensions: ['test-stop'], message: 'selection contract regression sentinel' }) };
@@ -2524,7 +2538,7 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
         const attempt = Number(request.metrics?.attempt || 0);
         const selected = attempt === 0
           ? [0, 0, 1, 2] : [3, 4, 5];
-        return { content: JSON.stringify({ pool: selected.map((index,position) => ({
+        return { content: JSON.stringify({ pool: bindMockPoolToPromptSlots(request,selected.map((index,position) => ({
           workingTitle: attempt === 0 && position === 1 ? '首批换名复刻'
             : '实际新机制' + index,
           storyCore: attempt === 0 && position === 1
@@ -2532,7 +2546,7 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
               .replace('浮标全部报出逆风', '海上浮标一起报告逆风')
             : diversePoolStories[index],
           storyCategoryId: 'K1',
-        })) }) };
+        }))) }) };
       }
       if (request.metrics?.stepKey === 'idea_premise_selection') {
         // Fail intentionally after observing the actual fixed shortlist.
