@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -573,4 +573,63 @@ it('limits a targeted missing-result correction to the matching chapter while re
  expect(choices.some((a:any)=>a.text.includes('他保留登记凭证'))).toBe(false);
  expect(choices.some((a:any)=>a.text.includes('第三章有人要求'))).toBe(false);
  expect(prompt).toContain('遗漏结果尚未经语义审核');
+});
+
+
+it('losslessly reviews 105 independent chapter outcomes through compact tuples while preserving every negative Gate',()=>{
+ const chapters=[1,2,3].map(chapterNumber=>({
+   chapterNumber,content:'她提交了核对清单。',
+   scenes:Array.from({length:35},(_,i)=>({outcome:'第'+chapterNumber+'章第'+(i+1)+'项处理结果已经生效。'})),
+ }));
+ const body=JSON.stringify(chapters), anchors=causalEvidenceAnchors(body,{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors);
+ const proofRows=entries.flatMap((entry,index)=>{
+   const action=anchors.find(a=>a.path===index+'.content'&&a.source==='body');
+   expect(action).toBeDefined();
+   return entry.resultAnchorIds.map(resultAnchorId=>[
+     entry.chapterNumber,resultAnchorId,action!.id,'','gap',
+     '只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
+   ]);
+ });
+ expect(proofRows).toHaveLength(105);
+ const decoded=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',proofRows});
+ expect(decoded.proofRows).toBeUndefined();
+ expect(decoded.transitions).toHaveLength(105);
+ const bound=materializeCausalAuditAnchors(decoded,body,{});
+ expect(causalChapterEvidenceAddressIssues(bound,entries)).toEqual([]);
+ expect(validateCausalAudit(bound,body,{})).toMatchObject({verified:true});
+ expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(105);
+ const catalogIds=new Set(entries.flatMap(entry=>entry.resultAnchorIds));
+ expect(new Set(bound.transitions.map((row:any)=>row.resultAnchorId))).toEqual(catalogIds);
+ const shortened=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
+   proofRows:proofRows.slice(0,104)});
+ expect(new Set(shortened.transitions.map((row:any)=>row.resultAnchorId))).not.toEqual(catalogIds);
+ const wrong=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
+   proofRows:[...[...proofRows.slice(0,104)], [3,'body:invalid:result',proofRows[104][2],'','gap','独立结果证据必须来自同章实际原文']]});
+ const wrongBound=materializeCausalAuditAnchors(wrong,body,{});
+ expect(causalChapterEvidenceAddressIssues(wrongBound,entries).length).toBeGreaterThan(0);
+ expect(validateCausalAudit(wrongBound,body,{}).verified).toBe(false);
+});
+
+it('compact initial proof removes repeated body prose but retains all result and world evidence and protocol failures',()=>{
+ const chapters=[{chapterNumber:1,content:'她提交了核对清单。',
+   scenes:[{outcome:'管理员暂时受理申请，最终是否批准尚不确定。'}]}];
+ const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({worldRules:'受理申请不等于准许最终登记。'})};
+ const base=causalAuditRepairPrompt(null,[],body,sources,false,false);
+ const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
+ expect(compact.prompt).toContain('proofRows每行恰好6项');
+ expect(compact.prompt).toContain('受理申请不等于准许最终登记');
+ const inventory=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,sources)).entries[0].resultAnchorIds;
+ for(const id of inventory)expect(compact.prompt).toContain(id);
+ expect(base.prompt).toContain('她提交了核对清单。');
+ expect(compact.prompt).not.toContain('"text":"她提交了核对清单。"');
+ expect(compact.prompt.length).toBeLessThan(base.prompt.length);
+ expect(decodePlanningProofRows({status:'evaluated',reason:'旧版本完整结果账目',
+   transitions:[{chapterNumber:1,resultAnchorId:'body:v1',status:'gap'}]}).transitions).toHaveLength(1);
+ for(const invalid of [
+   {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
+   {status:'evaluated',reason:'拒绝假冒',proofRows:[[1,'body:v2','body:v1','', 'supported','没有独立桥接证据']]},
+   {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v2','body:v1','gap','理由']]},
+   {status:'evaluated',reason:'拒绝伪造',proofRows:[[1,'body:invented','body:v1',null,'gap','独立状态与结果不成立的实际理由']]},
+ ])expect(()=>decodePlanningProofRows(invalid)).toThrow();
 });
