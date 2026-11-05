@@ -242,6 +242,27 @@ it('keeps repeated literal event text within a single field as separate obligati
  expect(groups.review).toHaveLength(causalChapterResultAnchors(all,0).length);
  expect(Object.keys(groups.aliasesByReview)).toHaveLength(0);
 });
+it('corrects structured outline citations using the same selectable IDs as the server, not prose-only paragraph IDs',()=>{
+ const source=JSON.stringify([{content:'养马人当众牵出老马。',scenes:[{outcome:'都尉验明马龄，拒收了这匹马。'}]}]);
+ const bad={status:'evaluated',reason:'需要纠正结构化章纲中的实际引文位置',
+  transitions:[{actionEvidence:'不在结构化原文里的行动',resultEvidence:'都尉验明马龄，拒收了这匹马。',
+   bridgeEvidence:'',status:'gap',reason:'行动定位错误，但不以来源协议错误断言故事成立'}]};
+ const errors=validateCausalAudit(bad,source,{}).errors;
+ const prompt=causalAuditRepairPrompt(bad,errors,source,{}).prompt;
+ expect(prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+ expect(prompt).toContain('body:v');
+ expect(prompt).not.toContain('"actionAnchorId":"body段落编号"');
+ const all=causalEvidenceAnchors(source,{});
+ const action=all.find(anchor=>anchor.source==='body'&&anchor.text==='养马人当众牵出老马。')!;
+ const result=all.find(anchor=>anchor.source==='body'&&anchor.text==='都尉验明马龄，拒收了这匹马。')!;
+ expect(action).toBeDefined();expect(result).toBeDefined();
+ const patched=applyCausalAuditRepair(bad,errors,{repairs:[{index:0,actionAnchorId:action.id,
+  resultAnchorId:result.id,bridgeAnchorId:'',status:'gap',reason:'现有信息不能证明都尉拒收的完整决定依据'}]});
+ const materialized=materializeCausalAuditAnchors(patched,source,{});
+ expect(validateCausalAudit(materialized,source,{})).toMatchObject({verified:true});
+ expect(materialized.transitions[0].status).toBe('gap');
+});
+
 it('only sends failed causal rows to the existing repair call and keeps all preserved rows server-side',()=>{
  const row={status:'supported',actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'body:p1',reason:'完成直接行动已有原文条件证据'};
  const original={status:'evaluated',reason:'逐项核实全部结果',transitions:[...Array.from({length:40},()=>({...row})),{...row,actionAnchorId:'body:p99'}]};
