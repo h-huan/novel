@@ -327,7 +327,7 @@ export function quarantineUnprovedCausalBridges(
   return {...row,status:'gap',bridgeAnchorId:'',bridgeEvidence:'',basisSource:'body',
     reason:'原因果审查未提供可验证的结果成立条件，须修复章节事实或收回过度断言：'+row.reason};
  });
- if(transitions.some(row=>row===null))return audit;
+ if(transitions.some((row:any)=>row===null))return audit;
  const reduced={...audit,transitions};
  return validateCausalAudit(reduced,content,sources).verified?reduced:audit;
 }
