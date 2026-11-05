@@ -18,6 +18,7 @@ import {
   ideaDiscoveryAuthorSettings,
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
+  capRankedPremiseSelections,
   selectedPremiseEvidenceForIdeaCard,
 } from './idea-discovery-contract';
 
@@ -284,6 +285,21 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('selectedPremises 返回 3-5 项');
     expect(directive).toContain('绝不为了凑数加入弱项');
     expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 恰好 5 项');
+  });
+
+  it('caps only unfunded ranked selections while retaining strict source and quality validation', () => {
+    const pool = Array.from({ length: 9 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具备独立行动、升级和兑现依据的故事骨架。',
+    }));
+    const ranked = pool.map(item => selectedPremise(item.premiseId));
+    const admitted = capRankedPremiseSelections(ranked, 8) as ReturnType<typeof selectedPremise>[];
+    expect(admitted.map(item => item.premiseId)).toEqual(pool.slice(0, 8).map(item => item.premiseId));
+    expect(ranked).toHaveLength(9);
+    expect(normalizePremiseSelectionPayload({pool, selectedPremises: admitted},8,9).selected).toHaveLength(8);
+    expect(() => normalizePremiseSelectionPayload({pool, selectedPremises: ranked},8,9)).toThrow('8-8 个成熟题材');
+    expect(() => capRankedPremiseSelections(ranked,0)).toThrow('选优预算数量无效');
   });
 
   it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
