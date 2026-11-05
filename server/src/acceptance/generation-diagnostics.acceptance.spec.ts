@@ -19,8 +19,8 @@ import { HttpException } from '@nestjs/common';
  * premise catalog. This is a deterministic fake model for acceptance tests,
  * not a bypass or fixture used by production generation. */
 function makeOverlapFixture(prompt:string){
-  const selected=JSON.parse(prompt.split('【待锁定已选胚子】')[1].split('\\n')[0]) as Array<Record<string,any>>;
-  const ids=JSON.parse(prompt.split('【本次须独立复核胜负的实际题材ID】')[1].split('\\n')[0]) as string[];
+  const selected=JSON.parse(prompt.split('【待锁定已选胚子】')[1].split('\n')[0]) as Array<Record<string,any>>;
+  const ids=JSON.parse(prompt.split('【本次须独立复核胜负的实际题材ID】')[1].split('\n')[0]) as string[];
   const getText=(row:Record<string,any>,field:string):string=>{
     const value=row[field];
     return typeof value==='string'?value
