@@ -197,8 +197,4 @@ export function premiseCausalCatalog(item: Record<string, unknown>, prefix: stri
   }));
 }
 
-export function premiseCausalReferenceExample(){
- const address=()=>({sourceRef:'本项真实ID:2:3-5'});
- return premiseCausalPlanExample().map(link=>({action:address(),conditions:link.conditions.map(()=>address()),result:address()}));
-}
-export const PREMISE_SOURCE_REFERENCE_DIRECTIVE='本次原池每句由服务器附带完整定位标记[本项真实ID:分节号:分句号]；单句sourceRef直接复制标记的ID:分节号:分句号；多句连续区间仅写一次ID和分节号，如P1:2:3-5（表示第2节第3至5句），不要重复写终点分节号。历史模型曾输出P1:2:3-2:5或P1:2:3-P1:2:5，仅在两个端点同ID、同节且原池确有该连续区间时由同一解析器兼容；不得跨分节。不要自行猜测身份、编号或字段。优先仅返回原文中实际行动、条件与结果的sourceRef地址，field由服务器按同一固定映射确定，不重复推测字段名。确需分句内更短原文以分离行动与结果时，允许沿原有{field,quote}逐字引用，不能同时填写sourceRef和quote；field仍须使用服务器分节到字段映射中的实际字段。编号及方括号只属传输定位，服务器从未加编号的原池逐字取回连续原文并验证同一身份、分节、范围与字段。范围不得跨分节，不能引用其它题材或把结果断言当作行动、条件；所有原因果质量判断仍独立执行。';
+export const PREMISE_SOURCE_REFERENCE_DIRECTIVE='本次原池每句由服务器附带完整定位标记[真实ID:分节号:分句号]；单句sourceRef可直接复制完整方括号标记或其中的地址；多句连续区间用同ID、同分节的实际起止句号，只保留一次ID和分节号。仅引用确实出现在下方当前原池目录中的编号，禁止照抄模板占位地址或假设存在某个句号。历史模型曾输出P1:2:3-2:5或P1:2:3-P1:2:5，仅在两个端点同ID、同节且原池确有该连续区间时由同一解析器兼容；不得跨分节。不要自行猜测身份、编号或字段。优先仅返回原文中实际行动、条件与结果的sourceRef地址，field由服务器按同一固定映射确定，不重复推测字段名。确需分句内更短原文以分离行动与结果时，允许沿原有{field,quote}逐字引用，不能同时填写sourceRef和quote；field仍须使用服务器分节到字段映射中的实际字段。编号及方括号只属传输定位，服务器从未加编号的原池逐字取回连续原文并验证同一身份、分节、范围与字段。范围不得跨分节，不能引用其它题材或把结果断言当作行动、条件；所有原因果质量判断仍独立执行。';
