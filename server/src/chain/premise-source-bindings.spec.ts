@@ -1,5 +1,5 @@
 import {indexedPremiseSourcePool,resolvePremiseSourceReference,exactPremiseSourceFields} from './premise-source-bindings';
-import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
+import { PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import {premiseSourceReviewWork,completePremiseSourceProof,premiseSourceAuditView} from './premise-selection-review';
 import {it,expect} from 'vitest';
 import {materializePremiseSourceBindings,projectPremiseSourceChoices,SOURCE_BINDING_EXAMPLE,PREMISE_SOURCE_SECTIONS} from './premise-source-bindings';
@@ -86,8 +86,10 @@ it('resolves numbered contiguous source clauses to exact original text before ev
  expect(result.selected[0].storyCore).toBe(seed.storyCore);
  expect(indexedPremiseSourcePool([seed])[0].storyCore).toContain('[P1:2:2]邻居看到桥面能站人，[P1:2:3]选择带来工具共同修桥。');
  expect(resolvePremiseSourceReference(seed,'P1:2:2-3')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
- expect(PREMISE_SOURCE_REFERENCE_DIRECTIVE).toContain('P1:2:3-5');
- expect(premiseCausalReferenceExample()[0].action.sourceRef).toBe('本项真实ID:2:3-5');
+ expect(PREMISE_SOURCE_REFERENCE_DIRECTIVE).toContain('完整方括号标记');
+ expect(PREMISE_SOURCE_REFERENCE_DIRECTIVE).toContain('禁止照抄模板占位地址');
+ expect(resolvePremiseSourceReference(seed,'[P1:2:2-3]')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
+ expect(resolvePremiseSourceReference(seed,' [P1:2:2-3] ')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
  for(const ref of ['P1:2:2-2:3','P1:2:2-P1:2:3']){
   expect(resolvePremiseSourceReference(seed,ref)).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
   const raw={...chosen,causalPlan:[{action:{sourceRef:ref},
@@ -99,7 +101,7 @@ it('resolves numbered contiguous source clauses to exact original text before ev
  expect(seed.storyCore).not.toContain('[2]');
 });
 
-it.each(['P2:2:1','P1:2:99','P1:4:4-2','P1:6:1','P1:4:1-P1:5:1','P1:2:2-3:3','P1:2:2-P2:2:3','P1:2:4-2:3','P1:2:2-P1:3:3','P1:2:2-P1:2:99'])('rejects a cross-owner, missing or noncontiguous source address: %s',ref=>{
+it.each(['[P2:2:1]','[P1:2:99]','[P1:2:2-P1:3:3]','P2:2:1','P1:2:99','P1:4:4-2','P1:6:1','P1:4:1-P1:5:1','P1:2:2-3:3','P1:2:2-P2:2:3','P1:2:4-2:3','P1:2:2-P1:3:3','P1:2:2-P1:2:99'])('rejects a cross-owner, missing or noncontiguous source address: %s',ref=>{
  expect(resolvePremiseSourceReference(seed,ref)).toBeUndefined();
  const raw=nomination();(raw.causalPlan[0] as any).action={field:'activeChoice',sourceRef:ref};
  expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
