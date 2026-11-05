@@ -236,13 +236,16 @@ const projectTargets = singleMode
 
 function chapterSummary(chapter) {
   if (!chapter) return null;
-  const content = String(chapter.content ?? chapter.body ?? '');
+  // Chapter LIST intentionally omits content; only the detail API can prove
+  // whether it is empty. A nonzero word_count on the list is not body proof.
+  const contentKnown = typeof chapter.content === 'string' || typeof chapter.body === 'string';
+  const content = contentKnown ? String(chapter.content ?? chapter.body) : '';
   return {
     id: chapter.id ?? null,
     index: chapter.chapter_index ?? chapter.chapterIndex ?? chapter.index ?? chapter.order ?? null,
     title: chapter.title ?? null,
     status: chapter.status ?? null,
-    contentLength: content.length,
+    contentLength: contentKnown ? content.length : null,
     wordCount: Number(chapter.word_count ?? chapter.wordCount ?? 0) || 0,
     locked: chapter.locked ?? chapter.is_locked ?? null,
   };
@@ -311,6 +314,15 @@ async function inspectProject(target) {
     const bi = Number(b.chapter_index ?? b.chapterIndex ?? b.index ?? b.order ?? 0);
     return ai - bi;
   });
+  // The list endpoint is metadata-only by design. Query ONE first-chapter
+  // detail before claiming the chapter has empty prose; do not fetch every
+  // chapter or use a stale word count as a substitute for persisted text.
+  const firstDetailRes = chapterRows[0]?.id
+    ? await request(`/projects/${encodeURIComponent(projectId)}/chapters/${encodeURIComponent(chapterRows[0].id)}`)
+    : null;
+  const firstDetail = firstDetailRes?.ok ? unwrap(firstDetailRes.data) : null;
+  const firstChapterRecord = firstDetail && String(firstDetail.id || '') === String(chapterRows[0]?.id)
+    ? firstDetail : chapterRows[0];
   const runRows = asArray(runsRes.data);
   const constitution = project?.creativeConstitution ?? project?.creative_constitution ?? projectSettings?.creativeConstitution ?? null;
   const confirmedStory = constitution?.confirmedStory && typeof constitution.confirmedStory === 'object' && !Array.isArray(constitution.confirmedStory)
@@ -381,8 +393,8 @@ async function inspectProject(target) {
     } : { id: projectId, error: projectRes.error ?? `HTTP ${projectRes.status}` },
     chapters: {
       count: chapterRows.length,
-      first: chapterSummary(chapterRows[0]),
-      latest: chapterSummary(chapterRows[chapterRows.length - 1]),
+      first: chapterSummary(firstChapterRecord),
+      latest: chapterSummary(chapterRows.length === 1 ? firstChapterRecord : chapterRows[chapterRows.length - 1]),
     },
     firstChapterRun: runSummary(firstChapterRun),
     latestRun: runSummary(runRows[0]),
@@ -390,7 +402,11 @@ async function inspectProject(target) {
     stepBreakdown: stepBreakdown(runRows.map(runDetail)),
     runtimeSources: {
       project: { ok: projectRes.ok, status: projectRes.status, error: projectRes.error ?? null },
-      chapters: { ok: chaptersRes.ok, status: chaptersRes.status, error: chaptersRes.error ?? null },
+      chapters: { ok: chaptersRes.ok, status: chaptersRes.status, error: chaptersRes.error ?? null,
+        firstChapterDetail: { ok: firstDetailRes?.ok ?? false,
+          status: firstDetailRes?.status ?? null,
+          error: firstDetailRes?.error ?? null,
+          sameIdentity: Boolean(firstDetail && String(firstDetail.id || '') === String(chapterRows[0]?.id)) } },
       runs: { ok: runsRes.ok, status: runsRes.status, error: runsRes.error ?? null, returned: runRows.length, limit: 200 },
       cockpit: { ok: cockpitRes.ok, status: cockpitRes.status, error: cockpitRes.error ?? null },
       integrity: { ok: integrityRes.ok, status: integrityRes.status, error: integrityRes.error ?? null },
@@ -645,7 +661,8 @@ if (health.ok) for (const target of projectTargets) {
   const firstChapter = result.chapters?.first ?? null;
   const shouldRequireFirstChapter = runFull || projectStatus === 'active';
   if (shouldRequireFirstChapter) {
-    if (!firstChapter || firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
+    if (!firstChapter || firstChapter.contentLength === null) runtimeProblems.push(`${prefix}_first_chapter_content_unverified`);
+    else if (firstChapter.contentLength <= 0) runtimeProblems.push(`${prefix}_first_chapter_empty`);
     const firstRun = result.firstChapterRun;
     if (!firstRun) {
       runtimeProblems.push(`${prefix}_first_chapter_run_missing`);
@@ -756,7 +773,7 @@ function projectMarkdown(target) {
   if (result.project?.error) return `### ${target.label}\n\n- 项目：FAIL · ${result.project.error}`;
   const firstChapter = result.chapters?.first ?? null;
   const firstLine = firstChapter
-    ? `${firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
+    ? `${firstChapter.contentLength === null ? 'UNVERIFIED' : firstChapter.contentLength > 0 ? 'PASS' : 'FAIL'} · length=${firstChapter.contentLength ?? 'unknown'} · wordCount=${firstChapter.wordCount} · status=${firstChapter.status ?? 'unknown'}`
     : '未生成第一章';
   const gateLine = result.firstChapterRun
     ? `${result.firstChapterRun.gate_status ?? result.firstChapterRun.gateStatus ?? 'missing'} · run=${result.firstChapterRun.id ?? 'unknown'} · status=${result.firstChapterRun.status ?? 'unknown'} · model=${result.firstChapterRun.model ?? 'unknown'}`
