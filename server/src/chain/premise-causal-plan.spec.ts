@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs, premiseCausalPlanExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs, premiseCausalPlanExample, premiseCausalReferenceExample, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE } from './premise-causal-plan';
 import { applyOrderedIdeaRepairPatches, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { materializePremisePayoffReview, premisePayoffReviewIssues } from './premise-payoff-review';
 import { materializePremiseSourceReview, normalizePremiseReselection, premiseSourceComparisonCatalog } from './premise-selection-review';
@@ -50,6 +50,14 @@ it('rebinds whitespace-only citation differences without inventing missing causa
  const repeated=structuredClone(original);
  repeated.activeChoice=original.activeChoice+'又一次：'+original.activeChoice;
  expect(premiseCausalPlanIssues(bindPremiseCausalPlan(repeated))).not.toEqual([]);
+});
+it('keeps numbered evidence examples purely structural, never a copyable fake source address',()=>{
+ const shape=premiseCausalReferenceExample();
+ expect(shape).toHaveLength(1);
+ for(const anchor of [shape[0].action,...shape[0].conditions,shape[0].result]){
+   expect(anchor.sourceRef).toContain('从本题材真实原池编号表复制');
+   expect(anchor.sourceRef).not.toMatch(/^P\\d+:[1-5]:\\d+/);
+ }
 });
 describe('plan critical prerequisites before full story cards',()=>{
   it('models intermediate result before payoff and teaches generation to keep later prerequisites separate',()=>{
