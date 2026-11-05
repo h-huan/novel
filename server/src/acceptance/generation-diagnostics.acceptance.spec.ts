@@ -54,6 +54,17 @@ const makePremiseSelectionFixture = (count = 5) => ({
   })),
 });
 
+/** Mock generation follows server-owned slots; only the initial transport
+ * identity/category envelope changes, not any independent story review. */
+function fixturePoolWithLockedSlots(input:any,pool:readonly Record<string,any>[]){
+ const marker='【生成前锁定的候选槽位】';
+ const slots=JSON.parse(String(input.prompt).split(marker)[1]?.split('\n')[0]||'[]') as
+  {premiseId:string;storyCategoryId:string}[];
+ return pool.map((item,index)=>({...item,
+  premiseId:slots[index]?.premiseId??item.premiseId,
+  storyCategoryId:slots[index]?.storyCategoryId??item.storyCategoryId}));
+}
+
 function promptArray(prompt: string, marker: string, terminator: string, optional = false): any[] {
   const markerAt = prompt.indexOf(marker);
   if (markerAt < 0) {
@@ -280,7 +291,7 @@ it.each(['baseline','refill','streaming','prepare','prepare_rejected','prepare_e
       if (step === 'idea_premise_pool_generation') {
         expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
         expect(input.prompt).toContain('分类不能靠结尾点题或改标签补救');
-        return { content: JSON.stringify({ pool: makePremiseSelectionFixture(partialFixture ? 4 : 5).pool }) };
+        return { content: JSON.stringify({ pool: fixturePoolWithLockedSlots(input,makePremiseSelectionFixture(partialFixture ? 4 : 5).pool) }) };
       }
       if (step === 'idea_premise_selection' || step === 'idea_premise_refill_selection') {
         expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
@@ -606,7 +617,7 @@ it('injects the user-declared custom platform standard into the idea prompt as t
       generationCall += 1;
       prompts.push(String(input.prompt));
       if (input.metrics?.stepKey === 'idea_premise_pool_generation') {
-        return { content: JSON.stringify({ pool: makePremiseSelectionFixture(5).pool }) };
+        return { content: JSON.stringify({ pool: fixturePoolWithLockedSlots(input,makePremiseSelectionFixture(5).pool) }) };
       }
       if (input.metrics?.stepKey === 'idea_premise_selection') {
         return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
