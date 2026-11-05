@@ -6871,8 +6871,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       .map(item=>({premiseId:item.premiseId,storyCore:item.storyCore}));
     const response = await this.realLLM.generate({
       prompt: PREMISE_CAUSAL_SEQUENCE_DIRECTIVE + PREMISE_SOURCE_REFERENCE_DIRECTIVE
-        + '\n只修点名题材的causalPlan原文地址，优先复制【原池分句编号】中真实的sourceRef，不复写原文或推测字段。编号属于唯一同ID原池，服务器会逐字回填；若需分句内更短证据，保留原有{field,quote}格式。不得新增、改写任何故事事实、身份、成立条件或结局。每步行动和结果必须实质不同，结局有多次独立决定时须逐一覆盖，普通直接因果可以一环。修复引用不代表因果已成立，后续独立Gate仍逐项审核。只返回JSON:{"plans":[{"premiseId":"点名ID","causalPlan":'
-        + '每一环仅保留action:{sourceRef}、conditions:[{sourceRef}]、result:{sourceRef}；其中conditions可以为空数组。必须逐条从下方当前原池目录选择真实编号，不能使用任何示例或占位编号。']}；恰好覆盖全部点名ID，不返回其它字段。'
+        + '\n只修点名题材的causalPlan原文地址，优先复制【原池分句编号】中真实的sourceRef，不复写原文或推测字段。编号属于唯一同ID原池，服务器会逐字回填；若需分句内更短证据，保留原有{field,quote}格式。不得新增、改写任何故事事实、身份、成立条件或结局。每步行动和结果必须实质不同，结局有多次独立决定时须逐一覆盖，普通直接因果可以一环。修复引用不代表因果已成立，后续独立Gate仍逐项审核。'
+        + '\n只返回一个JSON对象：顶层仅有plans数组，数组每项仅含premiseId与causalPlan；causalPlan是实际关键环节的数组，每环action、result只包含从下方当前原池目录选择的sourceRef，conditions是同类引用的数组（普通直接因果可为空）。必须恰好覆盖全部点名ID，不得使用模板占位地址或返回额外字段。'
         + '\n【原池分句编号（与首次选优同一来源）】' + JSON.stringify(sourceCatalog)
         + '\n【不可修改的实际故事字段与索引问题】sameTextAs仅表示同题材内与指向字段完全相同的既有原文，按该字段展开后逐字核对；这只压缩重复传输，不改变可引用事实。' + JSON.stringify(targets.map(compactRepeatedPremiseText)),
       scenario: 'idea_generate', responseFormat: 'json_object', temperature: 0.1,
