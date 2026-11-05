@@ -178,8 +178,8 @@ it('aggregates five rejected preselection positions once, then retains independe
     }))},current);
   });
   controller.llmCallWithRetry=vi.fn(async(_name:string,prompt:string,options:any)=>{
-    expect(prompt).toContain('replacements恰好4项');
-    const from=['D','E','F','G'],to=['I','J','K','L'];
+    expect(prompt).toContain('replacements恰好5项');
+    const from=['D','E','F','G','H'],to=['I','J','K','L','M'];
     const data={replacements:from.map((id,index)=>({
       replacesPremiseId:id,premise:premise(to[index]),
     }))};
@@ -219,7 +219,7 @@ it('does not spend an optional hedge when reselection allowance is unavailable',
    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
  });
 
-it('uses only already-funded preselection hedge slots when the final five cards have not yet been reviewed',async()=>{
+it('uses the full existing funded preselection reserve before costly full-card reviews',async()=>{
  const ids='ABCDEFGHIJK'.split('');
  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
    selectedPremises:ids.slice(0,8).map(premise)},8,15);
@@ -233,10 +233,11 @@ it('uses only already-funded preselection hedge slots when the final five cards 
    }))},current);
  });
  controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-   expect(prompt).toContain('replacements恰好2项');
+   expect(prompt).toContain('replacements恰好3项');
    const data={replacements:[
      {replacesPremiseId:'F',premise:premise('I')},
      {replacesPremiseId:'G',premise:premise('J')},
+     {replacesPremiseId:'H',premise:premise('K')},
    ]};
    expect(options.validate(data)).toBe(true);
    return {data};
@@ -244,7 +245,7 @@ it('uses only already-funded preselection hedge slots when the final five cards 
  const shared={reviews:{remaining:12},reselection:{remaining:3}};
  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],shared,5);
  expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I','J']);
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I','J','K']);
  expect(result.selectionAudit.reselectionAttempted).toBe(true);
  expect(result.selectionAudit.finalReview.passed).toBe(true);
  // The source, pair and selection Gates all still run from the SAME physical allowance.
