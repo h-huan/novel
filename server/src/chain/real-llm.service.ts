@@ -12,7 +12,7 @@ import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, expandCausalReviewedResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -791,8 +791,14 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         // Literal model quotes can be assigned a server-owned result ID only
         // when unique in the same chapter. Unknown, paraphrased or conflicting
         // IDs remain invalid; no causal proof or outcome is supplied by code.
+        const boundVerdict=bindCausalReviewEvidenceAddresses(rawVerdict,chapterEvidenceCatalog,evidenceAnchors,resultField);
+        // Exact same-chapter duplicate results may be cited by an alias
+        // present in the body catalog instead of the advertised representative.
+        // Rebind only the identity before validation; the LLM's action, bridge,
+        // status and negative verdict remain untouched.
         audit=materializeCausalAuditAnchors(
-          bindCausalReviewEvidenceAddresses(rawVerdict,chapterEvidenceCatalog,evidenceAnchors,resultField),body,sources);
+          !resultField?normalizeReviewedCausalResultAliases(boundVerdict,resultAliasesByReview,evidenceAnchors):boundVerdict,
+          body,sources);
         checked = validateCausalAudit(audit, body, sources);
         const addressErrors=causalChapterEvidenceAddressIssues(audit,chapterEvidenceCatalog,resultField);
         if(addressErrors.length){checked.verified=false;checked.errors.push(...addressErrors);}
