@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -524,4 +524,44 @@ it('never aliases same words across different chapters or changed assertions',()
  expect(Object.keys(aliasesByReview)).toHaveLength(0);
  const foreign={transitions:[{chapterNumber:3,resultAnchorId:entries[0].resultAnchorIds[0],status:'gap'}]};
  expect(normalizeReviewedCausalResultAliases(foreign,aliasesByReview,anchors)).toEqual(foreign);
+});
+
+
+it('splits a hundred independent final-scene claims into two complete-chapter audits without dropping obligations',()=>{
+ const chapters=[1,2,3].map(chapterNumber=>({
+  chapterNumber,chapterFunction:'resolution',
+  scenes:Array.from({length:18},(_,i)=>({outcome:'第'+chapterNumber+'章第'+(i+1)+'个真实结果已生效。'})),
+  characterActions:Array.from({length:16},(_,i)=>({result:'第'+chapterNumber+'章第'+(i+1)+'项人物行动有结果。'})),
+ }));
+ const groups=causalPlanningProofGroups(chapters);
+ expect(groups).toHaveLength(2);
+ expect(groups.flat()).toEqual(chapters);
+ expect(groups.every(group=>group.length>0)).toBe(true);
+ const original=chapters.reduce((n,chapter)=>
+   n+causalChapterResultReviewGroups(causalEvidenceAnchors(JSON.stringify([chapter]),{}),0).review.length,0);
+ const distributed=groups.flat().reduce((n,chapter)=>
+   n+causalChapterResultReviewGroups(causalEvidenceAnchors(JSON.stringify([chapter]),{}),0).review.length,0);
+ expect(original).toBeGreaterThan(100);
+ expect(distributed).toBe(original);
+ expect(causalPlanningProofGroups(chapters.slice(0,1))).toEqual([chapters.slice(0,1)]);
+ expect(causalPlanningProofGroups(chapters.slice(0,2),1000)).toEqual([chapters.slice(0,2)]);
+});
+
+it('limits a targeted missing-result correction to the matching chapter while retaining global world evidence',()=>{
+ const chapters=[{chapterNumber:1,content:'他保留登记凭证。',scenes:[{outcome:'第一章的登记成立。'}]},
+   {chapterNumber:2,content:'她向窗口提交申请。',scenes:[{outcome:'第二章的窗口收到申请。'}]},
+   {chapterNumber:3,content:'第三章有人要求作出决定。',scenes:[{outcome:'第三章的处理结果待定。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const missing=causalChapterResultAnchors(anchors,1)[0];
+ const review={status:'evaluated',transitions:[{chapterNumber:2,resultAnchorId:missing.id}]};
+ const reason=['第1项因果审查缺少该出口结果的行动及成立条件'];
+ const prompt=causalAuditRepairPrompt(review,reason,body,{project_context:JSON.stringify({worldRules:'窗口收到申请不等于审批通过。'})}).prompt;
+ const segment=prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\\n本次仅纠正编号')[0];
+ const choices=JSON.parse(segment);
+ expect(choices.some((a:any)=>a.id===missing.id)).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('她向窗口提交申请'))).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('窗口收到申请不等于审批通过'))).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('他保留登记凭证'))).toBe(false);
+ expect(choices.some((a:any)=>a.text.includes('第三章有人要求'))).toBe(false);
+ expect(prompt).toContain('遗漏结果尚未经语义审核');
 });
