@@ -159,13 +159,13 @@ it('plans optional screening surplus and funded per-premise reviews together wit
  const refill=premiseReviewCallFloor(5,2,0),initial=12-refill;
  const firstGroups=fundedSourceReviewGroups(count,2,initial-1,7,0);
  expect(firstGroups).toBe(4);
- // One source/overlap correction of up to four rejected identities still fits.
+ // Original correction capacity remains available without extra fine-partition spending.
  expect(firstGroups+1+premiseReviewCallFloor(4,2,0)+refill).toBe(12);
  expect(fundedSourceReviewGroups(5,2,5,7,0)).toBe(3);
- expect(fundedSourceReviewGroups(5,2,9,7,0)).toBe(5);
- expect(fundedSourceReviewGroups(5,3,9,4,0)).toBe(4); // one wave, no 5th serial call
+ expect(fundedSourceReviewGroups(5,2,9,7,0)).toBe(3);
+ expect(fundedSourceReviewGroups(5,3,9,4,0)).toBe(2); // two full independent groups, corrections reserved
  expect(fundedSourceReviewGroups(5,3,9,3,0)).toBe(2); // unfunded fine grouping stays bounded
- expect(fundedSourceReviewGroups(8,2,13,5,0)).toBe(5); // eight full premises, five source groups
+ expect(fundedSourceReviewGroups(8,2,13,5,0)).toBe(4); // eight full premises, four fully audited source groups
  expect(fundedSourceReviewGroups(5,3,9,4,1)).toBe(2); // manual grouping mode unchanged
 
  expect(plannedPreselectionCount(5,8,12,3,0,7)).toBe(8);
@@ -194,4 +194,13 @@ it('does not freeze a prepared refill at a deficit that can still grow before th
 
 it('uses eight minutes only as the discovery performance acceptance target',()=>{
  expect(IDEA_DISCOVERY_MAX_WALL_MS).toBe(8*60*1000);
+});
+
+it('does not turn spare review credits into repeated source partitions when the batch already fits',()=>{
+ for(const capacity of [2,4,8,12]) {
+  expect(fundedSourceReviewGroups(6,3,capacity,6,0)).toBe(capacity<2?0:2);
+  expect(fundedSourceReviewGroups(6,3,capacity,1,0)).toBe(capacity<2?0:2);
+ }
+ expect(fundedSourceReviewGroups(6,3,1,6,0)).toBe(0);
+ expect(fundedSourceReviewGroups(5,2,9,2,0)).toBe(fundedSourceReviewGroups(5,2,9,8,0));
 });
