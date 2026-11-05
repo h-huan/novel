@@ -302,6 +302,36 @@ export function validateCausalAudit(value: any, content: string, sources: Record
   return { verified: errors.length === 0, errors, issues };
 }
 
+/** A last reviewer response can supply genuine action and outcome quotes but
+ * leave a supported bridge unproven. After the existing citation correction
+ * was exhausted, record this as a BLOCKING causal gap rather than treating
+ * the whole chapter as an opaque protocol error. No condition or outcome is
+ * synthesized, and the calling quality gate must still reject the draft.
+ * Never convert missing action/result, conflicting addresses or incomplete
+ * audit coverage. */
+export function quarantineUnprovedCausalBridges(
+ audit:any,errors:readonly string[],content:string,sources:Record<string,string>,
+){
+ if(audit?.status!=='evaluated'||!Array.isArray(audit?.transitions)||!errors.length
+   ||errors.some(error=>!/^第[1-9]\\d*项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）$/.test(error)))return audit;
+ const indices=[...new Set(errors.map(error=>Number(error.match(/^第(\\d+)项/)?.[1])-1))];
+ if(indices.some(index=>!Number.isInteger(index)||index<0||index>=audit.transitions.length))return audit;
+ const selected=new Set(indices);
+ const transitions=audit.transitions.map((row:any,index:number)=>{
+  if(!selected.has(index))return row;
+  if(row?.status!=='supported'||typeof row.reason!=='string'||row.reason.trim().length<8
+    ||!resolveQualityEvidence(content,row.actionEvidence).verified
+    ||!resolveQualityEvidence(content,row.resultEvidence).verified)return null;
+  const source=row.basisSource==='body'?content:sources[row.basisSource];
+  if(resolveQualityEvidence(source||'',row.bridgeEvidence).verified)return null;
+  return {...row,status:'gap',bridgeAnchorId:'',bridgeEvidence:'',basisSource:'body',
+    reason:'原因果审查未提供可验证的结果成立条件，须修复章节事实或收回过度断言：'+row.reason};
+ });
+ if(transitions.some(row=>row===null))return audit;
+ const reduced={...audit,transitions};
+ return validateCausalAudit(reduced,content,sources).verified?reduced:audit;
+}
+
 export function causalAuditRepairTargets(audit:any,errors:string[]) {
  if(!Array.isArray(audit?.transitions))return [];
  const targets=[...new Set(errors.flatMap(error=>{const match=error.match(/^第(\d+)项因果审查/);return match?[Number(match[1])-1]:[]}))];
