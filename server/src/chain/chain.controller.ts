@@ -7224,12 +7224,25 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
-        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= missingSlots;
-        const enoughSharedBudget = !shared
-          || (shared.reselection.remaining > 0 && shared.reviews.remaining >= 2);
-        // A screened surplus is not user demand. Keep the existing final-card
-        // refill reserve for a deficit proven by the original full-card Gate.
-        if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
+        // A surviving 5/5 preselection is NOT five approved final cards. If
+        // this very review proved that other preselected premises are bad,
+        // use the existing fixed-pool correction slots for a small vetted
+        // hedge while the first approved cards can already be structured.
+        // Do not add provider credits, invent extra slots, or demand eight
+        // final deliveries from a five-card author request.
+        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= recoverySlots.length;
+        const group=readGenerationBudgets();
+        const requiredRecoveryReviewCalls=recoverySlots.length
+          ?minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
+            group.sourceBatchSize,group.reviewGroupingMode):0;
+        const enoughSharedBudget = !shared || (shared.reselection.remaining > 0
+          && shared.reviews.remaining >= requiredRecoveryReviewCalls);
+        const affordablePreselectionHedge = recoverySlots.length > 0
+          && partialSelection.selected.length < requestedCount
+          && enoughOriginalCandidates && enoughSharedBudget;
+        // Stop ONLY if the original, unchanged call allowance cannot fund
+        // the optional hedge. Final quality acceptance remains independent.
+        if (!affordablePreselectionHedge) {
           const capacityMet=missingSlots===0;
           const capacityMessage='锁定前筛选保留 '+partialSelection.selected.length+' 个独立复核合格候选；目标交付 '+deliveryCount
             +(capacityMet?' 张，当前候选容量已达到最低交付目标，完整卡终审仍待执行；不为可选冗余继续换选。':' 张，原池候选或共享预算不足，仍有实际缺额。');
