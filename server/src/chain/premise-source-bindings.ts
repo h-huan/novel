@@ -67,9 +67,13 @@ export function indexedPremiseSourcePool<T extends Record<string,unknown>>(pool:
 /** A sourceRef is an address, never an inferred causal relationship. */
 export function resolvePremiseSourceReference(seed:Record<string,unknown>,ref:unknown):string|undefined {
  if(typeof ref!=='string')return;
- const match=/^([^:]+):([1-5]):([1-9]\d*)(?:-([1-9]\d*))?$/.exec(ref);
- if(!match||match[1]!==String(seed.premiseId))return;
- try{const section=premiseSourceSections(seed)[Number(match[2])-1],start=Number(match[3]),end=Number(match[4]||match[3]);
+ // Canonical ID:section:start-end; legacy expanded endpoints resolve only
+ // when their owner and section exactly match the first endpoint.
+ const match=/^([^:]+):([1-5]):([1-9]\d*)(?:-(?:(?:([^:]+):)?([1-5]):)?([1-9]\d*))?$/.exec(ref);
+ if(!match||match[1]!==String(seed.premiseId)
+   ||match[4]!==undefined&&match[4]!==match[1]
+   ||match[5]!==undefined&&match[5]!==match[2])return;
+ try{const section=premiseSourceSections(seed)[Number(match[2])-1],start=Number(match[3]),end=Number(match[6]||match[3]);
   if(end<start||end>section.clauses.length)return;
   return section.clauses.slice(start-1,end).join('');
  }catch{return;}
