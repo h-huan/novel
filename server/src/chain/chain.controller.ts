@@ -5145,7 +5145,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
               '主动选择':'主角和对手具体采取什么行动，又如何引发新的局势。',
-              '必要条件':'逐项对应反转/兑现中的每个决定性结果：本人可直接实施什么动作；若依赖他人批准、判决、撤案、赔偿或改口，谁有权决定、证据如何取得传递与核验、他为何采纳、何时实际决定并执行。不能仅写请求、送检或指控。',
+              '必要条件':'逐项对应反转兑现中的每一个独立的已完成结果，在本节写出：实际执行者与结果对象、行动前已存在的权限或物证、物证的真实取得与接收人、审核/决定者为何依据它作出何种决定及生效时间。抓人、撤销停职、撤股、赔偿、给名额、调走职务等属于不同的结果，每一项都要单独成立；没有写出执行和条件的，只能在反转节写待查或尚未完成，不能把结果反当成立依据。普通直接动作不需额外程序。',
               '反转兑现':'写明由谁实施什么行动，只写已由前节行动和成立条件真正导致的结果、反击与代价；有权者尚未作决定的事项只能写申请或待定，不能自动写成胜诉、撤案、认罪、获奖、赔偿。不能用新结果反过来证明条件已满足。',
               '分类流派机制':'仅指出前四节已发生的分类流派机制、对手误判及代价；不新增决定性事实。',
             },
@@ -5167,7 +5167,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、独特局势变化与代价比较本批候选，弱方案在本次生成内重构；输出pool按成熟度由强到弱排序。本批只输出pool，不输出selectedPremises、分数、自评或淘汰过程；该顺序仅供全池选优，不能替代后续独立审核。',
-           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段以及本次需要自动确定的创作维度。只输出storySections，不再输出storyCore；服务器把五节原文按序无损拼接为唯一storyCore，继续使用全部原有审核、因果索引与持久化。五节合计优先控制在300—500汉字，不能为压字数删掉已发生的必要条件；各节必须有具体独立事件，不能把所有事实挤在一节。先确定可兑现结果，再倒查真实行动、证据取得与权限、对手反制和代价。发现异常材料不等于证明具体责任人，客户称赞不等于管理者任命，提交申请不等于主管机关批准；此类实际桥接须在原池写清，不得留到后续补位。',
+           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。五节合计优先300—500汉字，但不得压缩掉因果条件，每节有独立事件。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；缺失者须在这一轮改为真实可兑现的结果或重新构思本槽位，不能把修故事留到后续付费审核。',
           '按已注入GEN-002的分类关系、必要条件、内部事实一致与实质差异要求构思。承担结果的人物选择与必要条件须已实际发生。初次生成时先确定可兑现的具体结果，再倒查谁实际执行、影响哪些对象、怎样取得证据或权限、对手为何会配合或反制；把必需的真实条件写在前四节里，不能仅在第五节贴流派标签。安排一次主动选择后的局势变化，再有真实新阻力和不同的第二次变化；普通短篇不必机械凑环节。若仅有被轻视、亮本事、众人服气，或者既有行动全部成立而所称结果仍可能不成立，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。同批不同身份不能共享一条低职位忍让、保留账本或日志、借第三方逼主管签批、公开对照记录、上级受罚而主角离职的完整胜负机制；同属扮猪吃虎可以，但具体获胜策略、意外升级与二次代价要从第一次生成就有真实差异，不得以职业、年代、道具变化冒充。输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
@@ -7226,8 +7226,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // refill reserve for a deficit proven by the original full-card Gate.
         if (missingSlots === 0 || !enoughOriginalCandidates || !enoughSharedBudget) {
           const capacityMet=missingSlots===0;
-          this.logger?.warn('锁定前筛选保留 ' + partialSelection.selected.length + '/' + deliveryCount
-            +(capacityMet?' 个已独立复核题材，已满足本次成卡容量；不为可选冗余继续换选。':' 个已独立复核题材；原池候选或共享预算不足，保留真实缺额。'));
+          const capacityMessage='锁定前筛选保留 '+partialSelection.selected.length+' 个独立复核合格候选；目标交付 '+deliveryCount
+            +(capacityMet?' 张，当前候选容量已达到最低交付目标，完整卡终审仍待执行；不为可选冗余继续换选。':' 张，原池候选或共享预算不足，仍有实际缺额。');
+          if(capacityMet)this.logger?.log(capacityMessage);
+          else this.logger?.warn(capacityMessage);
           return { ...partialSelection, selectionAudit: {
             initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
             minimumSelectableCount, deliveryShortfall:missingSlots, selectionStopReason:capacityMet?'delivery_capacity_met':'original_pool_or_budget_shortfall',
@@ -7235,8 +7237,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             completeCardGatePending: true,
           } };
         }
-        this.logger?.warn('锁定前已有 ' + partialSelection.selected.length + '/' + deliveryCount
-          + ' 个审核合格预选题材；在原池与共享预算内补齐待审核预选容量，而不只是凑齐交付数量。');
+        this.logger?.log('锁定前已有 '+partialSelection.selected.length+' 个审核合格预选候选；目标交付 '+deliveryCount
+          +' 张，使用原有预算补齐可选预选容量。');
         break;
       }
     }
@@ -7440,9 +7442,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     if (isolatedIds.length) {
       selected = { ...selected, selected: selected.selected.filter(item=>!isolatedIds.includes(String(item.premiseId))) };
       if (!selected.selected.length)this.logger?.warn('锁定前所有原选项均被隔离；禁止重新接受失败旧身份，改由一次轻量候选补足决定是否仍能交付。');
-      this.logger?.warn('锁定前隔离 '+isolatedIds.join('、')+'（未完成本轮补位位置 '
-        +unresolvedIds.length+'，无需继续修复的冗余候选 '+rejectedExtraIds.length
-        +'），仅复核剩余 '+selected.selected.length+'/'+deliveryCount+' 个交付题材。');
+      const actualCandidateGap=Math.max(0,deliveryCount-selected.selected.length);
+      const isolationMessage='锁定前隔离 '+isolatedIds.join('、')+'（未完成本轮补位位置 '
+        +unresolvedIds.length+'，隔离可选冗余候选 '+rejectedExtraIds.length
+        +'）；保留 '+selected.selected.length+' 个待独立复核候选，目标交付 '+deliveryCount
+        +' 张'+(actualCandidateGap?'，当前仍缺 '+actualCandidateGap+' 个候选':'，目前候选数量满足交付目标；不代表完整卡已合格')+'。';
+      if(actualCandidateGap)this.logger?.warn(isolationMessage);
+      else this.logger?.log(isolationMessage);
     }
     if(!selected.selected.length){
       // An empty reviewed set has no source links to re-audit. Preserve the
@@ -8673,7 +8679,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 【唯一故事基准】${canonicalCreativeBrief}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
-能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准；不得新增与已确认事实互斥的限制、万能证据或调查渠道。口述、记忆与原始记录应按本故事已确认的能力和证据边界区别处理。
+能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准；不得新增与已确认事实互斥的限制、万能证据或调查渠道。口述、记忆与原始记录应按本故事已确认的能力和证据边界区别处理。多人协作时逐项区分谁引路/开门/授权、谁必须亲自取得原件、谁保管或移交证据、谁依法或按规则作出决定；陪同者能带路并不代表他可以代替限定的本人执行取回动作。世界观所有层级及factions.protagonistRelation均须继承该实际动作归属，不能用“替其取回”等模糊关系词把本人限定动作转移给主角。
 ${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : '【主角身份约束】题材未确认主角实名时，保留第一人称/匿名叙述身份，不得为主角新增姓名、姓氏或绰号；可用“我”指代。\n'}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
 按已注入AUTH-002世界资料补全边界执行。
