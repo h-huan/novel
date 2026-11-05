@@ -273,6 +273,44 @@ export function causalChapterEvidenceAddressIssues(
  });
 }
 
+/** A reviewer can cite an exact duplicate field rather than the advertised
+ * representative result ID, because both remain in the body action catalog.
+ * Recover ONLY the identity of the already-reviewed identical claim in the
+ * same chapter. Never invent a verdict or overwrite a separately reviewed
+ * representative; differing texts and cross-chapter citations remain invalid.
+ * This prevents one correct alias citation from causing a redundant full
+ * missing-result correction and an otherwise false outline failure. */
+export function normalizeReviewedCausalResultAliases(
+ value:any, aliasesByReview:Record<string,string[]>,
+ anchors:ReturnType<typeof causalEvidenceAnchors>,
+){
+ if(!value||!Array.isArray(value.transitions)||!Object.keys(aliasesByReview).length)return value;
+ const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ const aliasToRepresentative=new Map<string,string>();
+ for(const [representativeId,aliasIds] of Object.entries(aliasesByReview)){
+  const representative=byId.get(representativeId);
+  for(const aliasId of aliasIds){
+   const alias=byId.get(aliasId);
+   const sameChapter=representative?.path?.split('.')[0]===alias?.path?.split('.')[0];
+   if(!representative||!alias||representative.source!=='body'||alias.source!=='body'
+     ||!sameChapter||representative.text!==alias.text)
+    throw new Error('同文因果审核别名与服务器目录不一致');
+   aliasToRepresentative.set(aliasId,representativeId);
+  }
+ }
+ const alreadyCovered=new Set<string>(value.transitions.flatMap((row:any)=>{
+   const id=String(row?.resultAnchorId||'');
+   return aliasToRepresentative.has(id)?[]:[id];
+ }));
+ return {...value,transitions:value.transitions.map((row:any)=>{
+  const alias=String(row?.resultAnchorId||'');
+  const representative=aliasToRepresentative.get(alias);
+  if(!representative||alreadyCovered.has(representative))return row;
+  alreadyCovered.add(representative);
+  return {...row,resultAnchorId:representative};
+ })};
+}
+
 /** Project a complete independent judgment to only identical literal claims.
  * The server re-validates every expanded quote; a missing reviewed identity,
  * missing source address or differing content is an error, never a pass. */
