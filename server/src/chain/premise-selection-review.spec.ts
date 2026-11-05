@@ -1319,7 +1319,7 @@ it('blocks independent late-stage payoff gaps before complete-card work without 
   const reviewer={passed:true,issues:[],outcomeChecks:[
     {premiseId:'A',status:'gap',claimQuote:'商人最终放弃对整条街的收购',
       reason:'供货纠错只说明该店一项经营失误，未建立放弃整条街收购的动机或约束条件'},
-    {premiseId:'B',status:'supported',claimQuote:'负责人当场撤销之前已经作出的错误处罚',
+    {premiseId:'B',status:'supported',claimQuote:'学徒因此继续留任',
       priorQuote:'负责人逐项核对原始交接凭据，确认处罚对象搞错',
       reason:'核验直接确认处罚对象错误，作出原决定的负责人能够纠正错误处罚'}
   ]};
@@ -1352,7 +1352,7 @@ it('does not turn missing silver into missing physical offerings or carry stale 
     payoff:'我成了王庭第一个女掌库，但叔父因此怀恨在心。'};
   const selected=normalizePremiseSelectionPayload({pool:[row],selectedPremises:[row]},1,1);
   const judgment={passed:true,issues:[],outcomeChecks:[{
-    premiseId:'B',status:'gap',claimQuote:'叔父却交不出祭品',
+    premiseId:'B',status:'gap',claimQuote:'我成了王庭第一个女掌库',
     reason:'银两的账目亏空不能证明实物祭品不足，叔父仍可用本次新贡或自有物资补足缺口',
   }]};
   const checked=materializePremiseOutcomeCounterfactualReview(judgment,selected);
