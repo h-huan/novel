@@ -199,7 +199,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, decodePremisePoolTransport, claimLockedPremiseSlot, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, decodePremisePoolTransport, claimLockedPremiseSlot, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, capRankedPremiseSelections, selectedPremiseEvidenceForIdeaCard } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -1188,7 +1188,7 @@ sourceConflicts只指两份已提供的资料源彼此互斥，必须指出两�
       const targets=chapterObligationRepairTargets(verdict?.obligationChecks,obligationReview.errors,obligationCatalog);
       if(!targets.length)return fail(obligationReview.errors);
       try {
-        const response=await this.realLLM.generate({prompt:chapterObligationReviewDirective(obligationCatalog.filter(row=>targets.includes(row.ref)))+'\n本次仅返回这些编号：'+JSON.stringify(targets)+'；保留其它行已成立结论。只修固定行动审查合同，不改正文、不改其它审查。错误：'+JSON.stringify(obligationReview.errors)+chapterObligationEvidencePrompt(verdict?.obligationChecks,targets,obligationReview.errors,input.content),scenario:'review',temperature:0.1,responseFormat:'json_object',maxTokens:LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,maxEmptyRetries:0,metrics:{projectId:input.projectId,chapterIndex:input.chapterIndex,stepKey:'alignment_obligation_contract'}});
+        const response=await this.realLLM.generate({prompt:chapterObligationEvidencePrompt(verdict?.obligationChecks,targets,obligationReview.errors,input.content,obligationCatalog),scenario:'review',temperature:0.1,responseFormat:'json_object',maxTokens:LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,maxEmptyRetries:0,metrics:{projectId:input.projectId,chapterIndex:input.chapterIndex,stepKey:'alignment_obligation_contract'}});
         const corrected=this.safeExtractJson<any>(response.content,null as any)?.obligationChecks;
         const owned=Array.isArray(corrected)?corrected.filter(row=>targets.includes(row?.ref)):corrected;
         obligationReview=validateChapterObligationReview(mergeChapterObligationRepairs(verdict?.obligationChecks,targets,materializeChapterObligationEvidence(owned,verdict?.obligationChecks,obligationReview.errors,input.content)),obligationCatalog,input.content);
@@ -5626,11 +5626,18 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             // index gets one plan-only correction before the unchanged strict
             // normalizer and independent source/payoff gates run.
             const returnedSelected=parsedSelection?.selectedPremises;
-            const rawSelected=projectPremiseSourceChoices(returnedSelected,candidatePool);
-            const boundCount=Array.isArray(returnedSelected)?returnedSelected.filter(row=>row?.sourceBindings!==undefined).length:0;
-            const projectedCount=Array.isArray(rawSelected)?rawSelected.filter((row,index)=>row!==returnedSelected[index]).length:0;
+            const admittedSelected=capRankedPremiseSelections(returnedSelected,preselectionTarget);
+            const overflowCount=Array.isArray(returnedSelected)?Math.max(0,returnedSelected.length-preselectionTarget):0;
+            if(overflowCount)this.logger.warn('idea-discover: selector returned '+returnedSelected.length
+              +' ranked identities for '+preselectionTarget+' funded slots; ignoring '+overflowCount+' surplus identities before source projection');
+            const rawSelected=projectPremiseSourceChoices(admittedSelected,candidatePool);
+            const boundCount=Array.isArray(admittedSelected)?admittedSelected.filter(row=>row?.sourceBindings!==undefined).length:0;
+            const projectedCount=Array.isArray(rawSelected)&&Array.isArray(admittedSelected)
+              ?rawSelected.filter((row,index)=>row!==admittedSelected[index]).length:0;
             Object.assign(poolGenerationAudit,{strategy:'parallel_lightweight_pool_then_fixed_identity_selection',
-              selectionTransport:{serverProjected:projectedCount,sourceBound:boundCount,legacyExpanded:Array.isArray(rawSelected)?rawSelected.length-boundCount-projectedCount:0}});
+              selectionTransport:{serverProjected:projectedCount,sourceBound:boundCount,
+                legacyExpanded:Array.isArray(rawSelected)?rawSelected.length-boundCount-projectedCount:0,
+                overflowIgnored:overflowCount}});
             this.logger.log('idea-discover: global selection serverProjected='+projectedCount+' sourceBound='+boundCount+' target='+preselectionTarget);
             const shaped = normalizePremiseSelectionPayload({
               pool: candidatePool,
@@ -6493,7 +6500,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 });
                 const raw=JSON.parse(jsonrepair(String(selectionAnswer.content||'{}')
                   .replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'')));
-                const source=projectPremiseSourceChoices(Array.isArray(raw.selectedPremises)?raw.selectedPremises:[],unusedSeeds);
+                const returnedRows=Array.isArray(raw.selectedPremises)?raw.selectedPremises:[];
+                const admittedRows=capRankedPremiseSelections(returnedRows,refillTarget);
+                if(returnedRows.length>refillTarget)this.logger.warn('idea-discover: refill selector returned '
+                  +returnedRows.length+' ranked identities for '+refillTarget+' funded slots; surplus ignored before review');
+                const source=projectPremiseSourceChoices(admittedRows,unusedSeeds);
                 const prelim=normalizePremiseSelectionPayload({
                   pool:unusedSeeds,
                   selectedPremises:source.map((item:any)=>{
