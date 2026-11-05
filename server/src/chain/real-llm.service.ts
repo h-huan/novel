@@ -12,7 +12,7 @@ import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -726,7 +726,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     }
   }
 
-  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState'): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
+  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState', singlePass = false): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
     request=bindModelRequestClock(request);
     let chapters: any[] = [];
     try { chapters = JSON.parse(content).volumes.flatMap((volume: any) => volume.chapters || [])
@@ -748,6 +748,26 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       return { verified: batches.every(batch => batch.verified), errors: batches.flatMap(batch => batch.errors),
         issues: batches.flatMap(batch => batch.issues), audit: batches.map(batch => batch.audit) };
     }
+    // A three-chapter review can contain over a hundred separately asserted
+    // results. A single huge answer was repeatedly dropping its final few
+    // IDs and spending the existing correction call on protocol recovery.
+    // Reallocate those SAME two physical calls into two parallel, smaller
+    // chapter-complete proofs. No extra retries, output skips, or budgets.
+    // Exit-state counterchecks require independent second judgment; they
+    // continue through the original two-attempt path unchanged.
+    if (!resultField && !singlePass) {
+      const balanced=causalPlanningProofGroups(chapters);
+      if (balanced.length>1) {
+        const split=await boundedDiscoveryMap(balanced,
+          adaptiveDiscoveryConcurrency(balanced.length),
+          group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),undefined,true));
+        const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
+        if(failure)throw failure.reason;
+        const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
+        return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
+          issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
+      }
+    }
     const body = JSON.stringify(chapters);
     const sources = { project_context: run.context || '{}', chapter_plan: JSON.stringify(request.planningSources || {}) };
     const evidenceAnchors = causalEvidenceAnchorOptions(body, sources);
@@ -759,7 +779,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       causalChapterEvidenceCatalog(chapters,bodyAnchors,resultField);
     let audit: any = null;
     let checked = { verified: false, errors: ['缺少关键场景行动结果审查'], issues: [] as any[] };
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < (singlePass ? 1 : 2); attempt++) {
       try {
         const countercheck = attempt > 0 && !!resultField;
         const prompt = countercheck ? {
