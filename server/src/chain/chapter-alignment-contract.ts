@@ -163,9 +163,12 @@ function chapterObligationParagraphAnchors(body:string){
  return causalEvidenceAnchors(body,{}).filter(row=>/^body:p[1-9]\d*$/.test(row.id))
    .map(({id,text})=>({id,text}));
 }
-export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string) {
+export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string,
+ catalog:ReturnType<typeof chapterObligationCatalog>=[]) {
  const anchors=chapterObligationParagraphAnchors(body);
- return '\n原正文段落证据目录（唯一可引用的编号）：'+JSON.stringify(anchors)
+ const targetSources=catalog.filter(row=>targets.includes(row.ref));
+ return '\n【仅纠正证据定位，不重新审判固定行动或改正文】本次章纲目标：'+JSON.stringify(targetSources)
+   +'\n原正文段落证据目录（唯一可引用的编号）：'+JSON.stringify(anchors)
    +'\n【合法编号全集】'+JSON.stringify(anchors.map(row=>row.id))
    +'\n禁止重写或转录引文、编造段落编号或使用句子/子句编号，只能从合法编号全集逐字选取body:p数字形式，用evidenceAnchorIds数组返回。对无法从原文证明的行动保留missing或unknown，不能杜撰证据升级covered。简短应答和结果段须连同真实行动上下文选择；仅引文定位错误时保留原status与reason，其它已成立结论不重判。错误：'+JSON.stringify(errors)
    +'\n原检查：'+JSON.stringify(Array.isArray(rows)?rows.filter(row=>targets.includes(row?.ref)):[])
