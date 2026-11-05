@@ -5,7 +5,7 @@ import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} f
 import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
 import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
-import { PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
+import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremiseText} from './premise-source-bindings';
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
@@ -5215,7 +5215,7 @@ ${excludeText}
 ${promptPhase === 'selection'
   ? '【选优终检：不得留给后续长时复审才发现】选定身份以前，须用原池五小节验证【必要条件】与【分类流派机制】是否确实在故事行动中成立；不能在展开筛选字段时新造原池未交代的关键决定者、到场、传递、权限及代价。然后逐对检查本次入选题材的主动选择、选择触发的升级、改变胜负的必要条件、兑现后的具体代价；两项在这四个因果作用上同构，即使职业、年代、道具和分类不同，也不可同时入选。直接从上述实际固定原池身份中改选另一条实际行动机制完整、来源因果成立的成熟题材，不新增或改写候选池；不能以凑满数量、只换名字或把不完整条件留给审核作为理由入选。此为选优前的自检，不输出自评分，不代替后续全部独立审查。'
   : ''}
-只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
+上述JSON结构里的<从本题材真实原池编号表复制>只是占位符，绝不是合法sourceRef；必须从当前实际编号目录逐项复制并核实。\n只输出一个合法 JSON 对象，不输出 Markdown、评分表、淘汰过程或思考过程。
 JSON 结构：${JSON.stringify(promptSchema)}`;
       };
 
@@ -7343,7 +7343,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         sourceBindings:SOURCE_BINDING_EXAMPLE,readerQuestion:'仅追问已有故事事实',
         causalPlan:premiseCausalReferenceExample(),
       };
-      const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
+      // Placeholder references in the JSON shape must be replaced by actual IDs\n      // from selectablePool, not copied as fake causal evidence.\n      const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
         replacesPremiseId:String(slot.replacesPremiseId),
         premise:citationOnlyIds.has(String(slot.replacesPremiseId))
           ?{premiseId:String(slot.replacesPremiseId),causalPlan:premiseCausalReferenceExample()}
