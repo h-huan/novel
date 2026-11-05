@@ -5586,12 +5586,14 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           throw failWithPoolAudit(new Error(message), 'candidate_pool_generation', 'candidate_pool_empty');
         }
         if (candidatePool.length < premisePoolSize) {
-          this.logger.warn('idea-discover: 原池可解析且通过结构/字段/身份筛查 ' + candidatePool.length + '/' + premisePoolSize
-            + '；JSON未完整返回批次=' + poolGenerationAudit.parseFailureBatchCount
-            + '、原始条目数量未知批次=' + poolFilterTotals.rawReturnedUnknownBatches
-            + '、已返回项中结构与字段无效=' + poolGenerationAudit.invalidCount
-            + '、去重=' + poolGenerationAudit.duplicateCount
-            + '。仅代表候选传输和基础筛查，不代表弱题材的语义质量结论；后续仍须独立因果、分类及差异复核。');
+          const poolShortfallMessage='idea-discover: 基础可用原池 '+candidatePool.length+' 条（广搜目标 '+premisePoolSize
+            +'，本次必须交付 '+requestedCount+' 张）；JSON未完整返回批次='+poolGenerationAudit.parseFailureBatchCount
+            +'、数量未知批次='+poolFilterTotals.rawReturnedUnknownBatches
+            +'、结构/字段无效='+poolGenerationAudit.invalidCount
+            +'、去重='+poolGenerationAudit.duplicateCount
+            +'。原池有效只代表基础筛查，质量仍须独立审核。';
+          if(candidatePool.length<requestedCount)this.logger.warn(poolShortfallMessage);
+          else this.logger.log(poolShortfallMessage);
         }
         // Up to three additional paths from the SAME fixed pool are selected
         // and independently reviewed before card construction, avoiding serial
@@ -5766,8 +5768,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           selectedCategoryById.set(String(premise.premiseId), String(premise.storyCategory));
         }
         if (!normalizedSelection.poolTargetMet) {
-          this.logger.warn('idea-discover: 创建前广搜有效轻量胚子 ' + normalizedSelection.pool.length + '/' + premisePoolSize
-            + '，但已明确选出 ' + normalizedSelection.selected.length + '/' + requestedCount + ' 个成熟题材；继续结构化，不用弱题材凑池。');
+          const poolCapacityMessage='idea-discover: 广搜基础候选 '+normalizedSelection.pool.length+' 条，扩展搜索目标 '+premisePoolSize
+            +'；锁定前审核合格候选 '+normalizedSelection.selected.length+' 个，目标交付 '+requestedCount
+            +' 张，后续完整卡终审仍须逐卡验证；绝不拿弱候选凑数。';
+          if(normalizedSelection.selected.length<requestedCount)this.logger.warn(poolCapacityMessage);
+          else this.logger.log(poolCapacityMessage);
         }
         const priorAudit = normalizedSelection.selectionAudit && typeof normalizedSelection.selectionAudit === 'object'
           ? normalizedSelection.selectionAudit as Record<string, unknown> : {};
@@ -7245,7 +7250,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     if (repairPlan.availableCandidates.length < recoverySlots.length) {
       const retained = retainReviewedPremises(initial, initialReview);
       if (!retained.selection.selected.length)this.logger?.warn('原池没有可保留的独立审核合格题材；移交后续一次有界轻量候选补足，不放行任何失败旧身份。');
-      this.logger?.warn(`锁定前原池不足：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，问题项隔离，不凑数。`);
+      const retainedPoolMessage='锁定前可用原池不足以完成全部预选补位位置；保留 '+retained.selection.selected.length
+        +' 个无已举证问题候选，目标交付 '+deliveryCount+' 张，问题身份已隔离，不凑数。';
+      if(retained.selection.selected.length<deliveryCount)this.logger?.warn(retainedPoolMessage);
+      else this.logger?.log(retainedPoolMessage);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
         partial: true, excludedPremiseIds: retained.excludedPremiseIds, reasons: retained.reasons, completeCardGatePending: true } };
     }
@@ -7511,7 +7519,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       } catch (recordError) { this.logger?.warn('筛选终检失败记录写入失败：' + String(recordError)); }
       const retained = retainReviewedPremises(selected, finalReview, repairPlan.protectedItems.map(item => String(item.premiseId)));
       if (!retained.selection.selected.length)this.logger?.warn('锁定前终检没有合格原选项；保留真实失败证据供新的轻量候选规避，不将旧审查结论改为通过。');
-      this.logger?.warn(`锁定前重选复核部分未通过：保留 ${retained.selection.selected.length}/${requestedCount} 个无已举证问题题材，隔离 ${retained.excludedPremiseIds.join('、')}；继续完整卡原有质量验收，不补生或重复重选。`);
+      const retainedReviewMessage='锁定前部分备选未通过：已隔离 '+retained.excludedPremiseIds.join('、')
+        +'，仍保留 '+retained.selection.selected.length+' 个独立复核合格候选；最终目标交付 '
+        +deliveryCount+' 张，后续完整卡质量门仍然必须执行，不再重复重选。';
+      if(retained.selection.selected.length<deliveryCount)this.logger?.warn(retainedReviewMessage);
+      else this.logger?.log(retainedReviewMessage);
       const retainedEvidence=retainPremiseReviewEvidence(selected,finalReview,retained.selection);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: true,
         finalReview: retainedEvidence, rejectedHistory,
