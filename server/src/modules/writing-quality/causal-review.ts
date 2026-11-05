@@ -202,14 +202,25 @@ export function expandCausalReviewedResultAliases(value:any,aliasesByReview:Reco
 /** IDs resolve to exact source paragraphs; no fuzzy quote correction or invented bridge. */
 export function materializeCausalAuditAnchors(value: any, content: string, sources: Record<string,string>) {
   if (!value || !Array.isArray(value.transitions)) return value;
-  const anchors=new Map(causalEvidenceAnchors(content,sources).map(x=>[x.id,x]));
+  const allAnchors=causalEvidenceAnchors(content,sources);
+  const anchors=new Map(allAnchors.map(x=>[x.id,x]));
   return {...value,transitions:value.transitions.map((row:any)=>{
     if(!['actionAnchorId','resultAnchorId','bridgeAnchorId'].some(key=>Object.prototype.hasOwnProperty.call(row,key)))return row;
     const action=anchors.get(row?.actionAnchorId);
     const result=anchors.get(row?.resultAnchorId);
-    const bridge=anchors.get(row?.bridgeAnchorId);
+    // Some independent reviews return a literal, exact condition quote but
+    // omit ONLY its address. Bind it without a model retry iff it names one
+    // unique original source anchor. An explicitly wrong ID, a paraphrase or
+    // repeated text MUST remain invalid; this is citation recovery, not an
+    // inferred prerequisite or automatic quality approval.
+    const literalBridge=typeof row?.bridgeEvidence==='string'&&row.bridgeEvidence.trim().length>=8
+      ?allAnchors.filter(anchor=>anchor.text===row.bridgeEvidence
+        &&(row.basisSource===undefined||row.basisSource===anchor.source)):[];
+    const rawBridge=row?.bridgeAnchorId===undefined&&row?.status==='supported'&&literalBridge.length===1
+      ?literalBridge[0]:undefined;
+    const bridge=anchors.get(row?.bridgeAnchorId)||rawBridge;
     const before=anchors.get(row?.beforeStateAnchorId);
-    return {...row,
+    return {...row,...(rawBridge?{bridgeAnchorId:rawBridge.id}:{}),
       // An exact raw quote can be server-bound to a unique result ID without
       // inventing an action address. Preserve the raw action ONLY when no
       // actionAnchorId was supplied; a false provided ID must still fail shut.
