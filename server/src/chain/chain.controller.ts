@@ -7343,7 +7343,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         sourceBindings:SOURCE_BINDING_EXAMPLE,readerQuestion:'仅追问已有故事事实',
         causalPlan:premiseCausalReferenceExample(),
       };
-      // Placeholder references in the JSON shape must be replaced by actual IDs\n      // from selectablePool, not copied as fake causal evidence.\n      const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
+      // Placeholder references in the JSON shape must be replaced by actual IDs
+      // from selectablePool, not copied as fake causal evidence.
+      const reselectionOutputShape={replacements:scopedSlots.map(slot=>({
         replacesPremiseId:String(slot.replacesPremiseId),
         premise:citationOnlyIds.has(String(slot.replacesPremiseId))
           ?{premiseId:String(slot.replacesPremiseId),causalPlan:premiseCausalReferenceExample()}
