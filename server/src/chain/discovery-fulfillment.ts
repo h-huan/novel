@@ -192,14 +192,18 @@ export function fundedSourceReviewGroups(count:number,batchSize:number,credits:n
  // Never spend the last correction credits merely to make the first audit
  // narrower. An independently rejected premise still needs replacement and
  // a new source/overlap verdict inside the same allowance.
- // At most one wave of concurrently runnable source partitions. More
- // partitions than live remote slots merely create a second serial wave,
- // increase wall time and spend calls that could fund a real correction.
- // Every actual selected premise remains independently reviewed, with the
- // same configured per-partition size ceiling and unchanged quality Gates.
- const oneWaveGroups=Math.max(minimum,Math.min(count,concurrency));
- return preferFineSourceReview(count,batchSize,concurrency,groupingMode)&&credits>=count+correctionFloor
-  ?oneWaveGroups:minimum;
+ // Each independently justified candidate must pass ALL original source,
+ // payoff, category and genre rows. Spend only the funded minimum number of
+ // source batches, distributing them across the available concurrency.
+ // The former "fine" mode automatically spent spare calls on more (often
+ // singleton) partitions, then re-ran further partition waves for rejected
+ // candidates: in real runs those calls dominated discovery latency and
+ // depleted credits needed to replace weak candidates. More partitions are
+ // NOT more independent evidence; every check already has its own identity.
+ // The existing output-capacity fallback may still partition a genuinely
+ // oversized response using the original shared correction allowance.
+ void concurrency;void correctionFloor;
+ return minimum;
 }
 
 /** Full-card fulfillment is governed by real quality gates and the unchanged
