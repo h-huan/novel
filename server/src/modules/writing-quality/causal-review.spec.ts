@@ -15,6 +15,29 @@ it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标�
  expect(results.map(row=>row.path)).not.toContain('0.characterStates.0.stateBefore');
  expect(results.map(row=>row.path)).toContain('0.foreshadowingRecover.0.method');
 });
+it('causal source splitter binds dependent antecedents to their consequence without dropping independent outcomes', () => {
+ const cases=[
+  ['因为档案解封，管理员才同意复制，证据随后封存。','因为档案解封，管理员才同意复制，','证据随后封存。'],
+  ['由于名单未核准，申请仍被退回，负责人随后重新签字。','由于名单未核准，申请仍被退回，','负责人随后重新签字。'],
+  ['虽然她已递交资料，窗口仍未批准，翌日才安排复核。','虽然她已递交资料，窗口仍未批准，','翌日才安排复核。'],
+  ['为了保留追回机会，律师先提出异议，法院随后登记。','为了保留追回机会，律师先提出异议，','法院随后登记。'],
+  ['即使对手否认记录，申诉仍被受理，决定仍未生效。','即使对手否认记录，申诉仍被受理，','决定仍未生效。'],
+ ] as const;
+ for (const [outcome,first,second] of cases) {
+   const chapter=[{chapterNumber:1,scenes:[{outcome}]}];
+   const anchors=causalEvidenceAnchors(JSON.stringify(chapter),{});
+   const results=causalChapterResultAnchors(anchors,0);
+   expect(results.map(row=>row.text)).toEqual([first,second]);
+   expect(results.map(row=>row.text).join('')).toBe(outcome);
+   expect(results.every(row=>row.path==='0.scenes.0.outcome')).toBe(true);
+   expect(causalChapterEvidenceCatalog(chapter,anchors).entries[0].resultAnchorIds).toEqual(results.map(row=>row.id));
+ }
+ const trulyDistinct=[{chapterNumber:1,characterActions:[{result:'取得钥匙，打开门锁，转交给保管员。'}]}];
+ const distinct=causalChapterResultAnchors(causalEvidenceAnchors(JSON.stringify(trulyDistinct),{}),0);
+ expect(distinct).toHaveLength(3);
+ expect(distinct.map(row=>row.text).join('')).toBe('取得钥匙，打开门锁，转交给保管员。');
+});
+
 it('补齐遗漏结果只继承服务器章号，不允许借协议修复改章号或沿用旧桥接', () => {
  const original={transitions:[{chapterNumber:4,resultAnchorId:'body:v2'}]};
  const errors=['第1项因果审查缺少行动及成立条件'];

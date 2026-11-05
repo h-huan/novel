@@ -112,7 +112,11 @@ function causalAssertionParts(text: string): string[] {
       // A conditional antecedent is not an independent achieved outcome.
       // Join it to its consequence before subdividing any later results;
       // the original complete source and all other outcome addresses remain.
-      const unambiguousCondition=/^(?:如果|假如|倘若|只要|一旦|除非|若(?!干)|当.{1,24}时|在.{1,24}(?:时|后))/.test(left);
+      // Introductory causal, concessive and purpose clauses are prerequisites,
+      // not achieved outcomes. Keep their exact original characters attached
+      // to the following consequence; independently asserted later outcomes
+      // still receive distinct addresses and the unchanged semantic Gate.
+      const unambiguousCondition=/^(?:如果|假如|倘若|只要|一旦|除非|若(?!干)|因为|由于|虽然|尽管|即使|即便|为了|当.{1,24}时|在.{1,24}(?:时|后))/.test(left);
       const onlyCondition=/^只有/.test(left) && /^(?:才|方|就|便|则|可以|可|会|将|应|必须|不能|不得)/.test(right);
       if(!attachedCondition && (unambiguousCondition||onlyCondition)){
         attachedCondition=true;continue;
