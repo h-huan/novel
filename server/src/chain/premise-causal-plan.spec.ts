@@ -342,3 +342,18 @@ it('real refill shortfall is two: preserve four grounded peers if the fifth cand
   selected:kept.selected,
  });
 });
+
+it('does not spend the refill citation call when grounded candidates already exceed the two actual missing slots',async()=>{
+ const selected=selection(['P9','P10','P11','P12','P13']);
+ selected.selected[3].causalPlan[0].result.quote='本题材从未写过的结果';
+ const ready=selected.selected.filter(item=>premiseCausalPlanIssues(item).length===0);
+ expect(ready.map(item=>item.premiseId)).toEqual(['P9','P10','P11','P13']);
+ const c=Object.create(ChainController.prototype) as any;
+ const generate=vi.fn(async()=>{throw Error('citation correction should not be funded for optional surplus')});
+ c.realLLM={generate};
+ const quota={remaining:1};
+ const result=await c.completePremiseCausalPlans({...selected,selected:ready},quota,2);
+ expect(result.selected).toEqual(ready);
+ expect(generate).not.toHaveBeenCalled();
+ expect(quota.remaining).toBe(1);
+});
