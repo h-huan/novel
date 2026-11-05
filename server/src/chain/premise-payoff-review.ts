@@ -55,8 +55,14 @@ export function premiseUnmappedOutcomeClaims(selection:PremiseSelectionResult){
     const results=(Array.isArray(item.causalPlan)?item.causalPlan:[])
       .map((link:any)=>typeof link?.result?.quote==='string'?link.result.quote.trim():'')
       .filter(Boolean);
-    return (['reversalEffect','payoff'] as const).flatMap(field=>
-      String(item[field]||'').split(/[；。！？\n]+/u).flatMap(sentence=>{
+    return (['reversalEffect','payoff'] as const).flatMap(field=>{
+      const narrative=String(item[field]||'');
+      // A verbatim payoff alias of reversalEffect is one already-existing
+      // claim inventory, not a second event to review. Avoid asking the SAME
+      // independent source Gate to inspect identical claims twice. All other
+      // outcome fields, causal links and semantic checks remain unchanged.
+      if(field==='payoff'&&narrative===String(item.reversalEffect||''))return [];
+      return narrative.split(/[；。！？\n]+/u).flatMap(sentence=>{
         const text=sentence.trim();
         if(!text)return [];
         // A citation to ONE result clause does not establish the other
@@ -69,7 +75,8 @@ export function premiseUnmappedOutcomeClaims(selection:PremiseSelectionResult){
         }
         const claim=uncovered.replace(/^[，、,：:\s]+|[，、,：:\s]+$/gu,'').trim();
         return claim.length>=6?[{ref:`S${index+1}.${field}`,claim:claim.slice(0,160)}]:[];
-      }));
+      });
+    });
   });
 }
 /** One model-facing link schema, including every field required by admission. */

@@ -242,6 +242,24 @@ it('flags an unanchored separate outcome for independent review without inventin
   expect(directive).toContain('非新增质量门');
 });
 
+it('does not duplicate identical payoff and reversal claims while retaining every distinct result',()=>{
+ const shared='资料已提交。负责人仍可拒绝。法院最终作出决定。';
+ const input:any={selected:[{premiseId:'P5',reversalEffect:shared,payoff:shared,causalPlan:[]}]};
+ const focused=premiseUnmappedOutcomeClaims(input);
+ expect(focused.map((row:any)=>row.claim)).toEqual(['资料已提交','负责人仍可拒绝','法院最终作出决定']);
+ expect(focused.every((row:any)=>row.ref==='S1.reversalEffect')).toBe(true);
+ const directive=premisePayoffReviewDirective(input);
+ expect(directive).toContain('法院最终作出决定');
+ // A different final outcome is NOT an alias; the mandatory result stays
+ // visible to the existing independent semantic review.
+ const changed=premiseUnmappedOutcomeClaims({selected:[{...input.selected[0],payoff:'负责人仍可拒绝。窗口另行补发告知书。'}]});
+ expect(changed).toContainEqual({ref:'S1.payoff',claim:'窗口另行补发告知书'});
+ expect(changed.filter((row:any)=>row.ref==='S1.reversalEffect')).toHaveLength(3);
+ // Same words in a separate, actually different narrative are not deduped.
+ const different=premiseUnmappedOutcomeClaims({selected:[{...input.selected[0],payoff:shared+'新事件已发生。'}]});
+ expect(different).toContainEqual({ref:'S1.payoff',claim:'新事件已发生'});
+});
+
 it('does not hide another consequential outcome in the sentence when the plan cites only its first clause',()=>{
   const input:any={selected:[{
     premiseId:'P7',reversalEffect:'窗口已完成核验，随后撤销了全部持有人的许可',
