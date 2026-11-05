@@ -291,7 +291,15 @@ it.each(['baseline','refill','streaming','prepare','prepare_rejected','prepare_e
       if (step === 'idea_premise_pool_generation') {
         expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
         expect(input.prompt).toContain('分类不能靠结尾点题或改标签补救');
-        return { content: JSON.stringify({ pool: fixturePoolWithLockedSlots(input,makePremiseSelectionFixture(partialFixture ? 4 : 5).pool) }) };
+        // Split the fixed fixture across the actual generator slots (4+3
+        // for two cards, 8+7 for five). Never return five candidates into a
+        // four-slot first batch and silently rely on post-hoc renumbering.
+        const slots=JSON.parse(String(input.prompt).split('【生成前锁定的候选槽位】')[1]?.split('\n')[0]||'[]') as unknown[];
+        const batch=Number(input.metrics?.attempt||0);
+        const offset=batch===0?0:slots.length+1;
+        const original=makePremiseSelectionFixture(partialFixture?4:5).pool;
+        return { content: JSON.stringify({pool:fixturePoolWithLockedSlots(input,
+          original.slice(offset,offset+slots.length))}) };
       }
       if (step === 'idea_premise_selection' || step === 'idea_premise_refill_selection') {
         expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
@@ -534,7 +542,8 @@ it.each(['baseline','refill','streaming','prepare','prepare_rejected','prepare_e
     ...Array(2).fill('idea_premise_pool_refill'),
   ].sort());
   expect(partialResult.appealGate.fulfillment.actions.some((action:any)=>
-    action.phase==='lightweight_pool_refill_failed')).toBe(true);
+    action.phase==='lightweight_pool_refill'
+      &&action.failedTransportBatches>0)).toBe(true);
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
@@ -617,7 +626,11 @@ it('injects the user-declared custom platform standard into the idea prompt as t
       generationCall += 1;
       prompts.push(String(input.prompt));
       if (input.metrics?.stepKey === 'idea_premise_pool_generation') {
-        return { content: JSON.stringify({ pool: fixturePoolWithLockedSlots(input,makePremiseSelectionFixture(5).pool) }) };
+        const slots=JSON.parse(String(input.prompt).split('【生成前锁定的候选槽位】')[1]?.split('\n')[0]||'[]') as unknown[];
+        const batch=Number(input.metrics?.attempt||0);
+        const offset=batch===0?0:slots.length+1;
+        return { content: JSON.stringify({pool:fixturePoolWithLockedSlots(input,
+          makePremiseSelectionFixture(5).pool.slice(offset,offset+slots.length))}) };
       }
       if (input.metrics?.stepKey === 'idea_premise_selection') {
         return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
