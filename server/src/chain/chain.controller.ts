@@ -7221,11 +7221,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         freshPoolCount+citationOnlySlots,
       ))
       :repairPlan.repairSlots;
-    // Optional screening hedges must not block an affordable mandatory recovery.
-    // Use the SAME admission formula as execution; never shrink the author demand
-    // or spend a selection call when even its mandatory review cannot be funded.
+    // Spend the SAME bounded review allowance on as many original-pool replacements
+    // as can actually be independently audited: trim optional hedges first, then
+    // unfundable delivery replacements. A partial reviewed recovery is preferable
+    // to paying for an all-or-nothing request that cannot be audited. The author
+    // demand remains unchanged, and an unsatisfied delivery is still incomplete.
     const recoveryGrouping=readGenerationBudgets();
-    while(shared && recoverySlots.length>neededReplacementSlots
+    while(shared && recoverySlots.length>0
       && minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
         recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode)>shared.reviews.remaining)
       recoverySlots=recoverySlots.slice(0,-1);
@@ -7307,7 +7309,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const recoveryReviewFloor=recoverySlots.length
       ? minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
           recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode):0;
-    const recoveryReviewUnfunded=!!shared&&shared.reviews.remaining<recoveryReviewFloor;
+    const recoveryReviewUnfunded=!!shared&&(shared.reviews.remaining<recoveryReviewFloor
+      || neededReplacementSlots>0&&recoverySlots.length===0);
     const recoveryPoolUnavailable=repairPlan.availableCandidates.length<recoverySlots.length;
     if (recoveryPoolUnavailable||recoveryReviewUnfunded) {
       const retained = retainReviewedPremises(initial, initialReview);
