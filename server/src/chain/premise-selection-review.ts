@@ -16,95 +16,13 @@ export interface PremiseSelectionReview {
   passed: boolean;
   sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
-    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool'; protocolIncomplete?: boolean; origin?: 'outcome_counterfactual' }>;
+    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool'; protocolIncomplete?: boolean }>;
   sourceChecks?: PremiseSourceCheck[];
   payoffChecks?: PremisePayoffCheck[];
   genreChecks?: Array<{ref:string;status:string;field?:string;quote?:string;evidenceRef?:string;reason:string}>;
   categoryChecks?: Array<{ref:string;status:string;evidenceRef?:string;reason:string}>;
-  outcomeChecks?: PremiseOutcomeCounterfactualCheck[];
 }
 
-export interface PremiseOutcomeCounterfactualCheck {
-  premiseId: string;
-  status: 'supported' | 'gap' | 'unknown';
-  claimQuote: string;
-  priorQuote?: string;
-  reason: string;
-}
-
-/** The independent pair-review model already sees the full story narrative.
- * Spend NO additional model call: require it to challenge each decisive
- * result independently of the source/causal-plan reviewer. This is an
- * evidence-anchored semantic verdict, not a keyword or outcome auto-pass.
- * The original pool and all story fields remain immutable.
- */
-export function premiseOutcomeCounterfactualReviewIssues(
-  value: unknown, selection: PremiseSelectionResult, focusIds: readonly string[] = [],
-): string[] {
-  const selected = new Map(selection.selected.map(item => [String(item.premiseId), item]));
-  const ids = focusIds.length ? [...new Set(focusIds.map(String))] : [...selected.keys()];
-  const checks = (value as {outcomeChecks?: unknown})?.outcomeChecks;
-  if (!Array.isArray(checks) || checks.length !== ids.length)
-    return ['独立胜负反事实审查必须逐题材覆盖当前全部目标，不能用空数组或整体passed替代'];
-  const errors: string[] = [], seen = new Set<string>();
-  for (const raw of checks) {
-    const row = raw as PremiseOutcomeCounterfactualCheck | null;
-    const id = String(row?.premiseId ?? ''), item = selected.get(id);
-    if (!item || !ids.includes(id) || seen.has(id)) {
-      errors.push('独立胜负反事实审查的题材身份未知、越界或重复'); continue;
-    }
-    seen.add(id);
-    const quote = row?.claimQuote;
-    if (!['supported', 'gap', 'unknown'].includes(String(row?.status))
-      || typeof row?.reason !== 'string' || row.reason.trim().length < 16
-      || typeof quote !== 'string' || quote.trim().length < 8
-      || !(typeof item.payoff === 'string' && String(item.payoff).includes(quote)))
-      errors.push(id+'的胜负反事实审核缺少实际决定性结果原文、真实状态或具体必要条件理由');
-    // The single mandatory check must address the FINAL payoff, never an
-    // easier intermediate win. Earlier decisive failures are considered in
-    // the same causal reason, but cannot replace the required final claim.
-    if (row?.status === 'supported') {
-      const prior = row.priorQuote;
-      if (typeof prior !== 'string' || prior.trim().length < 8
-        || !['protagonistSituation','openingEvent','coreConflict','activeChoice','escalation','reversalEffect','payoff']
-          .some(field => typeof item[field] === 'string' && String(item[field]).includes(prior))
-        || prior.includes(String(quote)) || String(quote).includes(prior))
-        errors.push(id+'的已支持结论须引用独立于结果断言的实际先行条件，不能用胜负本身证明胜负');
-    } else if (row?.priorQuote !== undefined && (typeof row.priorQuote !== 'string'
-      || !Object.values(item).some(text => typeof text === 'string' && text.includes(row.priorQuote!))))
-      errors.push(id+'的反事实缺口不能附带虚构先行原文');
-  }
-  if (seen.size !== ids.length) errors.push('独立胜负反事实审查尚有题材未核对');
-  return errors;
-}
-
-/** Convert only genuine independent gaps/unknowns into the EXISTING
- * selection_fit gate, before full-card calls are scheduled. Never upgrade the
- * first review's failures, rewrite the story or fabricate a passing verdict.
- */
-export function materializePremiseOutcomeCounterfactualReview(
-  raw: PremiseSelectionReview, selection: PremiseSelectionResult,
-  focusIds: readonly string[] = [],
-): PremiseSelectionReview {
-  const errors = premiseOutcomeCounterfactualReviewIssues(raw,selection,focusIds);
-  if (errors.length) throw new Error('独立胜负反事实审查协议未完成：'+errors.join('；'));
-  const issues: PremiseSelectionReview['issues'] = [];
-  for (const check of raw.outcomeChecks || []) {
-    if (check.status === 'supported') continue;
-    const source=selection.pool.find(item=>String(item.premiseId)===check.premiseId);
-    const sourceQuote=String(source?.storyCore||'').slice(0,180);
-    if (sourceQuote.trim().length < 8)throw new Error('独立胜负反事实审查找不到冻结原池事实');
-    issues.push({kind:'selection_fit',premiseId:check.premiseId,referencePremiseId:check.premiseId,
-      quote:check.claimQuote,referenceQuote:sourceQuote,reason:check.reason,
-      repairMode:'replace_from_pool',origin:'outcome_counterfactual',
-      ...(check.status==='unknown'?{protocolIncomplete:true}:{})});
-  }
-  const result={...raw,issues:[...raw.issues,...issues],
-    passed:raw.issues.length===0&&issues.length===0};
-  const evidenceErrors=premiseSelectionReviewIssues(result,selection);
-  if(evidenceErrors.length)throw new Error('独立胜负反事实审查证据无效：'+evidenceErrors.join('；'));
-  return result;
-}
 const containsQuote = (value: Record<string, unknown> | undefined, quote: unknown) =>
   typeof quote === 'string' && quote.trim().length >= 8 && !!value
   && Object.values(value).some(text => typeof text === 'string' && text.includes(quote));
@@ -255,8 +173,7 @@ export function retainUnchangedOverlapIssues(
  previous:PremiseSelectionReview|undefined,
  changedNarrativeIds:ReadonlySet<string>,
 ):PremiseSelectionReview['issues'] {
- return (previous?.issues||[]).filter(issue=>(issue.kind==='overlap'
-     ||issue.origin==='outcome_counterfactual')
+ return (previous?.issues||[]).filter(issue=>(issue.kind==='overlap')
    && !changedNarrativeIds.has(String(issue.premiseId))
    && !changedNarrativeIds.has(String(issue.referencePremiseId)));
 }
