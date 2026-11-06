@@ -7300,15 +7300,28 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         break;
       }
     }
-    if (repairPlan.availableCandidates.length < recoverySlots.length) {
+    // Selecting fresh identities is pointless when the SAME source/overlap
+    // budget cannot independently vet the resulting selection. An optional
+    // hedge was trimmed above; the mandatory batch must pass this final check
+    // before it consumes even one reselection model call.
+    const recoveryReviewFloor=recoverySlots.length
+      ? minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
+          recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode):0;
+    const recoveryReviewUnfunded=!!shared&&shared.reviews.remaining<recoveryReviewFloor;
+    const recoveryPoolUnavailable=repairPlan.availableCandidates.length<recoverySlots.length;
+    if (recoveryPoolUnavailable||recoveryReviewUnfunded) {
       const retained = retainReviewedPremises(initial, initialReview);
       if (!retained.selection.selected.length)this.logger?.warn('原池没有可保留的独立审核合格题材；移交后续一次有界轻量候选补足，不放行任何失败旧身份。');
-      const retainedPoolMessage='锁定前可用原池不足以完成全部预选补位位置；保留 '+retained.selection.selected.length
+      const reason=recoveryReviewUnfunded
+        ? '现有来源/同构独立复核额度不能覆盖必须补位的位置，跳过无法审核的重选调用'
+        : '锁定前可用原池不足以完成全部预选补位位置';
+      const retainedPoolMessage=reason+'；保留 '+retained.selection.selected.length
         +' 个无已举证问题候选，目标交付 '+deliveryCount+' 张，问题身份已隔离，不凑数。';
       if(retained.selection.selected.length<deliveryCount)this.logger?.warn(retainedPoolMessage);
       else this.logger?.log(retainedPoolMessage);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
-        partial: true, excludedPremiseIds: retained.excludedPremiseIds, reasons: retained.reasons, completeCardGatePending: true } };
+        partial: true, selectionStopReason:recoveryReviewUnfunded?'mandatory_recovery_review_budget_shortfall':'original_pool_shortfall',
+        excludedPremiseIds: retained.excludedPremiseIds, reasons: retained.reasons, completeCardGatePending: true } };
     }
     // One scoped response can correct all current problems. Partition only after
     // an observed output-capacity failure, retaining the same live call budget.
