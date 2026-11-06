@@ -76,6 +76,23 @@ it.each([
   expect(record).toHaveBeenCalledTimes(1);
   expect(record.mock.calls[0][2]).toBe('network_error');
 });
+it('keeps the original transport error if another concurrent review spends the shared retry credit during backoff',async()=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockRejectedValue(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'));
+  (service as any).callModel=callModel;
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const failure=expect(service.generate({prompt:'并发复核同一来源',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}}))
+    .rejects.toThrow('UND_ERR_SOCKET');
+  await new Promise(resolve=>setTimeout(resolve,40));
+  // Another already-authorized independent reviewer consumed the last
+  // shared recovery credit during the first transport failure's backoff.
+  budget.remaining=0;
+  await failure;
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('network_error');
+});
 it('keeps the original funded socket recovery when a second physical credit already exists',async()=>{
   const service=createService(),budget={remaining:2};
   const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});

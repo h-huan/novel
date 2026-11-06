@@ -1281,7 +1281,12 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       if (mayRetryTransport(msg) && hasRecoveryAllowance()) {
         const delays = [1500];
         for (let netRetry = 0; netRetry < delays.length; netRetry++) {
+          // A peer may consume the shared recovery surplus while this shard
+          // backs off. Recheck immediately before dispatch: otherwise the
+          // budget exception hides the original DNS/connection failure.
+          if (!hasRecoveryAllowance()) break;
           await waitForGeneration(delays[netRetry]);
+          if (!hasRecoveryAllowance()) break;
           this.logger.warn(`[RealLLM] 网络重试 ${netRetry + 1}/${delays.length}（${msg.split('\n')[0]}，${delays[netRetry] / 1000}s 后）：model=${modelName}, scenario=${request.scenario || 'daily'}`);
           try {
             const result = await withTimeout(
