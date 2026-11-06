@@ -204,7 +204,7 @@ it('does not pay for an original-pool replacement when its mandatory independent
  const selected=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,3)},3,6);
  const c=Object.create(ChainController.prototype) as any;
  c.logger={warn:vi.fn(),log:vi.fn()};
- const budget={reviews:{remaining:2},reselection:{remaining:4}};
+ const budget={reviews:{remaining:3},reselection:{remaining:4}};
  c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string,credits:any)=>{
   credits.remaining--;
   if(mode==='overlap')return {passed:true,issues:[]};
@@ -223,7 +223,7 @@ it('does not pay for an original-pool replacement when its mandatory independent
  });
  expect(c.llmCallWithRetry).not.toHaveBeenCalled();
  expect(budget.reselection.remaining).toBe(4);
- expect(budget.reviews.remaining).toBe(0);
+ expect(budget.reviews.remaining).toBe(1);
 });
 
 it('does not spend an optional hedge when reselection allowance is unavailable',async()=>{
