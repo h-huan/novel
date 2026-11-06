@@ -967,5 +967,5 @@ it('fixed-pool selection requires evidence for each independent result before pa
  expect(prompt).toContain('同一段同时写出证据查明与另行处分');
  expect(prompt).toContain('证明前者不自动证明后者');
  expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
- expect(prompt).toContain('只返回selectedPremises');
+ expect(prompt).toContain('只输出selectedPremises');
 });
