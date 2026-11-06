@@ -34,7 +34,8 @@ describe('preselection reader promise and independent title verdict', () => {
 
 describe('creation consistency architecture invariants', () => {
   it('binds long POV and frozen world rules to accepted source rather than model array ordering',()=>{
-    expect(controllerSource).toContain('orderConfirmedLongCharacters(generatedCharacters,foundation.coreSetting?.protagonist)');
+    expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(generatedCharacters,foundation.coreSetting?.protagonist)');
+    expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(rawGeneratedCharacters,confirmedProtagonistName)');
     expect(controllerSource).toContain('const frozenRuleRows=existingFrozenWorld');
     expect(controllerSource).toContain('JSON.stringify(persistedWorldRules)');
     expect(controllerSource).toContain("serializeGeneratedSqlText(persistedWorldRules.join('\\n'))");

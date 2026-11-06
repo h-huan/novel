@@ -127,7 +127,7 @@ import {
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedLongCharacters } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
 import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
@@ -10086,8 +10086,9 @@ ${STORY_ENTITY_MODELING_POLICY}
     const normalizeGeneratedCharacters = (value: any): any[] => Array.isArray(value)
       ? value
       : (Array.isArray(value?.characters) ? value.characters : (Array.isArray(value?.items) ? value.items : []));
+    const confirmedProtagonistName=confirmedWorldProtagonistName(dto.selectedIdea?.protagonist);
     const confirmedCharacterNames = [
-      dto.selectedIdea?.protagonist,
+      ...(confirmedProtagonistName?[confirmedProtagonistName]:[]),
       ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters : []),
     ].map((item: any) => String(typeof item === 'string' ? item : item?.name || '').split(/[，,]/)[0].trim()).filter(Boolean);
     // Character facts originate in confirmed story/world, before chapter planning.
@@ -10128,7 +10129,13 @@ JSON格式：[{"name":"姓名","role":"该人物实际剧情职责（主角/对�
       },
     });
     taskWarnings.push(...charResult.warnings);
-    const generatedCharacters = normalizeGeneratedCharacters(charResult.data);
+    const rawGeneratedCharacters = normalizeGeneratedCharacters(charResult.data);
+    // A confirmed named short protagonist owns the POV, even when the model
+    // lists a supporting character first. For genuinely anonymous narration,
+    // preserve the existing role order rather than inventing a personal name.
+    const generatedCharacters = confirmedProtagonistName && rawGeneratedCharacters.length>0
+      ? orderConfirmedProtagonistCharacters(rawGeneratedCharacters,confirmedProtagonistName)
+      : rawGeneratedCharacters;
 
     let charCount = 0;
     if (generatedCharacters.length > 0) {
@@ -10165,7 +10172,7 @@ JSON格式：[{"name":"姓名","role":"该人物实际剧情职责（主角/对�
           // Unknown demographics stay unknown; descriptions may mention other people.
           const {age: ageMatch, gender: genderVal} = resolveExplicitCharacterDemographics(ch);
           const allTextForExtract = [basicInfo, identity, appearance, backstory, typeof ch.personality === 'string' ? ch.personality : ''].filter(Boolean).join(' ');
-          const isPov = ch.name === (generatedCharacters[0]?.name || '') ? 1 : 0;
+          const isPov = ch === generatedCharacters[0] ? 1 : 0;
           // 根据角色重要性设置 role 字段（POV主角→protagonist，反派→antagonist，其他→supporting/main）
           let roleVal = ch.role || 'supporting';
           if (isPov) roleVal = 'protagonist';
@@ -12533,7 +12540,7 @@ ${summarizeOutlineConsistency(pending)}`,
     if (generatedCharacters.length === 0 || generatedCharacters.some((character: any) => !character?.name || !character?.identity)) {
       throw new Error('长篇角色架构结果不完整。');
     }
-    const characters=orderConfirmedLongCharacters(generatedCharacters,foundation.coreSetting?.protagonist);
+    const characters=orderConfirmedProtagonistCharacters(generatedCharacters,foundation.coreSetting?.protagonist);
     input.onProgress?.('outline', '核心角色已通过验收，开始分卷与详细章纲');
 
     // 单批预算是「一次就要装得下」的承诺，必须与 real-llm 侧的结构化硬顶同源：

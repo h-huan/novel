@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedLongCharacters } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
 
 describe('generic world source validation', () => {
   it('preserves long world rules through current and historical nested-array storage',()=>{
@@ -12,10 +12,11 @@ describe('generic world source validation', () => {
   });
   it('anchors long POV to the named protagonist independent of model character order',()=>{
     const characters=[{name:'配角',identity:'观察者'},{name:'陆舟',identity:'站务员'}];
-    expect(orderConfirmedLongCharacters(characters,'陆舟，站务员')).toEqual([characters[1],characters[0]]);
+    expect(orderConfirmedProtagonistCharacters(characters,'陆舟，站务员')).toEqual([characters[1],characters[0]]);
     expect(characters[0].name).toBe('配角');
-    expect(()=>orderConfirmedLongCharacters(characters,'周舟，站务员')).toThrow('未形成唯一同名');
-    expect(()=>orderConfirmedLongCharacters(characters,'')).toThrow('未确认主角身份');
+    expect(()=>orderConfirmedProtagonistCharacters(characters,'周舟，站务员')).toThrow('未形成唯一同名');
+    expect(()=>orderConfirmedProtagonistCharacters(characters,'')).toThrow('缺少主角姓名');
+    expect(()=>orderConfirmedProtagonistCharacters([...characters,characters[1]],'陆舟')).toThrow('同名重复档案');
   });
   it('does not misidentify anonymous first-person narration and roles as names', () => {
     for (const description of ['我，一名修理工', '我是个修理工', '主角：修理工', '匿名主角', '叙述者', '一名技工']) {

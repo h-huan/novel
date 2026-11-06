@@ -38,13 +38,16 @@ export function normalizeWorldRuleStrings(value:unknown):string[]{
  return rules;
 }
 
-/** Keep the protagonist selected by the confirmed long skeleton as the
+/** Keep the protagonist selected by the confirmed story or long skeleton as the
  * first persisted POV character. Model array order is not story authority;
  * ambiguous or missing matches fail before chapter planning or Canon writes. */
-export function orderConfirmedLongCharacters<T extends {name?:unknown}>(
+export function orderConfirmedProtagonistCharacters<T extends {name?:unknown}>(
  characters:readonly T[],confirmedProtagonist:unknown):T[]{
+ const names=characters.map(item=>typeof item.name==='string'?item.name.trim():'');
+ if(names.some(name=>!name)||new Set(names).size!==names.length)
+  throw new Error('生成人物存在无姓名或同名重复档案，不能误建主视角身份');
  const source=typeof confirmedProtagonist==='string'?confirmedProtagonist.trim():'';
- if(!source)throw new Error('长篇地基未确认主角身份，不能凭模型人物顺序写入主视角');
+ if(!source)throw new Error('确认题材或主线地基缺少主角姓名，不能凭角色顺序猜定主视角');
  const leading=source.replace(/^(?:主角|男主角|女主角|男主|女主|第一人称主角)[：:\s]*/u,'')
   .split(/[，,、；;\s（(]/u)[0].trim();
  const exact=characters.filter(item=>typeof item.name==='string'&&item.name.trim()===leading);

@@ -18,6 +18,23 @@ describe('short character source before outline',()=>{
   expect((db.prepare('SELECT COUNT(*) c FROM outlines WHERE project_id=?').get('p') as any).c).toBe(0);
   expect(controller.generatedCanonGuard.assertStructuredCanCommit).toHaveBeenCalledWith(expect.objectContaining({runId:'role-run',expectedStages:['character']}));
  });
+ it('binds named short POV to the confirmed story even when a supporting character arrives first',async()=>{
+  controller.llmCallWithRetry.mockResolvedValue({data:[
+    {name:'邵工',basicInfo:'证人',abilities:'只知道昨天的维修情况'},
+    {name:'林青',basicInfo:'供水维修工',abilities:'有权查看本人维修记录'},
+  ],warnings:[],runId:'ordered-role'});
+  await controller.prepareCreationCharacters(input());
+  const rows=db.prepare('SELECT name,is_pov_character,role FROM characters WHERE project_id=?').all('p') as any[];
+  expect(rows.find(row=>row.name==='林青')).toMatchObject({is_pov_character:1,role:'protagonist'});
+  expect(rows.find(row=>row.name==='邵工')?.is_pov_character).toBe(0);
+  expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ });
+ it('rejects a character batch omitting the confirmed protagonist before writing any record',async()=>{
+  controller.llmCallWithRetry.mockResolvedValue({data:[{name:'邵工',basicInfo:'证人'}],warnings:[],runId:'bad-role'});
+  await expect(controller.prepareCreationCharacters(input())).rejects.toThrow('未形成唯一同名');
+  expect((db.prepare('SELECT COUNT(*) c FROM characters WHERE project_id=?').get('p') as any).c).toBe(0);
+  expect(controller.generatedCanonGuard.assertStructuredCanCommit).not.toHaveBeenCalled();
+ });
  it('reuses saved characters without dispatching a second role generation',async()=>{const now=new Date().toISOString();db.prepare('INSERT INTO characters(id,project_id,name,identity,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('role','p','林青','维修工',now,now);await controller.prepareCreationCharacters(input());expect(controller.llmCallWithRetry).not.toHaveBeenCalled();expect((db.prepare('SELECT COUNT(*) c FROM characters WHERE project_id=?').get('p') as any).c).toBe(1);});
  it('stops before outlining when no character was generated or persisted',async()=>{controller.llmCallWithRetry.mockResolvedValue({data:[],warnings:[],runId:'empty'});await expect(controller.prepareCreationCharacters(input())).rejects.toThrow('未开始章纲');expect((db.prepare('SELECT COUNT(*) c FROM outlines WHERE project_id=?').get('p') as any).c).toBe(0);expect(controller.generatedCanonGuard.assertStructuredCanCommit).not.toHaveBeenCalled();});
 });
