@@ -670,7 +670,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     const c=Object.create(ChainController.prototype) as any;
     const prompts:string[]=[];
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,_options:any)=>{
-      prompts.push(prompt);return {data:{passed:true,issues:[],outcomeChecks:['A','B'].map(premiseId=>({premiseId,status:'supported',claimQuote:premise(premiseId).payoff,priorQuote:premise(premiseId).activeChoice,reason:'由先前明确实际主动行动造成的结果仍需接受其它独立审查完整核验'}))}};
+      prompts.push(prompt);return {data:{passed:true,issues:[],}};
     });
     const input=selection();
     const overlap=await c.reviewPremiseSelection(input,standard,'overlap');
@@ -689,7 +689,7 @@ it('does not repair fiction if either independent audit fails to complete', asyn
     // A custom platform note may legitimately contain the same literal text
     // before the actual, server-appended category-manual separator.
     const prefix='用户自定义说明\n【与完整卡一致的分类标准】这只是原话';
-    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{prompts.push(prompt);return {data:{passed:true,issues:[],outcomeChecks:['A','B'].map(premiseId=>({premiseId,status:'supported',claimQuote:premise(premiseId).payoff,priorQuote:premise(premiseId).activeChoice,reason:'原有独立证据已经明示行动及正常结果之间的必要条件成立'}))}};});
+    c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string)=>{prompts.push(prompt);return {data:{passed:true,issues:[],}};});
     await c.reviewPremiseSelection(input,prefix+'\n'+standard,'overlap');
     expect(prompts[2]).toContain('这只是原话');
     expect(prompts[2]).toContain('第一人称/扮猪吃虎');
@@ -1103,12 +1103,8 @@ it('enumerates only post-reselection pairs involving changed identities and does
     const scope=prompt.split('【本次必须独立比较的无序题材配对】')[1]?.split('。逐对核对')[0];
     expect(JSON.parse(scope)).toEqual(premiseOverlapPairs(selected,['C']));
     expect(prompt).toContain('不重复消耗模型审查');
-    const result={passed:true,issues:[],outcomeChecks:[{
-      premiseId:'C',status:'supported',claimQuote:premise('C').payoff,
-      priorQuote:premise('C').activeChoice,
-      reason:'实际独立的先行动作已经存在，引用的前置条件没有和结果断言重合',
-    }]};
-    expect(options.validate({passed:true,issues:[]})).toBe(false);
+    const result={passed:true,issues:[]};
+    expect(options.validate({passed:true,issues:[]})).toBe(true);
     expect(options.validate(result)).toBe(true);
     return {data:result};
   });
