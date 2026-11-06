@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows,missingIdeaPresentationRetryPrompt} from './idea-review-protocol-repair';
 import {ideaReviewResponseExample,ideaPayoffBridgeIssues,ideaReviewEvidenceReferenceIssues,resolveIdeaReviewEvidence} from './idea-review-evidence';
-import {presentationReviewIssues,shouldBatchIdeaPresentation,targetIdeaReviews} from './idea-presentation-review';
+import {presentationReviewIssues,shouldBatchIdeaPresentation,targetIdeaReviews,compactIdeaPresentationReferences} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
 const card={title:'当面退回委托',hook:'她把错误订单退回，拒绝替别人签字。',description:'她到唯一出口等负责人下班。',setting:'负责人下班只能从此门经过。',ending:'她在门口等到负责人。'};
 const fixture=()=>{
@@ -9,6 +9,26 @@ const fixture=()=>{
  const value:any={reviews:[row]};value.reviews[0].readerGoals.immersion={supported:'',evidenceRef:'C1.description',reason:'她主动拒绝错误委托的选择与处境都有具体依据'};
  return value;
 };
+describe('full-card peer comparison context remains narrative-only',()=>{
+ it('retains all actual action-to-payoff and stage facts without repeated labels or self-praise',()=>{
+  const peer={title:'老铺账目翻转',storyType:'short_story',targetPlatform:'fanqie',storyCategory:'都市日常',
+   protagonist:'修鞋人守着摊位',setting:'门面产权和租期条件',
+   hook:'被要求撤摊后决定查备案',description:'他找到原件又遭拒绝，重新取得事实证明',
+   coreConflict:'物管试图清掉摊位',mainReversal:'备案改变处理依据',
+   ending:'双方作出有限让步并承担明年到期的代价',
+   scopeBreakdown:[{arc:'反制',reason:'新的压力出现',outcome:'主角改变决定并承担代价'}],
+   uniquePoint:'模型自称这个故事独一无二',noveltyProof:{familiarShell:'宣称创新'},
+   storyTone:['紧张'],writingStyle:['口语化'],webNovelGenre:['扮猪吃虎'],
+   plotTags:['小人物'],submissionTags:['未认证标签'],pov:'第一人称'};
+  const reference=compactIdeaPresentationReferences([peer])[0];
+  for(const key of ['title','storyCategory','protagonist','setting','hook','description',
+   'coreConflict','mainReversal','ending','scopeBreakdown'])expect(reference[key]).toEqual(peer[key]);
+  for(const key of ['uniquePoint','noveltyProof','storyTone','writingStyle',
+   'webNovelGenre','plotTags','submissionTags','pov'])expect(reference).not.toHaveProperty(key);
+  expect(JSON.stringify(reference).length).toBeLessThan(JSON.stringify(peer).length);
+ });
+});
+
 describe('five-card reader sharing citation regression (observed positions 1, 3, 5)',()=>{
  const fiveCards=Array.from({length:5},(_,i)=>({...card,title:'第'+(i+1)+'张不同题材',
   uniquePoint:'宣称有独特传播价值的主张，不能当故事证据'}));
