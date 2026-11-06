@@ -314,3 +314,11 @@ it.each(['exact_alias','result_self_proof','different_text'])('handles reversal 
   expect(quarantineUnprovenReversalEvidence({payoffChecks:[row]},input).payoffChecks[0].status).toBe('supported');
  }else expect(issues.join('')).toContain('不能用结果自证');
 });
+
+
+it('does not turn hypothetical off-page refusals into an extra independent causal Gate',()=>{
+ const directive=premisePayoffReviewDirective(selection);
+ expect(directive).toContain('真实必要条件和人物动机');
+ expect(directive).toContain('不得凭故事外任意假设');
+ expect(directive).toContain('整体或对应links必须判gap');
+});
