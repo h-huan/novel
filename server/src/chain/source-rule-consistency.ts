@@ -29,7 +29,7 @@ export function normalizeWorldSourceCandidate(value: unknown): unknown {
  // Only whole-document JSON.parse is allowed; never salvage prose fragments.
  for(let depth=0;depth<2&&typeof candidate==='string';depth++){
   const text=candidate.trim();
-  if(!text.startsWith('{')&&!text.startsWith('['))break;
+  if(!text.startsWith('{')&&!text.startsWith('[')&&!text.startsWith('"'))break;
   try{candidate=JSON.parse(text);}catch{break;}
  }
  if(Array.isArray(candidate)){
