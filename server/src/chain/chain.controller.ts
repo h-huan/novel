@@ -4,7 +4,7 @@ import {chapterConditionReviewIssues, materializeChapterConditionSources, chapte
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
 import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS, rankPremisePoolByMaturityScore, readPremiseMaturityScore } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
-import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
+import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView, premiseReviewSourcePool } from './premise-selection-review';
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremiseText} from './premise-source-bindings';
@@ -6939,7 +6939,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       +'逐项独立核对本次实际causalPlan每个行动、条件、结果，以及计划外反转与兑现主张。'
       +'真实缺口须返回gap并按同一原池来源证据决定restore_source_conditions或replace_from_pool。'
       +'本轮只输出payoffChecks，不返回sourceChecks、categoryChecks、genreChecks或新的故事事实。'
-      +'\n【唯一不可更改的原池】'+JSON.stringify(selection.pool)
+      +'\n【唯一不可更改的原池】'+JSON.stringify(premiseReviewSourcePool(selection))
       +'\n【索引修正后的题材全文】'+JSON.stringify(selection.selected)
       +premisePayoffReviewDirective(selection)
       +'\n只输出JSON：{"payoffChecks":[按上述逐卡目录完整填写每项因果核查]}。',
@@ -7013,7 +7013,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ? '\n当前为锁定前独立来源、因果、分类与流派同次审核，只审查、不改选。必须对causalPlan每个关键结果的必要条件与整体反转兑现核对，连同计划之外的反转，尤其对证明主线真相之外另行声称的任命、追责、退亲、资格或奖励逐项反证独立决定者与真实采纳依据，不能用第一项通过概括担保第二项；执行下方唯一的premisePayoffReviewDirective逐项证据合同；其中已完整列出行动和证据传递、归责、权限、决定、时间、对手反制。尤其核对物证的物理来源与样本取得链；原池与展开同样漏写关键成立条件也须返回gap，不能凭结局自述推断条件。来源审查、分类机制和手动流派落实仍分别返回独立结论；不可另造平行清单，不增加审核轮次。'
         : '\n当前是锁定前同构专责核对：逐对核对双方真实主动策略、行动升级、胜负转换和代价，判断是否存在结构相同而仅替换职业、道具或年代的重复题材。共同流派外壳不等于同构，差异必须落在因果链及独立选择上。来源、因果、兑现、分类与流派已由并行的来源审核分别检查，本次不得重复否决同一终局、要求额外程序或虚构反事实缺口。只根据本批双方的实际原文输出成对同构证据。')
       + (mode === 'source_drift' ? '本次来源继承这一部分逐项核对每个已选展开是否保持同ID原池storyCore的事实、压力、行动方向和结局承诺；同批重合由另一个独立Gate审核，本次仍须完成上文因果兑现、分类与流派结论。核对的是与原池明确约束是否兼容，不要求所有展开句都已逐字写入骨架；具体判据按GEN-002执行。不由评审补造候选没有写的事实。对于代写、转交、救助等多方动作，先分清原文明确的实施者、受益者与接收者；原文没有写明的角色关系不得由评审补成确定事实，更不能在修订前后按相反解释各判一次冲突。若原池只写人物提出请求，先核实展开是否仍保留请求发生；后文揭示真实动机不同不能单凭动机变化判来源冲突。核对状态与地点须分清先后阶段，不把后来变化倒推为前一事件未发生。' : '本次只逐对比较已选项实质差异，不审来源偏移，逐对比较行动策略、升级、胜负及代价。共同主题、正常类型元素不单独判同构，但不得因职业、地点或证据道具不同就漏掉真实的结构同构；具体职业和道具不同也不能掩盖相同的选择—反制—兑现链。普通扮猪吃虎类型外壳本身不构成同构。引用双方原文说明真实同构；普通流派外壳本身不算重复。因果兑现由独立来源审核承担，本次不重复审核终局成立条件。')
-      + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(selection.pool.filter((item:any)=>selection.selected.some((selected:any)=>selected.premiseId===item.premiseId))) : '')
+      + (mode === 'source_drift' ? '\n【原轻量池中对应已选ID的完整原项】' + JSON.stringify(premiseReviewSourcePool(selection)) : '')
       + (overlapFocusIds.length ? '\n【本次变化项】' + JSON.stringify(overlapFocusIds)
         + '\n【本次必须独立比较的无序题材配对】' + JSON.stringify(premiseOverlapPairs(selection,overlapFocusIds))
         + '。逐对核对所有列出配对，包括变化项之间与变化项对保留项；保留项之间的旧配对已独立核查，不重复消耗模型审查。只报告列出配对中的实际同构缺陷，issues可以交换两端身份但不能引用目录之外的配对；不得因题材身份、职业或证据道具不同遗漏实质同构。' : '')

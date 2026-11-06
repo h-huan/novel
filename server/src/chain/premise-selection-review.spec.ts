@@ -4,7 +4,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseReviewSourcePool, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -1359,4 +1359,25 @@ it('does not let final-card rejection overflow evict all earlier independently e
  expect(result.some(x=>x.startsWith('首轮独立来源因果缺口'))).toBe(true);
  expect(result.some(x=>x.startsWith('完整卡未通过质量门'))).toBe(true);
  expect(new Set(result).size).toBe(8);
+});
+
+it('sends reviewers only immutable original facts for the actual identities, without dropping any real story text',()=>{
+ const pool=['A','B','C'].map(id=>({...premise(id),premiseMaturityScore:85,
+   internalScoreExplanation:'不得让未经审查的自评分成为来源证明',
+   unneededServerCache:{expensive:'无关备用缓存'},
+ }));
+ const before=structuredClone(pool);
+ const projected=premiseReviewSourcePool({pool,selected:[{...pool[2]},{...pool[0]}]} as any);
+ expect(projected.map(row=>row.premiseId)).toEqual(['A','C']);
+ for(const row of projected){
+   const source=pool.find(item=>item.premiseId===row.premiseId)!;
+   expect(row.storyCore).toBe(source.storyCore);
+   expect(row.storyCategory).toBe(source.storyCategory);
+   expect(row.storyCategoryId).toBe(source.storyCategoryId);
+   expect(row.workingTitle).toBe(source.workingTitle);
+   expect(row).not.toHaveProperty('premiseMaturityScore');
+   expect(row).not.toHaveProperty('unneededServerCache');
+ }
+ expect(pool).toEqual(before);
+ expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(pool).length);
 });

@@ -398,6 +398,20 @@ export function completePremiseSourceProof(value:any,selection:PremiseSelectionR
  // missing, mathematically identical server projection may be supplied here.
  return {...value,sourceChecks:[...value.sourceChecks,...exact.filter(row=>!value.sourceChecks.some((check:any)=>check?.ref===row.ref))]};
 }
+/** Model transport only: independent reviewers need the immutable ORIGINAL facts
+ * for the identities they actually review, not score/auto-choice metadata or
+ * unrelated reserve candidates. The real pool remains intact for the same
+ * source, category, genre, causal and originality validators. */
+export function premiseReviewSourcePool(selection:Pick<PremiseSelectionResult,'selected'|'pool'>){
+ const reviewedIds=new Set(selection.selected.map(item=>String(item.premiseId)));
+ return selection.pool.filter(seed=>reviewedIds.has(String(seed.premiseId)))
+   .map(seed=>({
+     premiseId:seed.premiseId,workingTitle:seed.workingTitle,
+     storyCategoryId:seed.storyCategoryId,storyCategory:seed.storyCategory,
+     storyCore:seed.storyCore,
+   }));
+}
+
 export function premiseSourceAuditView(selection:PremiseSelectionResult){
  return selection.selected.map(candidate=>{
   const exact=exactPremiseSourceFields(candidate,selection.pool.find(seed=>seed.premiseId===candidate.premiseId));
