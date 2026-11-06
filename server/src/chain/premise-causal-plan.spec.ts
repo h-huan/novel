@@ -275,7 +275,11 @@ describe('plan critical prerequisites before full story cards',()=>{
   it('rebinds valid receipts and invalidates any changed plan or incomplete proof',async()=>{
     const s=selection(['A','B']),cache=new Map(),review=vi.fn(async input=>report(input));
     await reviewChangedPremiseSources(s,'same rules',cache,review);
-    const next=structuredClone(s);next.selected[1].causalPlan.reverse();
+    const next=structuredClone(s);
+    // Change one valid earlier condition instead of reversing causal time.
+    next.selected[1].causalPlan[1].conditions.push({
+      field:'openingEvent',quote:next.selected[1].openingEvent,
+    });
     const merged=await reviewChangedPremiseSources(next,'same rules',cache,review);
     expect(review.mock.calls[1][0].selected.map((item:any)=>item.premiseId)).toEqual(['B']);
     expect(premisePayoffReviewIssues(merged,next)).toEqual([]);

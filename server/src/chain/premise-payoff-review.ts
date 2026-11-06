@@ -41,7 +41,7 @@ export function premiseDecisionEvidenceIssues(check:any,candidate:Record<string,
  // Earlier completed results may remain as facts; source review must still
  // independently judge whether they can actually support this decision.
  const plan=Array.isArray(candidate.causalPlan)?candidate.causalPlan:[];
- const indexMatch=/causalPlan\\[(\\d+)\\]$/.exec(ref);
+ const indexMatch=/causalPlan\[(\d+)\]$/.exec(ref);
  const currentIndex=indexMatch?Number(indexMatch[1]):0;
  const unavailableResults=plan.slice(currentIndex).flatMap((link:any)=>
   typeof link?.result?.quote==='string'?[link.result.quote]:[]);
