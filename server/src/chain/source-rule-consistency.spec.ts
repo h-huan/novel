@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ChainController } from './chain.controller';
 import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
 
 describe('generic world source validation', () => {
@@ -76,5 +77,26 @@ describe('world JSON root recovery before unchanged semantic and source Gates',(
    const normalized=normalizeWorldSourceCandidate(value);
    expect(describeWorldSourceCandidate(normalized,'甲').length).toBeGreaterThan(0);
   }
+ });
+});
+
+describe('project activation world source contract',()=>{
+ it('accepts an authored empty long-novel rule list without substituting powerSystem, but keeps short-world and malformed rules blocked',()=>{
+   const controller:any=Object.create(ChainController.prototype);
+   let kind='long_novel';
+   let rules='[]';
+   controller.db={getDb:()=>({prepare:(sql:string)=>({
+     get:()=>sql.includes('FROM projects')?{type:kind}:sql.includes('world_settings')?{story_premise:'已确认故事',rules}:undefined,
+   })})};
+   expect(()=>controller.assertProjectSourceCompleteness('p')).not.toThrow();
+   kind='short_story';
+   expect(()=>controller.assertProjectSourceCompleteness('p')).toThrow('短篇世界观缺少');
+   rules='["只在行动之后生效"]';
+   expect(()=>controller.assertProjectSourceCompleteness('p')).not.toThrow();
+   kind='long_novel';
+   rules='{"not":"an array"}';
+   expect(()=>controller.assertProjectSourceCompleteness('p')).toThrow('格式无效');
+   rules='[["历史嵌套规则"]]';
+   expect(()=>controller.assertProjectSourceCompleteness('p')).not.toThrow();
  });
 });

@@ -7700,7 +7700,14 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
   private async assertOutlineFactLedger(projectId: string, canonicalBrief: string, executionStandard: string): Promise<void> {
     const db = this.db.getDb();
-    const outlineWorld = db.prepare('SELECT * FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1').get(projectId);
+    const savedWorld = db.prepare('SELECT * FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1').get(projectId);
+    // Long creation reuses the ORIGINAL chapter fact review budget. Supply
+    // its full immutable source hierarchy instead of only the world main row:
+    // otherwise changed role permissions or mechanism constraints in the
+    // saved profile are invisible to the long-novel acceptance gate.
+    const savedWorldProfile = db.prepare('SELECT synopsis,rules,tech_supernatural,system_mechanics,ending FROM world_system_profiles WHERE project_id=? LIMIT 1').get(projectId);
+    const savedCharacters = db.prepare('SELECT name,identity,abilities,relationships,arc,personality FROM characters WHERE project_id=? ORDER BY is_pov_character DESC,created_at,id').all(projectId);
+    const outlineWorld = { world: savedWorld, worldProfile: savedWorldProfile, characters: savedCharacters };
     const outlineFacts = db.prepare('SELECT "order",title,content,scenes FROM outlines WHERE project_id=? AND level=\'chapter\' ORDER BY "order"').all(projectId) as any[];
     await this.assertOutlineCandidateFacts(projectId, canonicalBrief, executionStandard, outlineWorld, outlineFacts);
   }
@@ -7770,11 +7777,18 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   private assertProjectSourceCompleteness(projectId: string): void {
     const db = this.db.getDb();
     const world = db.prepare('SELECT story_premise,rules FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1').get(projectId) as { story_premise?: string; rules?: string } | undefined;
-    const savedCoreRules = this.safeExtractJson<unknown>(String(world?.rules || '[]'), []);
-    if (!Array.isArray(savedCoreRules) || !savedCoreRules.some(rule => typeof rule === 'string' && rule.trim())) {
-      // 这里曾把 rules=[] 的世界观主记录视为已存在，后果是章纲把确认题材的
-      // 门后机制误判成“未授权”，再生成两章阻断文案并消耗后续角色与资料调用。
-      throw new Error('已保存世界观核心规则为空，不能激活或生成正文；必须先按确认题材重建世界观。');
+    if (!world) throw new Error('已保存世界观缺失，不能激活或生成正文');
+    const savedCoreRules = this.safeExtractJson<unknown>(String(world.rules ?? 'null'), null);
+    const isRuleArray=(value:unknown):boolean=>Array.isArray(value)
+      &&value.every((row:unknown)=>Array.isArray(row)?isRuleArray(row):typeof row==='string'&&row.trim().length>0);
+    if (!isRuleArray(savedCoreRules)) throw new Error('已保存世界观核心规则格式无效，不能激活或生成正文');
+    const project = db.prepare('SELECT type FROM projects WHERE id=?').get(projectId) as {type?:string}|undefined;
+    // The short-world producer requires at least one actual rule. The
+    // long-world producer permits rules=[] for realistic stories with no
+    // independent if-then mechanism. Do not silently substitute powerSystem
+    // or reject an output that the producing contract itself accepts.
+    if (String(project?.type)!=='long_novel' && normalizeWorldRuleStrings(savedCoreRules).length===0) {
+      throw new Error('短篇世界观缺少已确认的核心因果规则，不能激活或生成正文');
     }
     // 这里曾有按单本小说的门与回拨词形写死的第二份源规则检查，后果是
     // 换题材或换措辞便漏判。跨资料语义一致性由通用层级审查与最终 Gate 执行。

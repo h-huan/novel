@@ -1,7 +1,8 @@
 import {STORY_PREREQUISITE_POLICY} from '../../shared/src/执行标准';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ChainController } from './chain.controller';
 
 const controllerSource = readFileSync(
   fileURLToPath(new URL('./chain.controller.ts', import.meta.url)),
@@ -33,6 +34,23 @@ describe('preselection reader promise and independent title verdict', () => {
 });
 
 describe('creation consistency architecture invariants', () => {
+  it('reuses the existing long fact-ledger review for world profile and all persisted core role facts',async()=>{
+    const controller:any=Object.create(ChainController.prototype);
+    const savedWorld={rules:'[]',story_premise:'原故事'};
+    const savedProfile={rules:'',tech_supernatural:'现实查证机制'};
+    const savedRoles=[{name:'甲',identity:'档案员',abilities:'只读权限',relationships:'[]'}];
+    controller.db={getDb:()=>({prepare:(sql:string)=>({
+      get:()=>sql.includes('world_system_profiles')?savedProfile:savedWorld,
+      all:()=>sql.includes('FROM characters')?savedRoles:[{order:0,title:'第一章',content:'甲核对记录'}],
+    })})};
+    controller.assertOutlineCandidateFacts=vi.fn();
+    await controller.assertOutlineFactLedger('project','原始已确认题材','原执行标准');
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledTimes(1);
+    const args=controller.assertOutlineCandidateFacts.mock.calls[0];
+    expect(args[1]).toBe('原始已确认题材');
+    expect(args[3]).toEqual({world:savedWorld,worldProfile:savedProfile,characters:savedRoles});
+    expect(args[4]).toHaveLength(1);
+  });
   it('uses transactional short roles and refuses unverified saved-character shortcuts',()=>{
     expect(controllerSource).toContain("db.exec('SAVEPOINT creation_character_batch')");
     expect(controllerSource).toContain("db.exec('ROLLBACK TO SAVEPOINT creation_character_batch')");
