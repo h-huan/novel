@@ -259,6 +259,35 @@ export function causalChapterEvidenceCatalog(
  return {entries,aliasesByReview};
 }
 
+
+/** Model-facing reference projection only: all original chapter actions and
+ * outcome obligations remain in the shared evidence catalog and strict Gate.
+ * A sibling action is a location hint, never proof of its claimed outcome. */
+export function causalPlanningProofPromptCatalog(
+ chapters:readonly Record<string,unknown>[],
+ entries:readonly CausalChapterEvidenceEntry[],
+ anchors:ReturnType<typeof causalEvidenceAnchors>,
+) {
+ if(entries.length!==chapters.length)throw new Error('章纲结果目录与章节数量不一致');
+ const byId=new Map(anchors.map(a=>[a.id,a]));
+ const fields=new Map(anchors.filter(a=>a.source==='body'&&/^body:v\d+$/.test(a.id)&&a.path)
+   .map(a=>[a.path!,a.id]));
+ return entries.map((entry,index)=>{
+   const actionLookup:Array<{resultAnchorId:string;actionAnchorId:string}>=[];
+   const actions=(chapters[index] as any)?.characterActions;
+   if(Array.isArray(actions))for(let i=0;i<actions.length;i++){
+     const path=index+'.characterActions.'+i;
+     const actionId=fields.get(path+'.action');
+     if(!actionId)continue;
+     for(const resultId of entry.resultAnchorIds)
+       if(byId.get(resultId)?.path===path+'.result')
+         actionLookup.push({resultAnchorId:resultId,actionAnchorId:actionId});
+   }
+   return {chapterNumber:entry.chapterNumber,bodyIndex:index,
+     resultAnchorIds:[...entry.resultAnchorIds],actionLookup};
+ });
+}
+
 /** Partition a large planning proof by actual chapter-result workload,
  * not by an arbitrary chapter count. The original audit was allowed an
  * initial call and one correction. Two *single-pass* independent shards

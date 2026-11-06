@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -673,4 +673,33 @@ it('partitions a dominant chapter by server-owned result identities without omit
  expect(partitions.flat()).toEqual(full);
  expect(new Set(partitions.flat()).size).toBe(full.length);
  expect(causalPlanningProofResultPartitions(chapters,40)).toEqual([full]);
+});
+
+
+it('large outline audit keeps every exact result but avoids resending all action IDs',()=>{
+ const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'员工核对异常，但主管尚未作出最终决定。',
+   scenes:[{outcome:'主管暂缓处分决定。'}],
+   characterActions:[{character:'员工',action:'员工当面递交带签名的记录。',result:'主管暂缓处分决定。'},
+     {character:'员工',action:'员工向人事递交离职申请。',result:'离职申请已交，人事尚未批准。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ const shown=causalPlanningProofPromptCatalog(chapters,entries,anchors);
+ expect(shown).toHaveLength(1);
+ expect(shown[0].bodyIndex).toBe(0);
+ expect(shown[0].resultAnchorIds).toEqual(entries[0].resultAnchorIds);
+ expect(shown[0]).not.toHaveProperty('anchorIds');
+ expect(shown[0].actionLookup.length).toBeGreaterThan(0);
+ for(const hint of shown[0].actionLookup){
+   const action=anchors.find(a=>a.id===hint.actionAnchorId)!;
+   const result=anchors.find(a=>a.id===hint.resultAnchorId)!;
+   expect(result.path?.replace(/\.result$/,'.action')).toBe(action.path);
+ }
+ expect(JSON.stringify(shown).length).toBeLessThan(JSON.stringify(entries).length);
+ expect(Object.values(aliasesByReview).flat().length).toBeGreaterThan(0);
+ const hint=shown[0].actionLookup[0];
+ const checked=materializeCausalAuditAnchors({status:'evaluated',reason:'核对主管实际处分或批准的前置条件',
+   transitions:[{chapterNumber:3,actionAnchorId:hint.actionAnchorId,resultAnchorId:hint.resultAnchorId,
+     bridgeAnchorId:'',status:'gap',reason:'递交记录或申请并不自动证明处分或审批已经发生'}]},body,{});
+ expect(validateCausalAudit(checked,body,{}).verified).toBe(true);
+ expect(validateCausalAudit(checked,body,{}).issues).toHaveLength(1);
 });
