@@ -448,7 +448,7 @@ describe('decisive planning action proof', () => {
     expect(catalog[1].bodyIndex).toBe(1);
     expect(catalog[0]).not.toHaveProperty('anchorIds');
     expect(catalog[1]).not.toHaveProperty('anchorIds');
-    const original=JSON.parse(prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\\n')[0]);
+    const original=JSON.parse(prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\n')[0]);
     const chapter0=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('0.'));
     const chapter1=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('1.'));
     expect(chapter0.length).toBeGreaterThan(0);
