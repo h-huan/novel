@@ -65,6 +65,15 @@ export function selectedPremiseEvidenceForIdeaCard(value: unknown): Record<strin
   return evidence ? structuredClone(evidence) : null;
 }
 
+/** Lossless final-review transport only. The original server-owned premise
+ * remains untouched in the WeakMap and is still consumed by every semantic
+ * validation. Exact source-section and repeated-field references are
+ * restored from the complete storyCore / prior field in the SAME premise. */
+export function presentationLockedPremiseView(card: unknown): Record<string, unknown> | null {
+  const original=selectedPremiseEvidenceForIdeaCard(card);
+  return original ? projectedPremisePromptView(original) : null;
+}
+
 export const SELECTED_PREMISE_FIELDS = [
   'protagonistSituation',
   'openingEvent',
