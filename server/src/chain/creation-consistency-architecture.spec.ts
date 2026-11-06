@@ -33,6 +33,13 @@ describe('preselection reader promise and independent title verdict', () => {
 });
 
 describe('creation consistency architecture invariants', () => {
+  it('carries the original scored pool ranking through selection, aggregate recovery and bounded refill',()=>{
+    expect(controllerSource).toContain('const rankedOriginalPool=rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)');
+    expect(controllerSource).toContain('pool: rankedOriginalPool,');
+    expect(controllerSource).toContain('pool:rankedOriginalPool,selectedPremises:repaired.selected');
+    expect(controllerSource).toContain('const rankedRefillPool=rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores)');
+    expect(controllerSource).toContain('pool:rankedRefillPool,selectedPremises:planned.selected');
+  });
   it('refill model transport matches the initially screened pool instead of reading obsolete raw.storyCore',()=>{
     const initial=indexOrFail(controllerSource,'screenPremisePoolBatch(batch.candidates)');
     const start=indexOrFail(controllerSource,'const newSeedBatches=await independentReviewBatches');

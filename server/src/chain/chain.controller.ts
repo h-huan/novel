@@ -2,7 +2,7 @@ import {bindModelRequestClock,remainingModelRequestTime} from './model-request-c
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
 import {chapterConditionReviewIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
-import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS, rankPremisePoolByMaturityScore } from './idea-discovery-contract';
+import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS, rankPremisePoolByMaturityScore, readPremiseMaturityScore } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
 import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
@@ -5401,9 +5401,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               continue;
             }
             candidatePool.push(bound);
-            if(typeof item.premiseMaturityScore==='number'&&Number.isInteger(item.premiseMaturityScore)
-              &&item.premiseMaturityScore>=0&&item.premiseMaturityScore<=100)
-              premiseMaturityScores.set(String(bound.premiseId),item.premiseMaturityScore);
+            const score=readPremiseMaturityScore(item.premiseMaturityScore);
+            if(score!==null)premiseMaturityScores.set(String(bound.premiseId),score);
             stats.retained += 1;
             const categoryKey = storyCategory || String(storyCategoryId || 'unknown');
             stats.categoryBindingCounts[categoryKey] = (stats.categoryBindingCounts[categoryKey] || 0) + 1;
@@ -5624,8 +5623,10 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,adaptiveDiscoveryConcurrency(candidatePool.length));
         if(!preselectionTarget)throw failWithPoolAudit(new Error('共享来源审核额度无法覆盖请求数量，未支付无法审核的选优调用'),
           'fixed_pool_selection','preselection_review_capacity_shortfall');
-        Object.assign(poolGenerationAudit,{maturityRanking:rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)
-          .map(item=>({premiseId:item.premiseId,score:premiseMaturityScores.get(String(item.premiseId))??null}))});
+        const rankedOriginalPool=rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores);
+        Object.assign(poolGenerationAudit,{maturityRanking:rankedOriginalPool
+          .map(item=>({premiseId:item.premiseId,score:premiseMaturityScores.get(String(item.premiseId))??null})),
+          maturityScoreMissing:rankedOriginalPool.length-premiseMaturityScores.size});
         const selectionStartedAt = Date.now();
         let selectionWallMs = 0;
         let parsedSelection: any = null;
@@ -5634,7 +5635,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let initialSelection = await (async () => {
           try {
             const selectionResponse = await this.realLLM.generate({
-              prompt: buildPremiseSelectionPrompt('selection', { pool: rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores),targetCount:preselectionTarget }),
+              prompt: buildPremiseSelectionPrompt('selection', { pool: rankedOriginalPool,targetCount:preselectionTarget }),
               scenario: 'idea_generate',
               timeout: discoveryBudget.complexTimeoutMs,
               maxEmptyRetries: 1,
@@ -5664,7 +5665,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                 overflowIgnored:overflowCount}});
             this.logger.log('idea-discover: global selection serverProjected='+projectedCount+' sourceBound='+boundCount+' target='+preselectionTarget);
             const shaped = normalizePremiseSelectionPayload({
-              pool: candidatePool,
+              pool: rankedOriginalPool,
               selectedPremises: Array.isArray(rawSelected) ? rawSelected.map(item => {
                 if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
                 const { causalPlan: _pendingIndex, ...story } = item;
@@ -5684,7 +5685,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                   +excludedIds.join('、')+'；仍须原有来源、兑现、流派、同构独立审核');
                 Object.assign(poolGenerationAudit,{invalidCausalPlanIds:excludedIds});
               }
-              const selected = normalizePremiseSelectionPayload({pool:candidatePool,selectedPremises:repaired.selected},
+              const selected = normalizePremiseSelectionPayload({pool:rankedOriginalPool,selectedPremises:repaired.selected},
                 preselectionTarget,premisePoolSize,discoveryCategories,minimumSelectedCountForPool(candidatePool.length));
               selectionWallMs = Date.now() - selectionStartedAt;
               if (!variedCategories) for (const premise of selected.selected) {
@@ -6494,9 +6495,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                   }catch{continue;}
                   existingKeys.add(titleKey);existingKeys.add(coreKey);
                   unusedSeeds.push(bound);
-                  if(typeof seed.premiseMaturityScore==='number'&&Number.isInteger(seed.premiseMaturityScore)
-                    &&seed.premiseMaturityScore>=0&&seed.premiseMaturityScore<=100)
-                    premiseMaturityScores.set(String(bound.premiseId),seed.premiseMaturityScore);
+                  const score=readPremiseMaturityScore(seed.premiseMaturityScore);
+                  if(score!==null)premiseMaturityScores.set(String(bound.premiseId),score);
                   nextId++;
                 }
                 fulfillmentActions.push({phase:'lightweight_pool_refill',
@@ -6515,7 +6515,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 }
               }
             }
-            const refillTarget=Math.min(unusedSeeds.length,desiredSupplement,
+            const rankedRefillPool=rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores);
+            const refillTarget=Math.min(rankedRefillPool.length,desiredSupplement,
               affordableFullCardRefillCount(unusedSeeds.length,
                  presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode));
             if(refillTarget>=missingAfterFirstGate
@@ -6523,7 +6524,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               &&reselectionCompletionBudget.remaining>=1){
               try{
                 const selectionAnswer=await this.realLLM.generate({
-                  prompt:buildPremiseSelectionPrompt('selection',{pool:rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores),
+                  prompt:buildPremiseSelectionPrompt('selection',{pool:rankedRefillPool,
                     targetCount:refillTarget,minimumCount:missingAfterFirstGate,
                      failureReasons:refillFailureReasons()}),
                   scenario:'idea_generate',responseFormat:'json_object',
@@ -6537,9 +6538,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 const admittedRows=capRankedPremiseSelections(returnedRows,refillTarget);
                 if(returnedRows.length>refillTarget)this.logger.warn('idea-discover: refill selector returned '
                   +returnedRows.length+' ranked identities for '+refillTarget+' funded slots; surplus ignored before review');
-                const source=projectPremiseSourceChoices(admittedRows,unusedSeeds);
+                const source=projectPremiseSourceChoices(admittedRows,rankedRefillPool);
                 const prelim=normalizePremiseSelectionPayload({
-                  pool:unusedSeeds,
+                  pool:rankedRefillPool,
                   selectedPremises:source.map((item:any)=>{
                     if(!item||typeof item!=='object'||Array.isArray(item))return item;
                     const {causalPlan:_pendingIndex,...story}=item;
@@ -6564,7 +6565,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                 const planned=await this.completePremiseCausalPlans(
                   sourceForPlan,reselectionCompletionBudget,missingAfterFirstGate);
                 const aligned=normalizePremiseSelectionPayload({
-                  pool:unusedSeeds,selectedPremises:planned.selected,
+                  pool:rankedRefillPool,selectedPremises:planned.selected,
                 },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
                 let refillWork:DiscoveryCardWork<Record<string,unknown>,Record<string,unknown>>|undefined;
                 let refillTask:Promise<void>|undefined,abortRefill=false;

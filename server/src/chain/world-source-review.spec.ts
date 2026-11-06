@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {applyUncommittedWorldPatch,buildWorldSourceReviewPrompt,describeWorldSourceReview,materializeWorldSourceReview,worldSourceAnchors,worldCreationAuthority,worldReviewFailureOrigin} from './world-source-review';
+import {applyUncommittedWorldPatch,buildWorldSourceReviewPrompt,describeWorldSourceReview,materializeWorldSourceReview,worldSourceAnchors,worldReviewFields,worldCreationAuthority,worldReviewFailureOrigin} from './world-source-review';
 const parent={confirmed:{relation:'店主欠俱乐部人情。',place:'店铺占一楼大厅与二楼训练间。'}};
 const child={history:'俱乐部欠店主人情。',geography:'店铺在二楼，一楼大厅另有机器。',rules:['每局结束分别结算。','对方能拒绝诱饵。'],specialSettings:''};
 const findings=()=>[
@@ -9,7 +9,7 @@ const findings=()=>[
 ];
 function report(conflicts=findings()){
  const anchors=worldSourceAnchors(child);
- return {consistent:conflicts.length===0,fieldChecks:Object.keys(child).map(field=>({field,status:conflicts.some(c=>anchors.find(a=>a.ref===c.lowerRef)?.path[0]===field)?'conflict':'compatible',reason:'逐项核对当前字段中的人物关系、条件及实际排他范围'})),contradictions:conflicts};
+ return {consistent:conflicts.length===0,fieldChecks:worldReviewFields(child).map(field=>({field,status:conflicts.some(c=>{const path=anchors.find(a=>a.ref===c.lowerRef)?.path||[];return field===path[0]||field===path.join('.');})?'conflict':'compatible',reason:'逐项核对当前字段中的人物关系、条件及实际排他范围'})),contradictions:conflicts};
 }
 describe('unpublished world source review and minimal repair',()=>{
  it('requires actual full field coverage even when the global verdict is a valid old report',()=>{
@@ -17,6 +17,14 @@ describe('unpublished world source review and minimal repair',()=>{
   const value=report();expect(describeWorldSourceReview(value,parent,child)).toEqual([]);
   expect(describeWorldSourceReview({...value,fieldChecks:value.fieldChecks.slice(1)},parent,child).length).toBeGreaterThan(0);
   expect(describeWorldSourceReview({...value,fieldChecks:[...value.fieldChecks,value.fieldChecks[0]]},parent,child).length).toBeGreaterThan(0);
+ });
+ it('audits every world rule separately before repair and rejects a single blanket rules verdict',()=>{
+  const good=report([]);expect(worldReviewFields(child)).toContain('rules.0');expect(worldReviewFields(child)).toContain('rules.1');
+  expect(describeWorldSourceReview(good,parent,child)).toEqual([]);
+  const skipped={...good,fieldChecks:good.fieldChecks.filter(check=>check.field!=='rules.1')};
+  expect(describeWorldSourceReview(skipped,parent,child)).toContainEqual(expect.stringContaining('全部实际世界观字段'));
+  const blanket={...good,fieldChecks:good.fieldChecks.map(check=>check.field==='rules.0'?{...check,field:'rules'}:check)};
+  expect(describeWorldSourceReview(blanket,parent,child)).toContainEqual(expect.stringContaining('全部实际世界观字段'));
  });
  it('binds conflict quotes from the correct two original sources and preserves all judgments',()=>{
   const value=report(),before=JSON.stringify(value),result=materializeWorldSourceReview(value,parent,child);

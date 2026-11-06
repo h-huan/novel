@@ -280,6 +280,13 @@ export function capRankedPremiseSelections(rows:unknown,limit:number):unknown {
   return Array.isArray(rows)?rows.slice(0,limit):rows;
 }
 
+/** Read only a bounded, source-supplied candidate-generation score. Never infer
+ * a missing grade from story length, title punctuation or arbitrary keywords. */
+export function readPremiseMaturityScore(raw:unknown):number|null{
+ const value=typeof raw==='number'?raw:(typeof raw==='string'&&/^\d{1,3}$/.test(raw.trim())?Number(raw.trim()):NaN);
+ return Number.isInteger(value)&&value>=0&&value<=100?value:null;
+}
+
 /** Preserve immutable premise IDs while ranking the original pool by the scores
  * produced IN the existing candidate-generation calls. Scores decide screening
  * priority only: independently evidenced causal, category and appeal Gates

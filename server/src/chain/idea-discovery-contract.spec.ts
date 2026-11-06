@@ -20,11 +20,17 @@ import {
   normalizePremiseSelectionPayload,
   capRankedPremiseSelections,
   rankPremisePoolByMaturityScore,
+  readPremiseMaturityScore,
   selectedPremiseEvidenceForIdeaCard,
   presentationLockedPremiseView,
 } from './idea-discovery-contract';
 
 describe('original-pool same-generation maturity ranking',()=>{
+  it('accepts integer wire scores without fabricating missing, invalid or negative scores',()=>{
+    expect(readPremiseMaturityScore(93)).toBe(93);
+    expect(readPremiseMaturityScore('87')).toBe(87);
+    for(const value of [null,undefined,'87.5','高分',-2,101,83.5])expect(readPremiseMaturityScore(value)).toBeNull();
+  });
   it('ranks by stored original-pool scores, preserves identities and keeps legacy candidates without a score',()=>{
     const pool=[{premiseId:'P1'},{premiseId:'P2'},{premiseId:'P3'}];
     expect(rankPremisePoolByMaturityScore(pool,new Map([['P1',70],['P2',94]]))
