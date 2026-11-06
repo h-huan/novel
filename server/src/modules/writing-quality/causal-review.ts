@@ -1,7 +1,7 @@
 import { resolveQualityEvidence } from './quality-issue';
 import { STORY_CAUSAL_REVIEW_POLICY } from '../../../shared/src/system-workflow-rules.registry';
 
-export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false, compactPlanningProof = false) {
+export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false, compactPlanningProof = false, requiredResultSubset?:readonly string[]) {
   const targets=causalAuditRepairTargets(audit,errors);
   // This is the SAME selectable catalog used by the citation resolver. For
   // structured outline JSON its addresses are body:v... and clause IDs,
@@ -48,7 +48,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   // server for the unchanged literal validator, with no semantic shortcuts.
   const requiredResultIds=compactPlanningProof&&chapterRows.length
     ?new Set(causalChapterEvidenceCatalog(chapterRows,visibleAnchors.filter(a=>a.source==='body'))
-        .entries.flatMap(entry=>entry.resultAnchorIds))
+        .entries.flatMap(entry=>entry.resultAnchorIds).filter(id=>!requiredResultSubset||requiredResultSubset.includes(id)))
     :new Set<string>();
   const promptAnchors=compactPlanningProof
     ?focusedAnchors.map(anchor=>
@@ -269,6 +269,23 @@ export function causalChapterEvidenceCatalog(
  * A chapter remains indivisible: cross-field/cross-scene chronology is
  * required for its individual result proof.
  */
+/** If chapter-complete splitting still leaves one overloaded audit, split the
+ * SERVER-OWNED result inventory across the same two physical first-pass calls.
+ * Both reviewers receive every original chapter and its complete prior state;
+ * only result obligations are disjoint. No result or quality judgment is
+ * sampled, inferred or dropped. Above twice the safe burden retain the old
+ * first-pass plus targeted-correction path. */
+export function causalPlanningProofResultPartitions(
+ chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
+):string[][] {
+ if(!chapters.length)return [[]];
+ const body=JSON.stringify(chapters);
+ const anchors=causalEvidenceAnchorOptions(body,{});
+ const ids=causalChapterEvidenceCatalog(chapters,anchors).entries.flatMap(entry=>entry.resultAnchorIds);
+ if(ids.length<=maxSinglePassResults||ids.length>2*maxSinglePassResults)return [ids];
+ const midpoint=Math.ceil(ids.length/2);
+ return [ids.slice(0,midpoint),ids.slice(midpoint)];
+}
 export function causalPlanningProofGroups(
  chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
 ):Record<string,unknown>[][]{

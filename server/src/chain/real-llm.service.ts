@@ -12,7 +12,7 @@ import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors, quarantineUnprovedCausalBridges } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -726,7 +726,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     }
   }
 
-  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState', singlePass = false): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
+  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState', singlePass = false, requiredResultIds?: readonly string[]): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
     request=bindModelRequestClock(request);
     let chapters: any[] = [];
     try { chapters = JSON.parse(content).volumes.flatMap((volume: any) => volume.chapters || [])
@@ -767,6 +767,16 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
           issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
       }
+      const partitions=causalPlanningProofResultPartitions(chapters);
+      if(partitions.length>1){
+        const split=await boundedDiscoveryMap(partitions,adaptiveDiscoveryConcurrency(partitions.length),
+          resultIds=>this.auditPlanningActions(run,request,content,undefined,true,resultIds));
+        const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
+        if(failure)throw failure.reason;
+        const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
+        return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
+          issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
+      }
     }
     const body = JSON.stringify(chapters);
     const sources = { project_context: run.context || '{}', chapter_plan: JSON.stringify(request.planningSources || {}) };
@@ -775,8 +785,15 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       && /^(worldRules|world)(\.|$)/.test(anchor.path || '');
     const worldMechanisms = evidenceAnchors.filter(isWorldMechanism);
     const bodyAnchors = evidenceAnchors.filter(anchor => anchor.source === 'body');
-    const {entries:chapterEvidenceCatalog,aliasesByReview:resultAliasesByReview}=
+    const {entries:allChapterEvidence,aliasesByReview:resultAliasesByReview}=
       causalChapterEvidenceCatalog(chapters,bodyAnchors,resultField);
+    const allResultIds=new Set(allChapterEvidence.flatMap(entry=>entry.resultAnchorIds));
+    if(requiredResultIds?.some(id=>!allResultIds.has(id)))
+      return {verified:false,errors:['审查分片包含非本章服务器结果编号'],issues:[],audit:null};
+    const requiredSet=requiredResultIds?new Set(requiredResultIds):null;
+    const chapterEvidenceCatalog=requiredSet
+      ?allChapterEvidence.map(entry=>({...entry,resultAnchorIds:entry.resultAnchorIds.filter(id=>requiredSet.has(id))}))
+      :allChapterEvidence;
     let audit: any = null;
     let checked = { verified: false, errors: ['缺少关键场景行动结果审查'], issues: [] as any[] };
     for (let attempt = 0; attempt < (singlePass ? 1 : 2); attempt++) {
@@ -792,13 +809,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               || (anchor.source === 'project_context' && !/^(foreshadowing|outline|meta)(\.|$)/.test(anchor.path || ''))
               || audit?.transitions?.some((row: any) => row.bridgeAnchorId === anchor.id))))
             + '\n未证明的条件不能以未提供的来源或临时假设补齐。',
-        } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField, compactPlanningProof);
+        } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField, compactPlanningProof, requiredResultIds);
         const response = await this.generateInternal({ ...prompt, deadlineAt:request.deadlineAt,timeout:request.timeout, scenario: 'review', injectStandard: false,
           systemPrompt: prompt.systemPrompt + '\n独立核对关键场景的必要因果，不评分、不改写场景。',
           prompt: (attempt===0||countercheck
               ?'\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】'+body+'\n'
               :'\n【引用合同纠错】原章纲全部原文及路径已在下方证据目录；本次只修点名行，不重复传输整份章纲。\n')
-            + prompt.prompt + (compactPlanningProof ? '\n每个proofRows行的第一项为数字chapterNumber，' : '\n每项transitions另带chapterNumber，') + '须覆盖这些关键章：' + JSON.stringify(chapters.map(chapter => chapter.chapterNumber))
+            + prompt.prompt + (compactPlanningProof ? '\n每个proofRows行的第一项为数字chapterNumber，' : '\n每项transitions另带chapterNumber，') + '须覆盖这些关键章：' + JSON.stringify(chapterEvidenceCatalog.filter(entry=>entry.resultAnchorIds.length).map(entry=>entry.chapterNumber))
             + '。行动、结果证据必须实际属于声明的本章，不能以其它章节的结果代替。行动仅从本章anchorIds选地址，结果仅从本章resultAnchorIds选地址；原文由服务器按编号回填，不得自编、拼接或转述引文。\n【章号与本章证据地址对应】' + JSON.stringify(chapterEvidenceCatalog)
             + '\n服务器resultAnchorIds目录中的每一项均须单独核查并返回对应独立结果行，不能自行抽样；同一行动在场景结果、人物结果、冲突解决、状态、亮点、伏笔回收中的不同断言也分别核对。先一次收齐全部已有缺口，再交给同一次局部修复。普通动作直接结果可引用其实际行动，真实未来安排按planned核实，不为凑缺口强加额外手续。'
             + (resultField ? '\n本次核对出口状态目录：对应章resultAnchorIds逐项各有一条transitions，不抽样、不合并多个结果为一项。resultAnchorId必须来自该目录。先阅读完整responsibility中的事件先后，再核对该结果全部必要环节，而非仅证明最容易成立的一环；reason须交代行动前状态、必要条件是否实际满足。尤其不能从结果倒推尚有未完成任务，或把进入权限当成剥夺对手原有能力。prerequisites是待满足条件，字段名及同义复述不证明已满足。普通直接结果不追加程序；未来安排、线索埋设使用planned及实际理由，无需bridge，不得配成已兑现结果或报gap；心理选择按原文直接核对。' : '')
@@ -846,7 +863,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
             }
           }
         }
-        if (checked.verified && (audit.status !== 'evaluated' || chapters.some(chapter => !audit.transitions.some((row: any) =>
+        if (checked.verified && (audit.status !== 'evaluated' || chapters.some(chapter =>
+          chapterEvidenceCatalog.some(entry=>entry.chapterNumber===chapter.chapterNumber&&entry.resultAnchorIds.length>0)
+          && !audit.transitions.some((row: any) =>
           row.chapterNumber === chapter.chapterNumber && resolveQualityEvidence(JSON.stringify(chapter), row.actionEvidence).verified
             && resolveQualityEvidence(JSON.stringify(chapter), row.resultEvidence).verified)))) {
           checked = { ...checked, verified: false, errors: ['关键场景因果账目未按实际章号完整覆盖'] };

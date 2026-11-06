@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
@@ -656,4 +656,21 @@ it('compact initial proof removes repeated body prose but retains all result and
    {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v2','body:v1','gap','理由']]},
    {status:'evaluated',reason:'拒绝伪造',proofRows:[[1,'body:invented','body:v1',null,'gap','独立状态与结果不成立的实际理由']]},
  ])expect(()=>decodePlanningProofRows(invalid)).toThrow();
+});
+
+it('partitions a dominant chapter by server-owned result identities without omitting any result or chapter context',()=>{
+ const chapters=[
+  {chapterNumber:10,chapterFunction:'climax',content:'已有身份与行动均按完整事实保留。',
+   scenes:Array.from({length:85},(_,index)=>({outcome:'第十章结果'+index+'需要分别审查。'}))},
+  {chapterNumber:11,chapterFunction:'resolution',content:'完整故事中的前章因果仍需核对。',
+   scenes:[{outcome:'另一章真正完成了登记。'}]},
+ ];
+ const full=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(JSON.stringify(chapters),{}))
+  .entries.flatMap(entry=>entry.resultAnchorIds);
+ const partitions=causalPlanningProofResultPartitions(chapters);
+ expect(partitions).toHaveLength(2);
+ expect(partitions.every(part=>part.length<=72)).toBe(true);
+ expect(partitions.flat()).toEqual(full);
+ expect(new Set(partitions.flat()).size).toBe(full.length);
+ expect(causalPlanningProofResultPartitions(chapters,40)).toEqual([full]);
 });

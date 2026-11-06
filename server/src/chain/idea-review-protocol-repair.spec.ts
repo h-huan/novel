@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan,applyIdeaMissingPresentationRows,missingIdeaPresentationRetryPrompt} from './idea-review-protocol-repair';
 import {ideaReviewResponseExample,ideaPayoffBridgeIssues,ideaReviewEvidenceReferenceIssues,resolveIdeaReviewEvidence} from './idea-review-evidence';
-import {presentationReviewIssues,shouldBatchIdeaPresentation} from './idea-presentation-review';
+import {presentationReviewIssues,shouldBatchIdeaPresentation,targetIdeaReviews} from './idea-presentation-review';
 import {ChainController} from './chain.controller';
 const card={title:'当面退回委托',hook:'她把错误订单退回，拒绝替别人签字。',description:'她到唯一出口等负责人下班。',setting:'负责人下班只能从此门经过。',ending:'她在门口等到负责人。'};
 const fixture=()=>{
@@ -334,4 +334,20 @@ describe('semantic review batching honors the original physical-call ceiling',()
   expect(llm).toHaveBeenCalledOnce();
   expect(budget.remaining).toBe(0);
  });
+});
+
+it('uses the already-source-bound question for a short reviewer restatement without changing a failed verdict',()=>{
+ const grounded={...card,noveltyProof:{readerQuestion:'她把错误委托退回之后，负责人最终会如何回应她的决定？'}};
+ const report:any=ideaReviewResponseExample([grounded]);
+ report.reviews[0].readerQuestion='';
+ report.reviews[0].storyCoherent=false;
+ report.reviews[0].issues=['当下的决定仍缺少能够支撑结果的必要行动'];
+ const normalized=targetIdeaReviews(report,[grounded],[]);
+ expect(normalized.reviews[0].readerQuestion).toBe(grounded.noveltyProof.readerQuestion);
+ expect(normalized.reviews[0].storyCoherent).toBe(false);
+ expect(normalized.reviews[0].issues).toEqual(report.reviews[0].issues);
+ expect(presentationReviewIssues(resolveIdeaReviewEvidence(normalized,[grounded]),[grounded],true)).toEqual([]);
+ const unbound=targetIdeaReviews(report,[card],[]);
+ expect(presentationReviewIssues(resolveIdeaReviewEvidence(unbound,[card]),[card],true))
+  .toContain('第1张题材审查：readerQuestion至少8字');
 });

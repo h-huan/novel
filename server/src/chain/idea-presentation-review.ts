@@ -79,12 +79,24 @@ function normalizePresentationEnvelope(row: any): any {
   }
   return next;
 }
+/** A reviewer restating an already-locked reader question is not a new quality verdict.
+ * A missing/short restatement is a transport defect. Reuse only the actual
+ * card's source-bound question; never manufacture a question or change any
+ * negative six-criterion, payoff or reader-goal judgment. */
+function restoreLockedReaderQuestion(row:any,cards:readonly any[]):any {
+  const card=Number.isInteger(row?.position)?cards[row.position-1]:undefined;
+  if(!card||card.title!==row?.title)return row;
+  const locked=card?.noveltyProof?.readerQuestion;
+  if(typeof locked!=='string'||locked.trim().length<8)return row;
+  const received=typeof row?.readerQuestion==='string'?row.readerQuestion.trim():'';
+  return received.length<8?{...row,readerQuestion:locked.trim()}:row;
+}
 /** Reference verdicts are never accepted again; unknown/duplicate target rows still fail. */
 export function targetIdeaReviews(value: any, cards: readonly any[], references: readonly any[]): any {
   if (!Array.isArray(value?.reviews)) return value;
   const targets = new Set(cards.map(card => card.title));
   const referenceTitles = new Set(references.map(card => card.title).filter(title => !targets.has(title)));
-  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map(normalizePresentationEnvelope).map((row:any)=>({
+  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map(normalizePresentationEnvelope).map((row:any)=>restoreLockedReaderQuestion(row,cards)).map((row:any)=>({
     ...row, issues: Array.isArray(row?.issues) ? row.issues.map((issue:any)=> {
       if (typeof issue==='string') return issue;
       const criteria=['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'];
