@@ -22,7 +22,7 @@ describe('full-card peer comparison context remains narrative-only',()=>{
    plotTags:['小人物'],submissionTags:['未认证标签'],pov:'第一人称'};
   const reference=compactIdeaPresentationReferences([peer])[0];
   for(const key of ['title','storyCategory','protagonist','setting','hook','description',
-   'coreConflict','mainReversal','ending','scopeBreakdown'])expect(reference[key]).toEqual(peer[key]);
+   'coreConflict','mainReversal','ending','scopeBreakdown'] as const)expect(reference[key]).toEqual(peer[key]);
   for(const key of ['uniquePoint','noveltyProof','storyTone','writingStyle',
    'webNovelGenre','plotTags','submissionTags','pov'])expect(reference).not.toHaveProperty(key);
   expect(JSON.stringify(reference).length).toBeLessThan(JSON.stringify(peer).length);
