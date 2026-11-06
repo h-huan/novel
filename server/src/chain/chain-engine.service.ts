@@ -273,6 +273,8 @@ export class ChainEngineService {
       else {
         if(!Array.isArray(world.geography)||!world.geography.length)outputIssues.push('worldview.geography缺少实际地点');
         if(!Array.isArray(world.factions)||!world.factions.length)outputIssues.push('worldview.factions缺少实际势力');
+        if(world.rules!==undefined&&(!Array.isArray(world.rules)||world.rules.some((rule:any)=>typeof rule!=='string'||!rule.trim())))
+          outputIssues.push('worldview.rules如有规则必须是非空字符串数组，不得用体系对象或空白替代');
         for(const field of ['socialStructure','powerSystem','economy','culture'])
           if(typeof world[field]!=='string'||!world[field].trim())outputIssues.push('worldview缺少'+field+'的实际规则，不能交由下游补造');
         if(!Array.isArray(world.history))outputIssues.push('worldview.history须为时间事件数组，不能由下游假定');

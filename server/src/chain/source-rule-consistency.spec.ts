@@ -9,6 +9,7 @@ describe('generic world source validation', () => {
     expect(normalizeWorldRuleStrings(JSON.stringify([rules]))).toEqual(rules);
     expect(normalizeWorldRuleStrings('由真实社会机制驱动')).toEqual(['由真实社会机制驱动']);
     expect(normalizeWorldRuleStrings([{unknown:'cannot invent a rule'},null,''])).toEqual([]);
+    expect(()=>normalizeWorldRuleStrings('[broken json')).toThrow('规则数组JSON无效');
   });
   it('anchors long POV to the named protagonist independent of model character order',()=>{
     const characters=[{name:'配角',identity:'观察者'},{name:'陆舟',identity:'站务员'}];

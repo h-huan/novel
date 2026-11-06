@@ -189,9 +189,9 @@ export class PromptRegistryService {
 分类：{{user_input.genre}}
 已验收骨架：{{{json chain_output.node_1_skeleton}}}
 
-依据骨架中的事件链与人物选择，定义必要的地点、社会结构、真实职业或超常能力边界、经济、文化、历史及势力。已确认题材和骨架中明确的触发条件、作用对象、时空范围及代价必须原义继承；未确认的人数、距离、历史年份与新权限不得凭空补成限制既定主线行动的硬前提。每个维度要说明它如何约束主线行动；现实题材不得凭空添加修炼与超能力。人物年龄、履历、年份、亲属关系及机构名称必须与骨架一致。每个维度应具体可核查，不得以抽象套话占位。
+依据骨架中的事件链与人物选择，定义必要的地点、社会结构、真实职业或超常能力边界、经济、文化、历史及势力。已确认题材和骨架中明确的触发条件、作用对象、时空范围及代价必须原义继承；未确认的人数、距离、历史年份与新权限不得凭空补成限制既定主线行动的硬前提。每个维度要说明它如何约束主线行动；现实题材不得凭空添加修炼与超能力。人物年龄、履历、年份、亲属关系及机构名称必须与骨架一致。每个维度应具体可核查，不得以抽象套话占位。若原确认故事确有必须以明确条件触发的因果规则，可输出rules数组逐条陈述作用对象、条件及代价；没有独立规则时rules为[]，不得将powerSystem的体系说明拆作已生效规则。
 
-只输出合法 JSON：{"worldview":{"geography":[{"name":"地点名","description":"地点如何约束事件"}],"socialStructure":"阶层与制度","powerSystem":"能力或现实机制的来源、代价、边界","economy":"资源与利益分配","culture":"习俗与价值冲突","history":[{"date":"时间","event":"与主线相关的历史事件"}],"factions":[{"name":"势力名","description":"作用与边界","coreGoal":"目标","leader":"负责人"}]}}。每个世界维度至少30字，地理与势力条目必须有具名对象及具体作用。不得输出第二份主线或章纲。`,
+只输出合法 JSON：{"worldview":{"geography":[{"name":"地点名","description":"地点如何约束事件"}],"socialStructure":"阶层与制度","powerSystem":"能力或现实机制的来源、代价、边界","rules":[],"economy":"资源与利益分配","culture":"习俗与价值冲突","history":[{"date":"时间","event":"与主线相关的历史事件"}],"factions":[{"name":"势力名","description":"作用与边界","coreGoal":"目标","leader":"负责人"}]}}。每个世界维度至少30字，地理与势力条目必须有具名对象及具体作用。不得输出第二份主线或章纲。`,
       variables: ['user_input.story_setting', 'user_input.genre', 'chain_output.node_1_skeleton'],
       isActive: true,
     });

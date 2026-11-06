@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
 
 describe('configured long novel planning acceptance', () => {
+  it('stops on a changed named protagonist before paying for characters or chapter planning',async()=>{
+    const controller:any=Object.create(ChainController.prototype);
+    controller.resolvePlatformToneDirective=vi.fn(()=>'');
+    controller.llmCallWithRetry=vi.fn();
+    controller.chainTemplate={executeChain:vi.fn(async (_id:string,_params:any,onProgress:any)=>{
+      const skeleton={coreSetting:{protagonist:'邵工，巡查员',coreConflict:'身份冲突'},
+        skeletonVolumes:[{title:'争执卷',estimatedChapters:2,chapterCountReason:'两次行动导致状态变化'}]};
+      onProgress?.(0,'node_1_skeleton','completed',{output:skeleton});
+      return {outputs:{node_1_skeleton:skeleton}};
+    })};
+    await expect(controller.generateConfiguredLongNovelPlan({projectId:'p',title:'原题材',storySetting:'林川追查停运',
+      confirmedProtagonist:'林川，调查员',targetWords:8000,targetWanZi:0.8,genre:'悬疑',
+      chapterWordMin:3000,chapterWordMax:5000})).rejects.toThrow('骨架主角与已确认题材身份不符');
+    expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+    expect(controller.chainTemplate.executeChain).toHaveBeenCalledTimes(1);
+  });
   it('dynamically plans enough 3000-5000 word chapters for two million words and uses token configuration only as batch size', async () => {
     const controller: any = Object.create(ChainController.prototype);
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };

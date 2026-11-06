@@ -8338,14 +8338,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           ? this.safeExtractJson<Record<string, any>>(String(existingFrozenWorld.constraints || '{}'), {})
           : {};
         const frozenRuleRows=existingFrozenWorld
-          ?normalizeWorldRuleStrings(this.safeExtractJson<unknown>(String(existingFrozenWorld.rules||'[]'),[]))
+          ?normalizeWorldRuleStrings(existingFrozenWorld.rules
+            ?this.safeExtractJson<unknown>(String(existingFrozenWorld.rules),existingFrozenWorld.rules)
+            :existingFrozenProfile?.rules)
           :[];
         const frozenLongWorldview = existingFrozenWorld ? {
           era: String(existingFrozenWorld.era || existingFrozenProfile?.era || ''),
           geography: this.safeExtractJson<any[]>(String(existingFrozenWorld.geography || '[]'), []),
           factions: this.safeExtractJson<any[]>(String(existingFrozenWorld.factions || '[]'), []),
-          rules: frozenRuleRows.length?frozenRuleRows.join('\n')
-            :normalizeWorldRuleStrings(existingFrozenProfile?.rules).join('\n'),
+          rules: frozenRuleRows.join('\n'),
           atmosphere: String(existingFrozenWorld.atmosphere || existingFrozenProfile?.atmosphere_tone || ''),
           socialStructure: String(existingFrozenProfile?.social_structure || frozenWorldConstraints.socialStructure || ''),
           powerSystem: String(existingFrozenProfile?.tech_supernatural || frozenWorldConstraints.powerSystem || ''),
@@ -8372,6 +8373,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             // 执行标准（含创作宪法）由 generateConfiguredLongNovelPlan 内的唯一解析器
             // resolvePlatformToneDirective(projectId) 从项目行注入；此处不再传第二份口径。
             storySetting: `${dto.title}\n${ideaStr}`,
+            confirmedProtagonist: dto.selectedIdea?.protagonist,
             targetWords: dto.targetWords,
             targetWanZi,
             genre: constitution.category,
@@ -8436,8 +8438,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
             // 存储世界观
             if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0) {
-              const explicitWorldRules=normalizeWorldRuleStrings(worldSetting.rules);
-              const persistedWorldRules=explicitWorldRules.length?explicitWorldRules:normalizeWorldRuleStrings(worldSetting.powerSystem);
+              // An explanation of a power system is NOT an authored if-then
+              // world rule. An absent rules field remains empty, never
+              // reconstructed from powerSystem on save or frozen readback.
+              const persistedWorldRules=normalizeWorldRuleStrings(worldSetting.rules);
               const wid = uuid();
               try {
                 withAtomicWorldProfile(db, () => {
@@ -10076,17 +10080,37 @@ ${STORY_ENTITY_MODELING_POLICY}
     const {projectId,dto,constitution,styleInstruction,isShort,emit}=input;
     const db=this.db.getDb(),now=()=>new Date().toISOString();
     const {v4:uuid}=require('uuid');
-    const hasCharacters=Number((db.prepare('SELECT COUNT(*) as c FROM characters WHERE project_id=?').get(projectId) as any)?.c||0)>0;
+    const savedCharacters=db.prepare('SELECT id,name,identity,is_pov_character FROM characters WHERE project_id=?').all(projectId) as any[];
+    const confirmedProtagonistName=confirmedWorldProtagonistName(dto.selectedIdea?.protagonist);
     const groundedCreativeContext=JSON.stringify({canonicalBrief:JSON.parse(input.canonicalCreativeBrief),world:input.world});
     const taskWarnings: string[] = [];
-    if (hasCharacters) {
-      emit('characters', 27, '角色已存在，跳过', 'done');
-      return { step: 'characters', warnings: [] };
+    if(savedCharacters.length){
+      // A prior partial insert must never be mistaken for an accepted role batch.
+      // Do not overwrite saved Canon or send another model request here:
+      // the existing explicit failed-creation recovery owns cleanup.
+      const savedNames=savedCharacters.map(row=>String(row.name||'').trim());
+      const confirmedNames=[confirmedProtagonistName,
+        ...(Array.isArray(dto.selectedIdea?.characters)?dto.selectedIdea.characters:[])
+          .map((row:any)=>confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
+      ].filter(Boolean);
+      const profiles=db.prepare('SELECT character_id FROM character_extended_profiles WHERE project_id=?').all(projectId) as any[];
+      const profileIds=new Set(profiles.map(row=>String(row.character_id)));
+      const povRows=savedCharacters.filter(row=>Number(row.is_pov_character)===1);
+      const problems:string[]=[];
+      if(new Set(savedNames).size!==savedNames.length)problems.push('角色姓名重复');
+      if(savedCharacters.some(row=>!String(row.name||'').trim()||!String(row.identity||'').trim()))problems.push('角色姓名或身份不完整');
+      if(savedCharacters.some(row=>!profileIds.has(String(row.id))))problems.push('角色扩展档案缺失');
+      if(povRows.length!==1)problems.push('主视角角色数量不等于一');
+      if(confirmedProtagonistName && (povRows.length!==1||povRows[0].name!==confirmedProtagonistName))
+        problems.push('已保存主视角与确认题材主角不符');
+      if(confirmedNames.some(name=>!savedNames.includes(name)))problems.push('已确认核心人物尚未全部保存');
+      if(problems.length)throw new Error('已有角色资料不完整，不能直接跳过或重复生成；须由原失败恢复流程处理：'+problems.join('；'));
+      emit('characters',27,'已保存人物与扩展档案校验通过，复用原角色','done');
+      return {step:'characters',warnings:[]};
     }
     const normalizeGeneratedCharacters = (value: any): any[] => Array.isArray(value)
       ? value
       : (Array.isArray(value?.characters) ? value.characters : (Array.isArray(value?.items) ? value.items : []));
-    const confirmedProtagonistName=confirmedWorldProtagonistName(dto.selectedIdea?.protagonist);
     const confirmedCharacterNames = [
       ...(confirmedProtagonistName?[confirmedProtagonistName]:[]),
       ...(Array.isArray(dto.selectedIdea?.characters) ? dto.selectedIdea.characters : []),
@@ -10129,6 +10153,7 @@ JSON格式：[{"name":"姓名","role":"该人物实际剧情职责（主角/对�
       },
     });
     taskWarnings.push(...charResult.warnings);
+    if(taskWarnings.length)throw new Error('角色生成未完全通过原有检查，未写入角色：'+taskWarnings.join('；'));
     const rawGeneratedCharacters = normalizeGeneratedCharacters(charResult.data);
     // A confirmed named short protagonist owns the POV, even when the model
     // lists a supporting character first. For genuinely anonymous narration,
@@ -10145,8 +10170,13 @@ JSON格式：[{"name":"姓名","role":"该人物实际剧情职责（主角/对�
         expectedStages: ['character'],
         expectedScenarios: ['character_design'],
       });
+      // One role batch includes BOTH canonical characters and the writing-facing
+      // extension rows. A failure in either table rolls back all rows, avoiding
+      // a later "characters exist" short-circuit on incomplete evidence.
+      db.exec('SAVEPOINT creation_character_batch');
+      try {
       for (const ch of generatedCharacters) {
-        if (!ch.name) continue;
+        if (!ch.name) throw new Error('生成的人物缺少姓名，整批不保存');
         try {
           const cid = uuid();
           // 兼容新旧 prompt 格式（旧：identity/appearance/background/shortTermGoal；新：basicInfo/backstory/goalMotivation/growthArc）
@@ -10222,11 +10252,18 @@ JSON格式：[{"name":"姓名","role":"该人物实际剧情职责（主角/对�
                 now(), now()
               );
             }
-          } catch (e: any) { this.logger.warn(`character_extended_profiles 传播失败(${ch.name}): ${e.message}`); }
+          } catch (e: any) { throw new Error(`character_extended_profiles 写入失败(${ch.name}): ${e.message}`); }
           charCount++;
-        } catch (e: any) { taskWarnings.push(`角色写入失败:${e.message}`); }
+        } catch (e: any) { throw new Error(`角色写入失败(${ch.name}): ${e.message}`); }
       }
-      emit('characters', 27, `角色写入 ${charCount} 个`, charCount > 0 ? 'done' : 'failed');
+      db.exec('RELEASE SAVEPOINT creation_character_batch');
+      } catch(error) {
+        db.exec('ROLLBACK TO SAVEPOINT creation_character_batch');
+        db.exec('RELEASE SAVEPOINT creation_character_batch');
+        emit('characters',27,'角色批次未完整写入，已回滚','failed');
+        throw new Error('角色和扩展档案原子写入失败，未开始章纲：'+(error instanceof Error?error.message:String(error)));
+      }
+      emit('characters', 27, `角色写入 ${charCount} 个`, 'done');
     } else {
       taskWarnings.push('角色生成失败：LLM 未能返回有效角色数据');
       emit('characters', 27, '角色生成失败', 'failed');
@@ -12419,6 +12456,7 @@ ${summarizeOutlineConsistency(pending)}`,
     projectId: string;
     title: string;
     storySetting: string;
+    confirmedProtagonist?: unknown;
     targetWords: number;
     targetWanZi: number;
     genre: string;
@@ -12440,9 +12478,20 @@ ${summarizeOutlineConsistency(pending)}`,
       targetWords: input.targetWanZi,
       genre: input.genre,
     };
+    const ensureConfirmedLongProtagonist=(skeleton:any):void=>{
+      // Deterministic source identity belongs to the existing producing
+      // boundary. Semantic source review remains in the existing final Gate.
+      const withoutRoleLabel=(value:unknown)=>typeof value==='string'
+        ?value.replace(/^(?:主角|男主角|女主角)[：:]\s*/u,''):value;
+      const confirmed=confirmedWorldProtagonistName(withoutRoleLabel(input.confirmedProtagonist));
+      if(!confirmed)return; // anonymous first-person must stay anonymous
+      const generated=confirmedWorldProtagonistName(withoutRoleLabel(skeleton?.coreSetting?.protagonist));
+      if(generated!==confirmed)throw new Error('长篇骨架主角与已确认题材身份不符，禁止继续生成世界、人物或细纲');
+    };
     const foundationProgress = (_nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => {
       if (nodeId === 'node_1_skeleton' && status === 'completed') {
         const skeleton = result?.output;
+        ensureConfirmedLongProtagonist(skeleton);
         if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || skeleton.skeletonVolumes.length === 0
           || skeleton.skeletonVolumes.some((volume: any) => !Number.isInteger(Number(volume?.estimatedChapters))
             || Number(volume.estimatedChapters) <= 0 || !String(volume?.chapterCountReason || '').trim())) {
@@ -12463,6 +12512,7 @@ ${summarizeOutlineConsistency(pending)}`,
       : await this.chainTemplate.executeChain('long-novel-init-foundation', foundationInput, foundationProgress);
     const outputs: any = foundationResult?.outputs || {};
     const skeleton = outputs.node_1_skeleton;
+    ensureConfirmedLongProtagonist(skeleton);
     const worldOutput = outputs.node_2_worldview;
     const generatedWorldview = input.frozenWorldview || worldOutput?.worldview;
     if (!skeleton?.coreSetting || !Array.isArray(skeleton.skeletonVolumes) || !generatedWorldview

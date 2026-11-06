@@ -27,7 +27,8 @@ export function confirmedWorldProtagonistName(protagonist: unknown): string {
 export function normalizeWorldRuleStrings(value:unknown):string[]{
  let source=value;
  if(typeof source==='string'&&source.trim().startsWith('[')){
-  try{const parsed=JSON.parse(source);if(Array.isArray(parsed))source=parsed;}catch{}
+  try{const parsed=JSON.parse(source);if(Array.isArray(parsed))source=parsed;}
+  catch{throw new Error('冻结世界规则数组JSON无效，不能将原始传输文本误认成一条规则');}
  }
  const rules:string[]=[];
  const append=(item:unknown):void=>{

@@ -33,6 +33,17 @@ describe('preselection reader promise and independent title verdict', () => {
 });
 
 describe('creation consistency architecture invariants', () => {
+  it('uses transactional short roles and refuses unverified saved-character shortcuts',()=>{
+    expect(controllerSource).toContain("db.exec('SAVEPOINT creation_character_batch')");
+    expect(controllerSource).toContain("db.exec('ROLLBACK TO SAVEPOINT creation_character_batch')");
+    expect(controllerSource).toContain('角色扩展档案缺失');
+    expect(controllerSource).toContain('已确认核心人物尚未全部保存');
+    expect(controllerSource).toContain('ensureConfirmedLongProtagonist(skeleton)');
+  });
+  it('does not persist powerSystem as if it were a confirmed long causal rule',()=>{
+    expect(controllerSource).toContain('const persistedWorldRules=normalizeWorldRuleStrings(worldSetting.rules)');
+    expect(controllerSource).not.toContain('normalizeWorldRuleStrings(worldSetting.powerSystem)');
+  });
   it('binds long POV and frozen world rules to accepted source rather than model array ordering',()=>{
     expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(generatedCharacters,foundation.coreSetting?.protagonist)');
     expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(rawGeneratedCharacters,confirmedProtagonistName)');

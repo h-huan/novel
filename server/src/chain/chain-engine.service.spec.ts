@@ -156,6 +156,19 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects a world-rule object masquerading as an if-then rule array in its original producing call',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_2_worldview')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{node_1_skeleton:{}},timestamps:{},startTime:new Date()};
+    const worldview={geography:[{name:'旧城',description:'用于查证的主线地点'}],
+      factions:[{name:'调查局',description:'查明矛盾',coreGoal:'核实证据',leader:'陈明'}],
+      socialStructure:'按规章处理案件',powerSystem:'按真实法律取证',economy:'收入与成本',culture:'承诺与信任',history:[],rules:{unknown:'模型臆造的规则'}};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('worldview.rules');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
   it('rejects incomplete long foundation world dimensions at their producer, without paying for characters or chapter outlines',async()=>{
     const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
     const node=chain.nodes.find(row=>row.id==='node_2_worldview')!;
