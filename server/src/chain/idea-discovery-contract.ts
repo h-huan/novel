@@ -537,7 +537,7 @@ export function bindStructuredIdeaCardToPremise(
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId' && key !== 'causalPlan'),
   );
   const owned=Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>selectedPremise[field]!==undefined).map(field=>[field,structuredClone(selectedPremise[field])]));
-  const safeCard={...generatedCard,...owned,
+  const safeCard: Record<string, any>={...generatedCard,...owned,
     ...(typeof selectedPremise.storyCategory==='string'&&selectedPremise.storyCategory.trim()
       ? {storyCategory:selectedPremise.storyCategory}:{}),
   };
