@@ -12511,6 +12511,7 @@ ${summarizeOutlineConsistency(pending)}`,
 
 项目目标总字数：${input.targetWords}字
 题材：${input.genre}
+已确认的原始题材与阶段结局（只读事实基准；世界和骨架只是下层整理，若有差异以此为准，不得由角色补造能力和权限）：${input.storySetting}
 地基：${JSON.stringify({ coreSetting: foundation.coreSetting, worldview: foundation.worldview || foundation.worldSetting, skeletonVolumes: normalizedSkeletons })}
 
 每个人物必须包含 name,age,gender,identity,appearance,background,personality（按已注入GEN-006落实性格与具体行事方式）,abilities,relationships,arc,dialogueStyle。只输出合法JSON：{"characters":[...]}`;
@@ -12571,7 +12572,8 @@ ${summarizeOutlineConsistency(pending)}`,
 目标总字数：${input.targetWords}字；全书规划总章数：${totalPlannedChapters}
 篇幅进度：全书规划${totalPlannedChapters}章，创建阶段仅详细展开前${LONG_DETAIL_OUTLINE_WINDOW}章、其余随写作滚动规划；本批为全书第${absoluteStart}-${absoluteStart + batchCount - 1}章。窗口内各章目标按剧情密度在区间内单独决定，不要求本窗口合计等于全书总字数。
 章节篇幅规则：每章必须在${input.chapterWordMin}-${input.chapterWordMax}字之间；每章的具体 targetWords 必须根据本章剧情任务、场景数量、冲突强度和节奏单独决定，不得平均分配。
-世界观与主线地基（只读事实来源，必须同时遵守）：${JSON.stringify({coreSetting:foundation.coreSetting,worldview:foundation.worldview})}
+已确认的原始题材与阶段结局（只读上层来源；不得将以后阶段计划写成已发生或改变上层能力对象）：${input.storySetting}
+世界观与主线地基（只读事实来源，必须同时遵守；与原确认题材冲突的下层增补不能变成新规则）：${JSON.stringify({coreSetting:foundation.coreSetting,worldview:foundation.worldview})}
 当前卷：${JSON.stringify(volume)}
 主要人物完整来源（能力、动机、关系与边界不得省略；未知字段不能成为新增授权）：${JSON.stringify(characters)}
 本批范围：卷内第${localStart}-${batchEnd}章，共${batchCount}章；全书第${absoluteStart}-${absoluteStart + batchCount - 1}章。

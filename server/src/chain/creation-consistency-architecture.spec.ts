@@ -33,6 +33,12 @@ describe('preselection reader promise and independent title verdict', () => {
 });
 
 describe('creation consistency architecture invariants', () => {
+  it('passes the same confirmed long-novel story into existing character and detail-outline prompts',()=>{
+    const sourceMarker='已确认的原始题材与阶段结局（只读';
+    expect(controllerSource.split(sourceMarker).length-1).toBe(2);
+    expect(controllerSource).toContain('不得由角色补造能力和权限）：${input.storySetting}');
+    expect(controllerSource).toContain('不得将以后阶段计划写成已发生或改变上层能力对象）：${input.storySetting}');
+  });
   it('carries the original scored pool ranking through selection, aggregate recovery and bounded refill',()=>{
     expect(controllerSource).toContain('const rankedOriginalPool=rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)');
     expect(controllerSource).toContain('pool: rankedOriginalPool,');
