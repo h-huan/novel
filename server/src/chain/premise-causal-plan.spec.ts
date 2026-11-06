@@ -389,3 +389,12 @@ it('rejects a generated causal action or condition that embeds its claimed resul
  expect(premiseCausalPlanIssues({...item,causalPlan:[maskedCondition,final]}).join('；'))
    .toContain('引文已包含结果断言');
 });
+
+it('rejects a prior causal step that cites a later result as a pre-existing condition',()=>{
+ const p=premise();
+ p.activeChoice+='救援队打开仓库救出被困者';
+ p.causalPlan[0].conditions.push({field:'activeChoice',quote:'救援队打开仓库救出被困者'});
+ expect(premiseCausalPlanIssues(p).join('；')).toContain('不能倒用未来结果证明前一步');
+ const original=premise();
+ expect(premiseCausalPlanIssues(original)).toEqual([]);
+});

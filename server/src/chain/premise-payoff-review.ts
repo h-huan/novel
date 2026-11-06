@@ -35,8 +35,21 @@ function unplannedPayoffEvidenceIssues(row:any,candidate:Record<string,any>,key:
 export function premiseDecisionEvidenceIssues(check:any,candidate:Record<string,any>,ref:string,resultQuote?:string):string[]{
  if(!check||!['supported','gap','unknown','not_required'].includes(check.status)||typeof check.reason!=='string'||check.reason.trim().length<8)return [ref+'缺少决定者与决定依据的独立核对'];
  if(check.status!=='supported')return [];
+ // A later result is not a prerequisite of an earlier decision. The former
+ // filter removed only THIS result and let the model cite a future win or
+ // reward as the already-established basis for an earlier approval.
+ // Earlier completed results may remain as facts; source review must still
+ // independently judge whether they can actually support this decision.
+ const plan=Array.isArray(candidate.causalPlan)?candidate.causalPlan:[];
+ const indexMatch=/causalPlan\\[(\\d+)\\]$/.exec(ref);
+ const currentIndex=indexMatch?Number(indexMatch[1]):0;
+ const unavailableResults=plan.slice(currentIndex).flatMap((link:any)=>
+  typeof link?.result?.quote==='string'?[link.result.quote]:[]);
+ if(typeof resultQuote==='string')unavailableResults.push(resultQuote);
  const text=PREMISE_CAUSAL_NARRATIVE_FIELDS.map(field=>{
-  let value=String(candidate[field]||'');for(const link of Array.isArray(candidate.causalPlan)?candidate.causalPlan:[]){if(typeof link?.result?.quote==='string'&&(!resultQuote||link.result.quote===resultQuote))value=value.split(link.result.quote).join('');}return value;
+  let value=String(candidate[field]||'');
+  for(const result of unavailableResults)value=value.split(result).join('');
+  return value;
  });
  return ['deciderQuote','basisQuote'].flatMap(key=>typeof check[key]==='string'&&check[key].trim().length>=4&&text.some(value=>value.includes(check[key]))?[]:[ref+'的'+key+'须引用本题材已建立的决定者或改变决定依据，不能使用结果断言或评审新造条件']);
 }

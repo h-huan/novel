@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence,normalizePremisePayoffGapRoutes} from './premise-payoff-review';
+import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence,normalizePremisePayoffGapRoutes,premiseDecisionEvidenceIssues} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -321,4 +321,27 @@ it('does not turn hypothetical off-page refusals into an extra independent causa
  expect(directive).toContain('真实必要条件和人物动机');
  expect(directive).toContain('不得凭故事外任意假设');
  expect(directive).toContain('整体或对应links必须判gap');
+});
+
+it('cannot certify an earlier decision using its own or a future outcome as a prior motive',()=>{
+ const item={
+  activeChoice:'会议主持人先宣布这次审议由委员会表决。',
+  escalation:'委员会此前已经收到双方签署的完整协议。',
+  reversalEffect:'委员会正式同意暂缓本次公开公告。',
+  payoff:'委员会另外同意向主角发放专项奖金。',
+  causalPlan:[
+   {action:{field:'activeChoice',quote:'会议主持人先宣布这次审议由委员会表决。'},conditions:[],result:{field:'reversalEffect',quote:'委员会正式同意暂缓本次公开公告。'}},
+   {action:{field:'escalation',quote:'委员会此前已经收到双方签署的完整协议。'},conditions:[],result:{field:'payoff',quote:'委员会另外同意向主角发放专项奖金。'}},
+  ],
+ };
+ const established={status:'supported',deciderQuote:'会议主持人先宣布这次审议由委员会表决。',
+  basisQuote:'委员会此前已经收到双方签署的完整协议。',reason:'既有审议者与先前提供的协议分别已在故事正文写出'};
+ expect(premiseDecisionEvidenceIssues(established,item,'S1.causalPlan[0]',item.reversalEffect)).toEqual([]);
+ const futureBasis={...established,basisQuote:item.payoff};
+ expect(premiseDecisionEvidenceIssues(futureBasis,item,'S1.causalPlan[0]',item.reversalEffect).join('；')).toContain('basisQuote');
+ const currentBasis={...established,basisQuote:item.reversalEffect};
+ expect(premiseDecisionEvidenceIssues(currentBasis,item,'S1.causalPlan[0]',item.reversalEffect).join('；')).toContain('basisQuote');
+ // A previously established result is not mechanically banned as evidence
+ // for a later decision. Its *semantic* sufficiency remains independently judged.
+ expect(premiseDecisionEvidenceIssues({...established,basisQuote:item.reversalEffect},item,'S1.causalPlan[1]',item.payoff)).toEqual([]);
 });

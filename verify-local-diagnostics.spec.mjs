@@ -34,9 +34,9 @@ test('full production acceptance refuses missing, incomplete and contradictory a
  assert.ok(discoveryProductionAcceptanceIssues({...good,qualified:3}).includes('latest_idea_discovery_quantity_mismatch'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,requested:null}).includes('latest_idea_discovery_quantity_unverified'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:null}).includes('latest_idea_discovery_latency_unverified'));
- assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:09:59.999Z'}),[]);
- assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:10:00.000Z'}),[]);
- assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:10:00.001Z'}).includes('latest_idea_discovery_over_wall_budget'));
+ assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:07:59.999Z'}),[]);
+ assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.000Z'}),[]);
+ assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.001Z'}).includes('latest_idea_discovery_over_wall_budget'));
  const dynamic={...good,requested:2,returned:2,qualified:2,totalIdeas:2,shortfall:0};
  assert.deepEqual(discoveryProductionAcceptanceIssues(dynamic),[]);
 });

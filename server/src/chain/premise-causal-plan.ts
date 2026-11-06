@@ -147,6 +147,14 @@ export function premiseCausalPlanIssues(item: Record<string, unknown>): string[]
     } else if(embedded) {
       errors.push(ref + '行动或条件引文已包含结果断言，不能用结果自证其成立；请缩至实际先行动作或必要条件');
     }
+    // An earlier action/condition cannot be proved by an outcome that this
+    // same causal plan says will happen only in a later step. Detect only
+    // literal quotation containment; the independent Gate still owns meaning.
+    const futureResults=plan.slice(index+1).flatMap((future:any)=>
+      typeof future?.result?.quote==='string'?[foldQuotation(future.result.quote)]:[]);
+    if(proofAnchors.some(row=>futureResults.some(result=>
+      result.length>=8&&foldQuotation(row.quote).includes(result))))
+      errors.push(ref+'行动或条件提前引用后续因果结果，不能倒用未来结果证明前一步');
     const key = JSON.stringify(link);
     if (seen.has(key)) errors.push(ref + '重复同一因果环节');
     seen.add(key);
