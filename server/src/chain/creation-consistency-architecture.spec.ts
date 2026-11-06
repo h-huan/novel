@@ -23,6 +23,15 @@ function indexOrFail(source: string, marker: string): number {
   return index;
 }
 
+describe('preselection reader promise and independent title verdict', () => {
+  it('does not accept a jargon-only title by reading the hidden synopsis', () => {
+    expect(controllerSource).toContain('先遮住hook、description、setting和参考卡');
+    expect(controllerSource).toContain('必须titleCompelling=false');
+    expect(controllerSource).toContain('不得拿概要中的解释反向证明原标题清晰');
+    expect(STORY_PREREQUISITE_POLICY).toContain('人物知情时点');
+  });
+});
+
 describe('creation consistency architecture invariants', () => {
   it('refill model transport matches the initially screened pool instead of reading obsolete raw.storyCore',()=>{
     const initial=indexOrFail(controllerSource,'screenPremisePoolBatch(batch.candidates)');
