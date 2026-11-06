@@ -1270,12 +1270,15 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const msg = err?.message || String(err);
       // 网络错误发生在拿到创作结果之前，可补发一次；重复网络错误交还调用方，
       // 不再与 SDK 和业务节点叠加成多轮隐式运行。
-      const isNetworkErr = msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED')
-        || msg.includes('ETIMEDOUT') || msg.includes('terminated') || msg.includes('socket hang up')
-        || msg.includes('aborted') || msg.includes('ENETUNREACH') || msg.includes('EAI_AGAIN')
-        || msg.includes('fetch failed') || msg.includes('UND_ERR_SOCKET') || msg.includes('other side closed')
-        || msg.includes('Connection error');
-      if (isNetworkErr) {
+      const isTransportFailure = (message: string) =>
+        /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|UND_ERR_SOCKET|terminated|socket hang up|aborted|fetch failed|other side closed|Connection error/i.test(message);
+      // An ENOTFOUND response indicates a failed DNS lookup, not a malformed
+      // JSON or story-quality verdict. Preserve it without another identical
+      // immediate call. EAI_AGAIN and interrupted connections may use ONLY
+      // already-funded network recovery credits.
+      const mayRetryTransport = (message: string) =>
+        isTransportFailure(message) && !/ENOTFOUND/i.test(message);
+      if (mayRetryTransport(msg) && hasRecoveryAllowance()) {
         const delays = [1500];
         for (let netRetry = 0; netRetry < delays.length; netRetry++) {
           await waitForGeneration(delays[netRetry]);
@@ -1334,11 +1337,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           } catch (innerErr: any) {
             const innerMsg = innerErr?.message || String(innerErr);
             // 若新错误不再是网络错误，立即停止重试（复用同一判定逻辑）
-            const stillNetwork = innerMsg.includes('ECONNRESET') || innerMsg.includes('ECONNREFUSED') || innerMsg.includes('ETIMEDOUT')
-              || innerMsg.includes('terminated') || innerMsg.includes('socket hang up')
-              || innerMsg.includes('aborted') || innerMsg.includes('ENETUNREACH') || innerMsg.includes('EAI_AGAIN')
-              || innerMsg.includes('fetch failed') || innerMsg.includes('UND_ERR_SOCKET') || innerMsg.includes('other side closed')
-              || innerMsg.includes('Connection error');
+            const stillNetwork = mayRetryTransport(innerMsg);
             if (!stillNetwork) {
               if (!metricEmitted) emit('failed', { reason: innerMsg });
               throw innerErr;
@@ -1347,7 +1346,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           }
         }
       }
-      const isNetFinal = msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('UND_ERR_SOCKET') || msg.includes('socket hang up');
+      const isNetFinal = isTransportFailure(msg);
       this.logger.warn(
         `[RealLLM] model ${modelName} failed (${request.scenario || 'daily'}); configured-model-only mode is enabled: ${msg}`,
       );

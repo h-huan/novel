@@ -59,6 +59,38 @@ it.each([32768,4096])('retains the original truncation and usage after the last 
  expect(record).toHaveBeenCalledTimes(1);expect(record.mock.calls[0][2]).toBe('truncated');
  expect((record.mock.calls[0][5] as any).resp.usage).toEqual(usage);
 });
+it.each([
+  'DeepSeek 网络连接失败(EAI_AGAIN): DNS 临时不可用',
+  'DeepSeek 网络连接失败(fetch failed): 上游连接中断',
+  'DeepSeek 网络连接失败(ENOTFOUND): DNS 解析失败',
+])('retains the real transport error when its source-review shard has only one funded call: %s',async(message)=>{
+  const service=createService(),budget={remaining:1};
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const callModel=vi.fn().mockRejectedValue(new Error(message));
+  (service as any).callModel=callModel;
+  await expect(service.generate({prompt:'锁定前独立来源因果审查',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}})).rejects.toThrow(message);
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(budget.remaining).toBe(0);
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('network_error');
+});
+it('keeps the original funded socket recovery when a second physical credit already exists',async()=>{
+  const service=createService(),budget={remaining:2};
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const callModel=vi.fn().mockRejectedValueOnce(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'))
+    .mockResolvedValueOnce({content:'{"sourceChecks":[],"payoffChecks":[]}',finishReason:'stop'});
+  (service as any).callModel=callModel;
+  const response=await service.generate({prompt:'原来源审查',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}});
+  expect(response.content).toContain('sourceChecks');
+  expect(callModel).toHaveBeenCalledTimes(2);
+  expect(budget.remaining).toBe(0);
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('success');
+});
 it('keeps a network-recovered truncation instead of replacing it with a budget error',async()=>{
  const service=createService(),budget:{remaining:number;recoveryWithoutThinking?:boolean}={remaining:2};
  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
