@@ -678,9 +678,43 @@ it('partitions a dominant chapter by server-owned result identities without omit
  expect(partitions.every(part=>part.length<=72)).toBe(true);
  expect(partitions.flat()).toEqual(full);
  expect(new Set(partitions.flat()).size).toBe(full.length);
- expect(causalPlanningProofResultPartitions(chapters,40)).toEqual([full]);
+ const tighter=causalPlanningProofResultPartitions(chapters,40);
+ expect(tighter).toHaveLength(2);
+ expect(tighter.flat()).toEqual(full);
+ expect(new Set(tighter.flat()).size).toBe(full.length);
 });
 
+
+it('shards more than 144 independent results without adding model calls or losing claims',()=>{
+ const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'主角实际递交材料，对方是否接受仍需分别核对。',
+   scenes:Array.from({length:200},(_,index)=>({outcome:'独立结果第'+(index+1)+'项需要逐个反证成立条件。'}))}];
+ const body=JSON.stringify(chapters);
+ const catalog=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,{})).entries;
+ const all=catalog.flatMap(entry=>entry.resultAnchorIds);
+ expect(all.length).toBeGreaterThan(144);
+ // One huge call previously exceeded the provider output cap. Spend the
+ // same initial + correction budget on two disjoint first passes.
+ const parts=causalPlanningProofResultPartitions(chapters);
+ expect(parts).toHaveLength(2);
+ expect(parts.flat()).toEqual(all);
+ expect(new Set(parts.flat()).size).toBe(all.length);
+ const anchors=causalEvidenceAnchors(body,{});
+ const action=anchors.find(item=>item.path==='0.content');
+ expect(action).toBeDefined();
+ let approved=0;
+ for(const part of parts){
+  const expected=part.map(resultAnchorId=>({chapterNumber:3,resultAnchorId}));
+  const proofRows=part.map((_,index)=>[index+1,action!.id,'','gap','逐项要求的结果尚未得到实际决定者的有效批准']);
+  const checked=materializeCausalAuditAnchors(decodePlanningProofRows({
+   status:'evaluated',reason:'实际逐一核对各个结果成立条件',proofRows},expected),body,{});
+  expect(causalChapterEvidenceAddressIssues(checked,[{
+   chapterNumber:3,anchorIds:catalog[0].anchorIds,resultAnchorIds:part
+  }])).toEqual([]);
+  expect(validateCausalAudit(checked,body,{}).verified).toBe(true);
+  approved+=checked.transitions.length;
+ }
+ expect(approved).toBe(all.length);
+});
 
 it('large outline audit keeps every exact result but avoids resending all action IDs',()=>{
  const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'员工核对异常，但主管尚未作出最终决定。',
