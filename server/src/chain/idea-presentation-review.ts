@@ -12,13 +12,15 @@ export function shouldBatchIdeaPresentation(count:number,groupingMode:number,bat
  * labels, author self-praise or execution settings for each peer review.
  * The actual target cards remain completely unchanged. */
 export function compactIdeaPresentationReferences(references:readonly Record<string,any>[]) {
-  // Keep peer platform/category/dimension facts and the complete story path:
-  // independent cross-card checks can require them. Only an already-reviewed
-  // peer's self-advertised noveltyProof is removed, never a source fact.
+  // Keep every peer's actual narrative, including the entire staged causal
+  // trajectory, for independent cross-card comparison. Author claims of
+  // novelty and labels/tags describe intent, not events: retransmitting them
+  // in every later review grows quadratically and cannot prove uniqueness.
+  // Each actual target card still receives its FULL original standards,
+  // authored dimensions, source facts and semantic quality review unchanged.
   const narrative=['position','title','storyType','targetPlatform','storyCategory',
     'hook','description','setting','protagonist','coreConflict','mainReversal',
-    'ending','scopeBreakdown','uniquePoint','storyTone','writingStyle',
-    'webNovelGenre','plotTags','submissionTags','pov'] as const;
+    'ending','scopeBreakdown'] as const;
   return references.map(row=>Object.fromEntries(narrative
     .filter(key=>row[key]!==undefined).map(key=>[key,row[key]])));
 }
