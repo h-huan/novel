@@ -62,7 +62,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好5项，按顺序为[resultOrdinal,actionAnchorId,bridgeAnchorId,status,reason]。resultOrdinal按服务器结果目录的章节顺序及每章resultAnchorIds顺序从1连续编号，恰好每号一条；结果和章号由服务器按唯一编号绑定，禁止重复、漏项、换号。这是完整因果审核的短传输格式，不是抽样或统一判定。每个actionAnchorId以及非空bridgeAnchorId须来自实际目录；supported必须填有效bridgeAnchorId，gap/planned可填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；行数必须与本次服务器结果目录完全一致；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好5项，按顺序为[resultOrdinal,actionAnchorId,bridgeAnchorId,status,reason]。resultOrdinal按服务器结果目录的章节顺序及每章resultAnchorIds顺序从1连续编号，恰好每号一条；结果和章号由服务器按唯一编号绑定，禁止重复、漏项、换号。这是完整因果审核的短传输格式，不是抽样或统一判定。每个actionAnchorId以及非空bridgeAnchorId须来自实际目录；supported必须填有效bridgeAnchorId，gap/planned可填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；成立的直接结果通常用8—30字明确行动和必要条件，不复述整段章纲；真实gap须完整解释缺失条件，不限制必要长度。行数必须与本次服务器结果目录完全一致；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
@@ -324,8 +324,10 @@ export function causalPlanningProofPromptCatalog(
  * SERVER-OWNED result inventory across the same two physical first-pass calls.
  * Both reviewers receive every original chapter and its complete prior state;
  * only result obligations are disjoint. No result or quality judgment is
- * sampled, inferred or dropped. Above twice the safe burden retain the old
- * first-pass plus targeted-correction path. */
+ * sampled, inferred or dropped. Totals beyond twice the nominal per-call count
+ * must not fall back to one oversized response: that previously exhausted the
+ * review model's 32768-token output cap. Two independent first-pass calls still
+ * fit the original initial-plus-correction allowance. */
 export function causalPlanningProofResultPartitions(
  chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
 ):string[][] {
@@ -333,7 +335,7 @@ export function causalPlanningProofResultPartitions(
  const body=JSON.stringify(chapters);
  const anchors=causalEvidenceAnchorOptions(body,{});
  const ids=causalChapterEvidenceCatalog(chapters,anchors).entries.flatMap(entry=>entry.resultAnchorIds);
- if(ids.length<=maxSinglePassResults||ids.length>2*maxSinglePassResults)return [ids];
+ if(ids.length<=maxSinglePassResults)return [ids];
  const midpoint=Math.ceil(ids.length/2);
  return [ids.slice(0,midpoint),ids.slice(midpoint)];
 }
