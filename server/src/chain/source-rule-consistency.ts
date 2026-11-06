@@ -20,6 +20,42 @@ export function confirmedWorldProtagonistName(protagonist: unknown): string {
   return token;
 }
 
+/** Preserve the exact authored world rules on initial persistence and frozen
+ * readback. Historical long records nested the whole rules array in another
+ * array; this projection only flattens transport wrappers, never invents a
+ * world rule, changes a restriction, or supplies a semantic verdict. */
+export function normalizeWorldRuleStrings(value:unknown):string[]{
+ let source=value;
+ if(typeof source==='string'&&source.trim().startsWith('[')){
+  try{const parsed=JSON.parse(source);if(Array.isArray(parsed))source=parsed;}catch{}
+ }
+ const rules:string[]=[];
+ const append=(item:unknown):void=>{
+  if(Array.isArray(item)){for(const child of item)append(child);}
+  else if(typeof item==='string'&&item.trim())rules.push(item.trim());
+ };
+ append(source);
+ return rules;
+}
+
+/** Keep the protagonist selected by the confirmed long skeleton as the
+ * first persisted POV character. Model array order is not story authority;
+ * ambiguous or missing matches fail before chapter planning or Canon writes. */
+export function orderConfirmedLongCharacters<T extends {name?:unknown}>(
+ characters:readonly T[],confirmedProtagonist:unknown):T[]{
+ const source=typeof confirmedProtagonist==='string'?confirmedProtagonist.trim():'';
+ if(!source)throw new Error('长篇地基未确认主角身份，不能凭模型人物顺序写入主视角');
+ const leading=source.replace(/^(?:主角|男主角|女主角|男主|女主|第一人称主角)[：:\s]*/u,'')
+  .split(/[，,、；;\s（(]/u)[0].trim();
+ const exact=characters.filter(item=>typeof item.name==='string'&&item.name.trim()===leading);
+ const matches=exact.length===1?exact:characters.filter(item=>{
+  const name=typeof item.name==='string'?item.name.trim():'';
+  return !!name&&source.includes(name);
+ });
+ if(matches.length!==1)throw new Error('长篇已确认主角与生成人物未形成唯一同名身份，禁止把第一位配角标为主角');
+ const lead=matches[0];return [lead,...characters.filter(item=>item!==lead)];
+}
+
 /** Restore only an unambiguous complete world OBJECT from a provider's
  * alternate JSON root. Do not extract a nested fragment, infer missing fields,
  * add world facts or mark a failed semantic/source Gate as passed. */

@@ -31,7 +31,7 @@ describe('configured long novel planning acceptance', () => {
     controller.chainTemplate = {
       executeChain: vi.fn(async (_name: string, _params: any, onProgress: any) => {
         const skeleton = {
-        coreSetting: { title: '长篇验证', coreConflict: '真相与秩序冲突' },
+        coreSetting: { title: '长篇验证', protagonist:'林川，调查员', coreConflict: '真相与秩序冲突' },
         skeletonVolumes: [
           { volumeNumber: 1, title: '追查卷', theme: '追查', description: '找到入口', estimatedChapters: 251, chapterCountReason: '调查链包含建立、误判、升级与阶段揭示，需要251个独立事件节点' },
           { volumeNumber: 2, title: '兑现卷', theme: '兑现', description: '完成回收', estimatedChapters: 250, chapterCountReason: '真相推进、关系决裂和伏笔回收形成250个不可合并节点' },
@@ -46,7 +46,10 @@ describe('configured long novel planning acceptance', () => {
     controller.realLLM = { getConfiguredMaxTokens: vi.fn(() => 1400) };
     const outlineCalls: string[] = [];
     controller.llmCallWithRetry = vi.fn(async (step: string, prompt: string) => {
-      if (step === '长篇角色架构') return { data: { characters: [{ name: '林川', identity: '调查员', arc: '从怀疑到承担' }] }, rawContent: '', warnings: [] };
+      if (step === '长篇角色架构') return { data: { characters: [
+        { name: '段辅', identity: '旧站知情人', arc: '从隐瞒到配合' },
+        { name: '林川', identity: '调查员', arc: '从怀疑到承担' },
+      ] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [{ content: '旧信日期', type: 'identity', scope: 'global', setupChapter: 1, recoveryChapter: 501, recoveryWindowStart: 495, recoveryWindowEnd: 501, evidenceText: '信纸日期早于车站建成', riskLevel: 'high', recoveryCondition: '抵达终点', payoffDescription: '揭示循环' }] }, rawContent: '', warnings: [] };
       outlineCalls.push(step);
       const prior = JSON.parse(prompt.split('本批之前已经生成的完整章节事实（含前卷，只读事实来源，不得只依据上一章推翻更早事件）：')[1].split('\n')[0]);
@@ -72,6 +75,7 @@ describe('configured long novel planning acceptance', () => {
 
     const chapters = result.volumes.flatMap((volume: any) => volume.chapters);
     expect(chapters).toHaveLength(20);
+    expect(result.characters.map((ch:any)=>ch.name)).toEqual(['林川','段辅']);
     expect(result.volumes.map((volume: any) => volume.chapters.length)).toEqual([20, 0]);
     expect(result.volumes.map((volume: any) => volume.estimatedChapters)).toEqual([251, 250]);
     expect(chapters.every((chapter: any) => chapter.targetWords >= 3000 && chapter.targetWords <= 5000 && chapter.wordCountReason)).toBe(true);
@@ -97,7 +101,7 @@ describe('configured long novel planning acceptance', () => {
       executeChain: vi.fn(async (_name: string, params: any, onProgress: any) => {
         foundationParams = params;
         const skeleton = {
-          coreSetting: { title: '标准注入验证', coreConflict: '规则与生存冲突' },
+          coreSetting: { title: '标准注入验证', protagonist:'周砚，巡查员', coreConflict: '规则与生存冲突' },
           skeletonVolumes: [
             { volumeNumber: 1, title: '入楼卷', theme: '入楼', description: '触发规则', estimatedChapters: 2, chapterCountReason: '两次独立触规事件不可合并' },
           ],

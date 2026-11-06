@@ -127,7 +127,7 @@ import {
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedLongCharacters } from './source-rule-consistency';
 import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
@@ -8337,11 +8337,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const frozenWorldConstraints = existingFrozenWorld
           ? this.safeExtractJson<Record<string, any>>(String(existingFrozenWorld.constraints || '{}'), {})
           : {};
+        const frozenRuleRows=existingFrozenWorld
+          ?normalizeWorldRuleStrings(this.safeExtractJson<unknown>(String(existingFrozenWorld.rules||'[]'),[]))
+          :[];
         const frozenLongWorldview = existingFrozenWorld ? {
           era: String(existingFrozenWorld.era || existingFrozenProfile?.era || ''),
           geography: this.safeExtractJson<any[]>(String(existingFrozenWorld.geography || '[]'), []),
           factions: this.safeExtractJson<any[]>(String(existingFrozenWorld.factions || '[]'), []),
-          rules: String(existingFrozenProfile?.rules || this.safeExtractJson<any[]>(String(existingFrozenWorld.rules || '[]'), []).join('\n')),
+          rules: frozenRuleRows.length?frozenRuleRows.join('\n')
+            :normalizeWorldRuleStrings(existingFrozenProfile?.rules).join('\n'),
           atmosphere: String(existingFrozenWorld.atmosphere || existingFrozenProfile?.atmosphere_tone || ''),
           socialStructure: String(existingFrozenProfile?.social_structure || frozenWorldConstraints.socialStructure || ''),
           powerSystem: String(existingFrozenProfile?.tech_supernatural || frozenWorldConstraints.powerSystem || ''),
@@ -8432,6 +8436,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
             // 存储世界观
             if (!reusingFrozenWorld && Object.keys(worldSetting).length > 0) {
+              const explicitWorldRules=normalizeWorldRuleStrings(worldSetting.rules);
+              const persistedWorldRules=explicitWorldRules.length?explicitWorldRules:normalizeWorldRuleStrings(worldSetting.powerSystem);
               const wid = uuid();
               try {
                 withAtomicWorldProfile(db, () => {
@@ -8440,7 +8446,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     wid, projectId, `${dto.title}世界观`, serializeGeneratedSqlText(worldSetting.era),
                     JSON.stringify(worldSetting.geography || worldSetting.locations || []),
                     JSON.stringify(worldSetting.factions || worldSetting.organizations || []),
-                    JSON.stringify([worldSetting.rules || worldSetting.powerSystem || '']),
+                    JSON.stringify(persistedWorldRules),
                     serializeGeneratedSqlText(worldSetting.atmosphere), JSON.stringify({
                       socialStructure: worldSetting.socialStructure || '',
                       powerSystem: worldSetting.powerSystem || '',
@@ -8461,7 +8467,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     serializeGeneratedSqlText(worldSetting.history || worldSetting.era || ''),
                     serializeGeneratedSqlText(worldSetting.geography || ''),
                     serializeGeneratedSqlText(worldSetting.atmosphere || ''),
-                    serializeGeneratedSqlText(worldSetting.rules || ''),
+                    serializeGeneratedSqlText(persistedWorldRules.join('\n')),
                     serializeGeneratedSqlText(worldSetting.socialStructure || ''),
                     serializeGeneratedSqlText(worldSetting.powerSystem || ''),
                     serializeGeneratedSqlText(worldSetting.powerSystem || ''),
@@ -12521,12 +12527,13 @@ ${summarizeOutlineConsistency(pending)}`,
       scenario: 'character_design',
       timeout: LLM_TUNABLES.timeoutMedium(),
     });
-    const characters = Array.isArray(characterResult.data)
+    const generatedCharacters = Array.isArray(characterResult.data)
       ? characterResult.data
       : (Array.isArray(characterResult.data?.characters) ? characterResult.data.characters : []);
-    if (characters.length === 0 || characters.some((character: any) => !character?.name || !character?.identity)) {
+    if (generatedCharacters.length === 0 || generatedCharacters.some((character: any) => !character?.name || !character?.identity)) {
       throw new Error('长篇角色架构结果不完整。');
     }
+    const characters=orderConfirmedLongCharacters(generatedCharacters,foundation.coreSetting?.protagonist);
     input.onProgress?.('outline', '核心角色已通过验收，开始分卷与详细章纲');
 
     // 单批预算是「一次就要装得下」的承诺，必须与 real-llm 侧的结构化硬顶同源：
