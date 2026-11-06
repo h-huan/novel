@@ -20,6 +20,7 @@ import {
   normalizePremiseSelectionPayload,
   capRankedPremiseSelections,
   selectedPremiseEvidenceForIdeaCard,
+  presentationLockedPremiseView,
 } from './idea-discovery-contract';
 
 const selectedPremise = (premiseId: string) => ({
@@ -968,4 +969,33 @@ it('fixed-pool selection requires evidence for each independent result before pa
  expect(prompt).toContain('证明前者不自动证明后者');
  expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
  expect(prompt).toContain('只输出selectedPremises');
+});
+
+it('transports the complete pre-vetted premise to final review without duplicating identical source sections',()=>{
+ const sections={
+  '处境触发':'我在市场里被掌柜当成只会搬箱子的学徒，店铺欠款正准备推到我身上。',
+  '主动选择':'我决定保住师傅留下的发票，当着所有采购员核对订单。'.repeat(2),
+  '必要条件':'每份票据由我与库房分别保管，另一份底联确实还在库房手里。'.repeat(2),
+  '反转兑现':'库房拿出已登记的底联，掌柜当众承认自己改过订单。'.repeat(2),
+  '分类流派机制':'我一直隐藏的账目核算能力此刻改变双方选择，掌柜不得不撤回指控。'.repeat(2),
+ };
+ const storyCore=Object.entries(sections).map(([name,value])=>'【'+name+'】'+value).join('\n');
+ const source={...selectedPremise('P-locked-review'),storyCore,workingTitle:'学徒保住了发票',
+  protagonistSituation:sections['处境触发'],openingEvent:sections['处境触发'],
+  activeChoice:sections['主动选择'],
+  escalation:sections['必要条件']+'\n'+sections['反转兑现'],
+  reversalEffect:sections['反转兑现'],payoff:sections['反转兑现'],
+  irreplaceableCarrier:sections['处境触发']+'\n'+sections['分类流派机制'],
+ };
+ const card=bindStructuredIdeaCardToPremise(source,[{title:'他们以为我不懂账',hook:'我在店铺面临当众背锅，唯一的底联却在库房'}]);
+ const before=selectedPremiseEvidenceForIdeaCard(card)!;
+ const projected=presentationLockedPremiseView(card)!;
+ expect(projected.storyCore).toBe(before.storyCore);
+ expect(projected.causalPlan).toEqual(before.causalPlan);
+ expect(projected.activeChoice).toEqual({fromSourceSections:['主动选择']});
+ expect(projected.protagonistSituation).toEqual({fromSourceSections:['处境触发']});
+ expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(before).length*0.75);
+ expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(before);
+ // The packed prompt is not the server's canonical evidence and cannot add a new fact.
+ expect(JSON.stringify(card)).not.toContain('fromSourceSections');
 });
