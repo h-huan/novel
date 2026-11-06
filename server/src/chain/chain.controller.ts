@@ -127,7 +127,7 @@ import {
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate } from './source-rule-consistency';
+import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate } from './source-rule-consistency';
 import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
@@ -8800,12 +8800,21 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
             projectId,
             scenario: 'world_building',
             maxTokens: 24576,
-            validate: value => describeWorldSourceCandidate(value, protagonistName).length === 0,
-            describeValidation: value => describeWorldSourceCandidate(value, protagonistName),
+            validate: value => describeWorldSourceCandidate(normalizeWorldSourceCandidate(value), protagonistName).length === 0,
+            describeValidation: value => describeWorldSourceCandidate(normalizeWorldSourceCandidate(value), protagonistName),
           });
           warnings.push(...worldResult.warnings);
-          if (!worldResult.data) throw new Error('世界观生成未返回有效结构，停止创建以避免后续上下文失真：'+(worldResult.validationIssues||[]).join('；'));
-          let worldCandidate = worldResult.data;
+          if (!worldResult.data) {
+            const rawRoot=this.safeExtractJson<unknown>(worldResult.rawContent,null);
+            const outputType=rawRoot===null?'unparseable':Array.isArray(rawRoot)?'array':typeof rawRoot;
+            const issues=(worldResult.validationIssues||[]).join('；')||'世界观结构协议未满足';
+            throw new Error('世界观生成未返回有效结构，停止创建以避免后续上下文失真：'+issues
+              +'；输出根类型='+outputType+'；输出字符数='+worldResult.rawContent.length
+              +'；模型运行ID='+(worldResult.runId||'unknown'));
+          }
+          // Normalize only the exact already-validated JSON root; the unchanged
+          // source audit and durable Canon guard own all meaning and persistence.
+          let worldCandidate = normalizeWorldSourceCandidate(worldResult.data);
           let worldCandidateRunId = worldResult.runId;
           const originalWorldCandidate=structuredClone(worldCandidate);
           activeFailureOrigin = 'source_review_incomplete';
