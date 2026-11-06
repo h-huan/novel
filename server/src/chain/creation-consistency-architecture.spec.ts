@@ -280,7 +280,7 @@ describe('creation consistency architecture invariants', () => {
   });
 
   it('moves the same world completeness Gate before costly short outline generation without duplicating it', () => {
-    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare');
+    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT id, era, geography');
     const earlyGate = controllerSource.indexOf('this.assertProjectSourceCompleteness(projectId);', shortWorldReadback);
     const firstStoryCard = controllerSource.indexOf('const canonicalCardFromIdea', shortWorldReadback);
     const chapterPrompt = controllerSource.indexOf('const chapterPrompt =', shortWorldReadback);
@@ -295,7 +295,7 @@ describe('creation consistency architecture invariants', () => {
 
   it('has one creation-world authority and no legacy post-outline world regeneration', () => {
     const shortWorld = indexOrFail(controllerSource, 'const worldResult = await this.llmCallWithRetry<any>(\'世界观生成\', worldPrompt, {');
-    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare');
+    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT id, era, geography');
     const chapterOutlines = indexOrFail(controllerSource, 'const chapterPrompt =');
     const guard = indexOrFail(controllerSource, '创建期世界观主记录缺失或无效：前序世界观必须先通过审核并落库');
     const enrichment = indexOrFail(controllerSource, '// 任务C：组织/地点生成');
