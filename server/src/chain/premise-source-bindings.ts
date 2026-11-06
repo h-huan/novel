@@ -64,23 +64,33 @@ export function indexedPremiseSourcePool<T extends Record<string,unknown>>(pool:
  });
 }
 
-/** A sourceRef is an address, never an inferred causal relationship. */
-export function resolvePremiseSourceReference(seed:Record<string,unknown>,ref:unknown):string|undefined {
+/** A sourceRef is an address, never an inferred causal relationship.
+ * Share the one decoder between textual evidence recovery and field ownership.
+ * Real fixed-pool model outputs also use [ID:section:start]-[ID:section:end]
+ * (each endpoint copied verbatim from the displayed pool). This is an existing
+ * same-section range, not two stories or a new fact. All identity, range and
+ * source-preservation checks remain mandatory. */
+function parsePremiseSourceAddress(ref:unknown):
+ {owner:string;section:number;start:number;end:number}|undefined {
  if(typeof ref!=='string')return;
- // The provider sees [ID:section:clause] markers in the frozen source catalog.
- // Accept the exact displayed marker or its inner address; never infer a
- // missing clause, owner, section, number, or story fact.
  const trimmed=ref.trim();
- const address=trimmed.startsWith('[')&&trimmed.endsWith(']')?trimmed.slice(1,-1):trimmed;
- // Canonical ID:section:start-end; legacy expanded endpoints resolve only
- // when their owner and section exactly match the first endpoint.
+ const bracketedEndpoints=/^\[([^\[\]]+)\]-\[([^\[\]]+)\]$/.exec(trimmed);
+ const address=bracketedEndpoints
+  ?bracketedEndpoints[1]+'-'+bracketedEndpoints[2]
+  :trimmed.startsWith('[')&&trimmed.endsWith(']')?trimmed.slice(1,-1):trimmed;
  const match=/^([^:]+):([1-5]):([1-9]\d*)(?:-(?:(?:([^:]+):)?([1-5]):)?([1-9]\d*))?$/.exec(address);
- if(!match||match[1]!==String(seed.premiseId)
-   ||match[4]!==undefined&&match[4]!==match[1]
-   ||match[5]!==undefined&&match[5]!==match[2])return;
- try{const section=premiseSourceSections(seed)[Number(match[2])-1],start=Number(match[3]),end=Number(match[6]||match[3]);
-  if(end<start||end>section.clauses.length)return;
-  return section.clauses.slice(start-1,end).join('');
+ if(!match||(match[4]!==undefined&&match[4]!==match[1])
+   ||(match[5]!==undefined&&match[5]!==match[2]))return;
+ return {owner:match[1],section:Number(match[2]),
+  start:Number(match[3]),end:Number(match[6]||match[3])};
+}
+export function resolvePremiseSourceReference(seed:Record<string,unknown>,ref:unknown):string|undefined {
+ const address=parsePremiseSourceAddress(ref);
+ if(!address||address.owner!==String(seed.premiseId))return;
+ try{
+  const section=premiseSourceSections(seed)[address.section-1];
+  if(address.end<address.start||address.end>section.clauses.length)return;
+  return section.clauses.slice(address.start-1,address.end).join('');
  }catch{return;}
 }
 
@@ -101,7 +111,9 @@ export function resolvePremiseSourceAnchor(candidate:Record<string,unknown>,ref:
  const quote=resolvePremiseSourceReference(candidate,ref);
  if(!quote)return;
  // The codec above has already checked owner, section and contiguous bounds.
- const section=PREMISE_SOURCE_SECTIONS[Number(String(ref).split(':')[1])-1];
+ const address=parsePremiseSourceAddress(ref);
+ if(!address)return;
+ const section=PREMISE_SOURCE_SECTIONS[address.section-1];
  const exact=exactPremiseSourceFields(candidate,candidate);
  const fields=(Object.keys(SOURCE_BINDING_EXAMPLE) as Array<keyof typeof SOURCE_BINDING_EXAMPLE>)
   .filter(field=>exact.has(field)&&(SOURCE_BINDING_EXAMPLE[field] as readonly string[]).includes(section)

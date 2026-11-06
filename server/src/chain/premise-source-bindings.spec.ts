@@ -90,7 +90,7 @@ it('resolves numbered contiguous source clauses to exact original text before ev
  expect(PREMISE_SOURCE_REFERENCE_DIRECTIVE).toContain('禁止照抄模板占位地址');
  expect(resolvePremiseSourceReference(seed,'[P1:2:2-3]')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
  expect(resolvePremiseSourceReference(seed,' [P1:2:2-3] ')).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
- for(const ref of ['P1:2:2-2:3','P1:2:2-P1:2:3']){
+ for(const ref of ['P1:2:2-2:3','P1:2:2-P1:2:3','[P1:2:2]-[P1:2:3]']){
   expect(resolvePremiseSourceReference(seed,ref)).toBe('邻居看到桥面能站人，选择带来工具共同修桥。');
   const raw={...chosen,causalPlan:[{action:{sourceRef:ref},
     conditions:[{sourceRef:'P1:3:3-3:3'}],result:{sourceRef:'P1:4:1-4:2'}}]};
@@ -101,10 +101,26 @@ it('resolves numbered contiguous source clauses to exact original text before ev
  expect(seed.storyCore).not.toContain('[2]');
 });
 
-it.each(['[P2:2:1]','[P1:2:99]','[P1:2:2-P1:3:3]','P2:2:1','P1:2:99','P1:4:4-2','P1:6:1','P1:4:1-P1:5:1','P1:2:2-3:3','P1:2:2-P2:2:3','P1:2:4-2:3','P1:2:2-P1:3:3','P1:2:2-P1:2:99'])('rejects a cross-owner, missing or noncontiguous source address: %s',ref=>{
+it.each(['[P2:2:1]','[P1:2:99]','[P1:2:2-P1:3:3]','P2:2:1','P1:2:99','P1:4:4-2','P1:6:1','P1:4:1-P1:5:1','P1:2:2-3:3','P1:2:2-P2:2:3','P1:2:4-2:3','P1:2:2-P1:3:3','P1:2:2-P1:2:99','[P1:2:2]-[P2:2:3]','[P1:2:2]-[P1:3:3]','[P1:2:3]-[P1:2:2]','[P1:2:2]-[P1:2:99]'])('rejects a cross-owner, missing or noncontiguous source address: %s',ref=>{
  expect(resolvePremiseSourceReference(seed,ref)).toBeUndefined();
  const raw=nomination();(raw.causalPlan[0] as any).action={field:'activeChoice',sourceRef:ref};
  expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[raw]},1,1)).toThrow();
+});
+
+it('rebinds a bracketed endpoint pair through the same source projection, without modifying a story or creating a result',()=>{
+ const raw=nomination();
+ (raw.causalPlan[0] as any).action={sourceRef:'[P1:2:2]-[P1:2:3]'};
+ (raw.causalPlan[0] as any).conditions=[{sourceRef:'[P1:3:3]'}];
+ (raw.causalPlan[0] as any).result={sourceRef:'[P1:4:1]-[P1:4:2]'};
+ const original=JSON.stringify({raw,seed});
+ const bound=normalizePremiseSelectionPayload({pool:[seed],
+  selectedPremises:projectPremiseSourceChoices([raw],[seed])},1,1).selected[0];
+ expect(bound.causalPlan).toEqual(nomination().causalPlan);
+ expect(bound.storyCore).toBe(seed.storyCore);
+ expect(JSON.stringify({raw,seed})).toBe(original);
+ const wrong={...raw,causalPlan:[{...raw.causalPlan[0],action:{sourceRef:'[P1:2:2]-[P1:3:3]'}}]};
+ expect(()=>normalizePremiseSelectionPayload({pool:[seed],
+  selectedPremises:projectPremiseSourceChoices([wrong],[seed])},1,1)).toThrow();
 });
 
 it('proves exact copied facts while retaining independent review of the new reader question',()=>{
