@@ -4948,6 +4948,18 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       // 只验证并使用 idea_generate 当前场景所配置的模型；不得切换模型、提供商或模式。
       this.realLLM.assertScenarioModelConfigured('idea_generate');
       const discoveryBudget=readGenerationBudgets();
+      // Record the persisted settings AT REQUEST START. A later diagnostic
+      // may see changed settings; never infer historical batch size or timeout
+      // from repository defaults or from a newer backend snapshot.
+      this.logger.log('idea-discover: 请求启动时实际生成预算（单次超时不是总耗时上限） '+JSON.stringify({
+        reviewGroupingMode:discoveryBudget.reviewGroupingMode,
+        sourceBatchSize:discoveryBudget.sourceBatchSize,
+        presentationBatchSize:discoveryBudget.presentationBatchSize,
+        sourceMaxPhysicalCalls:discoveryBudget.sourceMaxPhysicalCalls,
+        presentationMaxPhysicalCalls:discoveryBudget.presentationMaxPhysicalCalls,
+        premiseReselectionMaxCalls:discoveryBudget.premiseReselectionMaxCalls,
+        complexTimeoutMs:discoveryBudget.complexTimeoutMs,
+      }));
       const presentationCallLimit=discoveryBudget.presentationMaxPhysicalCalls;
       // All source/cause/genre/category and pairwise evidence is established
       // before full cards. No source credits are reserved for a later card

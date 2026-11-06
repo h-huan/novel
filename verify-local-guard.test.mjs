@@ -40,6 +40,11 @@ const root = path.dirname(fileURLToPath(import.meta.url));
   const wrapperScript=fs.readFileSync(path.join(root,'verify-local.mjs'),'utf8');
   assert.match(wrapperScript,/当前后端实际生成预算（诊断时刻，非历史运行）/u);
   assert.match(wrapperScript,/effectiveGenerationBudget/u);
+  // The runtime request log must preserve the configuration at discovery
+  // start, even if users subsequently edit the saved settings.
+  const chainScript=fs.readFileSync(path.join(root,'server/src/chain/chain.controller.ts'),'utf8');
+  assert.match(chainScript,/请求启动时实际生成预算（单次超时不是总耗时上限）/u);
+  assert.match(chainScript,/complexTimeoutMs:discoveryBudget\.complexTimeoutMs/u);
 }
 
 
