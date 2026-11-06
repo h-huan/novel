@@ -444,11 +444,18 @@ describe('decisive planning action proof', () => {
     const prompt=generate.mock.calls[0][0].prompt as string;
     const catalog=JSON.parse(prompt.split('【章号与本章证据地址对应】')[1].split('\n服务器resultAnchorIds目录')[0]);
     expect(catalog).toHaveLength(2);
-    expect(catalog[0].anchorIds.length).toBeGreaterThan(0);
-    expect(catalog[1].anchorIds.length).toBeGreaterThan(0);
-    expect(catalog[0].anchorIds.filter((id:string)=>catalog[1].anchorIds.includes(id))).toEqual([]);
+    expect(catalog[0].bodyIndex).toBe(0);
+    expect(catalog[1].bodyIndex).toBe(1);
+    expect(catalog[0]).not.toHaveProperty('anchorIds');
+    expect(catalog[1]).not.toHaveProperty('anchorIds');
+    const original=JSON.parse(prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\\n')[0]);
+    const chapter0=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('0.'));
+    const chapter1=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('1.'));
+    expect(chapter0.length).toBeGreaterThan(0);
+    expect(chapter1.length).toBeGreaterThan(0);
+    expect(chapter0.some((a:{id:string})=>chapter1.some((b:{id:string})=>a.id===b.id))).toBe(false);
     expect(catalog[0].resultAnchorIds.filter((id:string)=>catalog[1].resultAnchorIds.includes(id))).toEqual([]);
-    expect(prompt).toContain('行动仅从本章anchorIds选地址');
+    expect(prompt).toContain('path以本章bodyIndex和点号开头');
   });
   it('schedules disjoint groups concurrently and merges their results in chapter order',async()=>{
     const concurrency=await import('./discovery-concurrency');
