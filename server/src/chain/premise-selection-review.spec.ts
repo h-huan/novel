@@ -4,7 +4,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -33,26 +33,24 @@ it('keeps all substantive overlap facts and sources in memory while removing rep
   expect(JSON.stringify(viewed).length).toBeLessThan(JSON.stringify(original).length);
 });
 
-it('keeps overlap judgment scoped to pairwise story paths rather than repeating the source and causal-plan gate', async()=>{
-  const c=Object.create(ChainController.prototype) as any;
-  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-    expect(prompt).toContain('当前是锁定前同构与终局反事实双核对');
-    expect(prompt).toContain('当前审查类型=overlap');
-    expect(prompt).not.toContain('先按causalPlan核查');
-    expect(prompt).not.toContain('逐字段来源核查目录');
-    expect(prompt).not.toContain('【逐环节因果计划目录');
-    const result={passed:true,issues:[],outcomeChecks:['A','B'].map(premiseId=>({
-      premiseId,status:'supported',claimQuote:premise(premiseId).payoff,
-      priorQuote:premise(premiseId).activeChoice,
-      reason:'主动承担代价是先前明确承诺的实际行动，结果仍须受独立来源与因果审查约束',
-    }))};
-    expect(options.validate({passed:true,issues:[]})).toBe(false);
-    expect(options.validate(result)).toBe(true);
-    return {data:result};
-  });
-  const result=await c.reviewPremiseSelection(selection(),'原有标准','overlap');
-  expect(result).toMatchObject({passed:true,issues:[],outcomeChecks:expect.any(Array)});
-  expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
+it('checks pairwise story differences without redoing source and causal payoff decisions',async()=>{
+ const c=Object.create(ChainController.prototype) as any;
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
+  expect(prompt).toContain('当前是锁定前同构专责核对');
+  expect(prompt).toContain('当前审查类型=overlap');
+  expect(prompt).not.toContain('【逐环节因果计划目录');
+  expect(prompt).not.toContain('【逐字段来源核查目录');
+  expect(prompt).not.toContain('【本次须独立复核胜负的实际题材ID】');
+  expect(options.validate({passed:true,issues:[]})).toBe(true);
+  const overlap={kind:'overlap',premiseId:'A',referencePremiseId:'B',
+   quote:premise('A').activeChoice,referenceQuote:premise('B').activeChoice,
+   reason:'两条题材的主动策略与局势升级以及兑现机制完全同构'};
+  expect(options.validate({passed:false,issues:[overlap]})).toBe(true);
+  return {data:{passed:true,issues:[]}};
+ });
+ const result=await c.reviewPremiseSelection(selection(),'原有标准','overlap');
+ expect(result).toEqual({passed:true,issues:[]});
+ expect(c.llmCallWithRetry).toHaveBeenCalledOnce();
 });
 
 it('keeps the defective source plan and complete independent-review selection while shrinking unchanged reselection peers',()=>{
@@ -1302,67 +1300,15 @@ it('deduplicates identical narrative text losslessly within each review identity
 });
 
 
-it('blocks independent late-stage payoff gaps before complete-card work without any additional model call',async()=>{
-  const a={...premise('A'),
-    storyCore:'【处境触发】商人要收购整条街，摊主拒绝。【主动选择】摊主查出他的店铺供货错误。【必要条件】商人对供货和雇员有权处置。【反转兑现】摊主要求不再收购整条街，商人答应了。【分类流派机制】弱者用手艺反击。',
-    activeChoice:'摊主当众拿出供货记录，商人回店核实后辞退违规店员。',
-    escalation:'商人查实店员以次充好，于是撤走堵摊的废料。',
-    reversalEffect:'摊主提出停止整条街收购，商人答应从此不再收购。',
-    payoff:'商人最终放弃对整条街的收购，摊主保住全部铺子。',
-  };
-  const b={...premise('B'),storyCore:'【处境触发】被排挤的学徒只能负责仓库清单。【主动选择】学徒查出库房遗漏的交接凭据。【必要条件】负责人亲自核对原始记录。【反转兑现】负责人撤销错误处罚，学徒继续留任。【分类流派机制】被低估者靠真本事反击。',
-    activeChoice:'学徒提交自己的原始交接凭据，要求负责人核对。',
-    escalation:'负责人逐项核对原始交接凭据，确认处罚对象搞错。',
-    reversalEffect:'负责人当场撤销之前已经作出的错误处罚。',
-    payoff:'学徒因此继续留任，并承担公开出面作证的代价。'};
-  const selected=normalizePremiseSelectionPayload({pool:[a,b],selectedPremises:[a,b]},2,2);
-  const reviewer={passed:true,issues:[],outcomeChecks:[
-    {premiseId:'A',status:'gap',claimQuote:'商人最终放弃对整条街的收购',
-      reason:'供货纠错只说明该店一项经营失误，未建立放弃整条街收购的动机或约束条件'},
-    {premiseId:'B',status:'supported',claimQuote:'学徒因此继续留任',
-      priorQuote:'负责人逐项核对原始交接凭据，确认处罚对象搞错',
-      reason:'核验直接确认处罚对象错误，作出原决定的负责人能够纠正错误处罚'}
-  ]};
-  expect(premiseOutcomeCounterfactualReviewIssues(reviewer,selected)).toEqual([]);
-  const c=Object.create(ChainController.prototype) as any;
-  c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-    expect(prompt).toContain('【本次须独立复核胜负的实际题材ID】');
-    expect(options.validate(reviewer)).toBe(true);
-    return {data:reviewer};
-  });
-  const checked=await c.reviewPremiseSelection(selected,'原标准','overlap');
-  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
-  expect(checked.passed).toBe(false);
-  expect(checked.issues).toEqual([expect.objectContaining({
-    kind:'selection_fit',premiseId:'A',referencePremiseId:'A',
-    repairMode:'replace_from_pool',origin:'outcome_counterfactual'
-  })]);
-  expect(premiseSelectionReviewIssues(checked,selected)).toEqual([]);
-  expect(premiseOutcomeCounterfactualReviewIssues({...reviewer,outcomeChecks:[reviewer.outcomeChecks[0]]},selected).length).toBeGreaterThan(0);
-  expect(premiseOutcomeCounterfactualReviewIssues({...reviewer,outcomeChecks:[{
-    ...reviewer.outcomeChecks[0],status:'supported',priorQuote:'商人最终放弃对整条街的收购'
-  },reviewer.outcomeChecks[1]]},selected).length).toBeGreaterThan(0);
+it('keeps proven overlap rejections when the pair is unchanged and invalidates changed pairs',()=>{
+ const issue={kind:'overlap' as const,premiseId:'A',referencePremiseId:'B',
+  quote:premise('A').activeChoice,referenceQuote:premise('B').activeChoice,
+  reason:'两条题材的胜负转换与行动升级确实相同'};
+ const review:PremiseSelectionReview={passed:false,issues:[issue]};
+ expect(retainUnchangedOverlapIssues(review,new Set())).toEqual([issue]);
+ expect(retainUnchangedOverlapIssues(review,new Set(['B']))).toEqual([]);
+ expect(premiseSelectionReviewIssues(review,selection())).toEqual([]);
 });
-
-it('does not turn missing silver into missing physical offerings or carry stale objections to a changed premise',()=>{
-  const row={...premise('B'),
-    storyCore:'【处境触发】王庭要统一查库。【主动选择】女主查出银两亏空。【必要条件】库银保管者受旧账约束。【反转兑现】祭祀时叔父交不出实物祭品而被撤权。【分类流派机制】弱者揭出账目问题。',
-    escalation:'查库发现银两亏空，随后设局让各部落上缴实物祭品，叔父却交不出祭品。',
-    reversalEffect:'叔父在祭祀中因交不出实物祭品被撤去管库权限。',
-    payoff:'我成了王庭第一个女掌库，但叔父因此怀恨在心。'};
-  const selected=normalizePremiseSelectionPayload({pool:[row],selectedPremises:[row]},1,1);
-  const judgment={passed:true,issues:[],outcomeChecks:[{
-    premiseId:'B',status:'gap',claimQuote:'我成了王庭第一个女掌库',
-    reason:'银两的账目亏空不能证明实物祭品不足，叔父仍可用本次新贡或自有物资补足缺口',
-  }]};
-  const checked=materializePremiseOutcomeCounterfactualReview(judgment,selected);
-  expect(checked.issues[0]).toMatchObject({premiseId:'B',origin:'outcome_counterfactual',repairMode:'replace_from_pool'});
-  const retained=retainUnchangedOverlapIssues(checked,new Set());
-  expect(retained).toEqual(checked.issues);
-  expect(retainUnchangedOverlapIssues(checked,new Set(['B']))).toEqual([]);
-  expect(premiseOutcomeCounterfactualReviewIssues({...judgment,outcomeChecks:[]},selected).length).toBeGreaterThan(0);
-});
-
 
 it('carries already-proven preselection causes into the existing refill while retaining later card failures',()=>{
  const audit={reasons:[
