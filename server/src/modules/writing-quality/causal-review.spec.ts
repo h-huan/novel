@@ -606,16 +606,16 @@ it('losslessly reviews 105 independent chapter outcomes through compact tuples w
  }));
  const body=JSON.stringify(chapters), anchors=causalEvidenceAnchors(body,{});
  const {entries}=causalChapterEvidenceCatalog(chapters,anchors);
+ const expected=entries.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId})));
  const proofRows=entries.flatMap((entry,index)=>{
    const action=anchors.find(a=>a.path===index+'.content'&&a.source==='body');
    expect(action).toBeDefined();
-   return entry.resultAnchorIds.map(resultAnchorId=>[
-     entry.chapterNumber,resultAnchorId,action!.id,'','gap',
-     '只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
+   return entry.resultAnchorIds.map(()=>[
+     action!.id,'','gap','只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
    ]);
  });
  expect(proofRows).toHaveLength(105);
- const decoded=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',proofRows});
+ const decoded=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',proofRows},expected);
  expect(decoded.proofRows).toBeUndefined();
  expect(decoded.transitions).toHaveLength(105);
  const bound=materializeCausalAuditAnchors(decoded,body,{});
@@ -624,11 +624,10 @@ it('losslessly reviews 105 independent chapter outcomes through compact tuples w
  expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(105);
  const catalogIds=new Set(entries.flatMap(entry=>entry.resultAnchorIds));
  expect(new Set(bound.transitions.map((row:any)=>row.resultAnchorId))).toEqual(catalogIds);
- const shortened=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
-   proofRows:proofRows.slice(0,104)});
- expect(new Set(shortened.transitions.map((row:any)=>row.resultAnchorId))).not.toEqual(catalogIds);
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
+   proofRows:proofRows.slice(0,104)},expected)).toThrow(/结果数量与服务器目录不一致/);
  const wrong=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
-   proofRows:[...[...proofRows.slice(0,104)], [3,'body:invalid:result',proofRows[104][2],'','gap','独立结果证据必须来自同章实际原文']]});
+   proofRows:[...proofRows.slice(0,104),['body:invalid:action','','gap','独立结果的行动证据必须来自同章实际原文']]},expected);
  const wrongBound=materializeCausalAuditAnchors(wrong,body,{});
  expect(causalChapterEvidenceAddressIssues(wrongBound,entries).length).toBeGreaterThan(0);
  expect(validateCausalAudit(wrongBound,body,{}).verified).toBe(false);
@@ -641,7 +640,7 @@ it('compact initial proof removes repeated body prose but retains all result and
  const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({worldRules:'受理申请不等于准许最终登记。'})};
  const base=causalAuditRepairPrompt(null,[],body,sources,false,false);
  const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
- expect(compact.prompt).toContain('proofRows每行恰好6项');
+ expect(compact.prompt).toContain('proofRows每行恰好4项');
  expect(compact.prompt).toContain('受理申请不等于准许最终登记');
  const inventory=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,sources)).entries[0].resultAnchorIds;
  for(const id of inventory)expect(compact.prompt).toContain(id);
@@ -650,12 +649,15 @@ it('compact initial proof removes repeated body prose but retains all result and
  expect(compact.prompt.length).toBeLessThan(base.prompt.length);
  expect(decodePlanningProofRows({status:'evaluated',reason:'旧版本完整结果账目',
    transitions:[{chapterNumber:1,resultAnchorId:'body:v1',status:'gap'}]}).transitions).toHaveLength(1);
+ const expected=[{chapterNumber:1,resultAnchorId:'body:v2'}];
  for(const invalid of [
    {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
-   {status:'evaluated',reason:'拒绝假冒',proofRows:[[1,'body:v2','body:v1','', 'supported','没有独立桥接证据']]},
-   {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v2','body:v1','gap','理由']]},
-   {status:'evaluated',reason:'拒绝伪造',proofRows:[[1,'body:invented','body:v1',null,'gap','独立状态与结果不成立的实际理由']]},
- ])expect(()=>decodePlanningProofRows(invalid)).toThrow();
+   {status:'evaluated',reason:'拒绝假冒通过',proofRows:[['body:v1','', 'supported','没有独立桥接证据']]},
+   {status:'evaluated',reason:'拒绝缺项',proofRows:[['body:v1','gap','理由']]},
+   {status:'evaluated',reason:'拒绝伪造',proofRows:[['body:invented',null,'gap','独立状态与结果不成立的实际理由']]},
+ ])expect(()=>decodePlanningProofRows(invalid,expected)).toThrow();
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不存在权威结果目录',proofRows:[
+   ['body:v1','','gap','未确认实际成立条件']]})).toThrow(/服务器结果目录/);
 });
 
 it('partitions a dominant chapter by server-owned result identities without omitting any result or chapter context',()=>{

@@ -62,7 +62,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好6项，按顺序为[chapterNumber,resultAnchorId,actionAnchorId,bridgeAnchorId,status,reason]。这是完整因果审核的短传输格式，不是抽样或统一判定。所有结果编号都必须逐一出现；章号为数字；resultAnchorId、actionAnchorId以及bridgeAnchorId所填的非空编号均须来自实际目录，bridgeAnchorId在supported时填实际有效编号，gap/planned时填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好4项，按顺序为[actionAnchorId,bridgeAnchorId,status,reason]。严格按下方服务器结果目录中的章节顺序及每章resultAnchorIds顺序逐项返回，不得交换位置；结果与章号由服务器按目录绑定，不让模型改写或遗漏结果身份。这是完整因果审核的短传输格式，不是抽样或统一判定。每个actionAnchorId以及非空bridgeAnchorId须来自实际目录；supported必须填有效bridgeAnchorId，gap/planned可填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；行数必须与本次服务器结果目录完全一致；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
   };
 }
 
@@ -74,25 +74,34 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
  * Reject dual schemas, malformed tuples and missing evidence: this function
  * never supplies a verdict, quote or inferred fact.
  */
-export function decodePlanningProofRows(value:any):any {
- if(!value || typeof value!=='object' || !Object.prototype.hasOwnProperty.call(value,'proofRows'))
-   return value;
+export function decodePlanningProofRows(
+ value:any,
+ // The server already owns both the chapter and every distinct result address.
+ // The reviewer returns ONLY the independent action/condition/verdict for each
+ // ordered result. Never let it rename, omit or duplicate an outcome by JSON.
+ expectedRows:readonly {chapterNumber:number;resultAnchorId:string}[]=[],
+):any {
+ if(!value||typeof value!=='object'||!Object.prototype.hasOwnProperty.call(value,'proofRows'))return value;
  if(value.transitions!==undefined)throw new Error('因果审核不能混用精简结果账目与完整transitions');
  if(!Array.isArray(value.proofRows))throw new Error('精简因果审核缺少逐项proofRows数组');
+ if(!expectedRows.length||new Set(expectedRows.map(row=>row.chapterNumber+':'+row.resultAnchorId)).size!==expectedRows.length
+   ||expectedRows.some(row=>!Number.isSafeInteger(row.chapterNumber)||row.chapterNumber<1
+     ||typeof row.resultAnchorId!=='string'||!row.resultAnchorId.trim()))
+   throw new Error('精简因果审核缺少唯一的服务器结果目录');
  const {proofRows,...header}=value;
+ if(proofRows.length!==expectedRows.length)
+   throw new Error('精简因果审核结果数量与服务器目录不一致：应为'+expectedRows.length+'项，实际'+proofRows.length+'项');
  return {...header,transitions:proofRows.map((row:any,index:number)=>{
-   if(!Array.isArray(row)||row.length!==6)
-     throw new Error('精简因果审核第'+(index+1)+'项必须恰好包含章号、结果、行动、桥接、状态与理由');
-   const [chapterNumber,resultAnchorId,actionAnchorId,bridgeAnchorId,status,reason]=row;
-   if(!Number.isSafeInteger(chapterNumber)||chapterNumber<1
-      ||typeof resultAnchorId!=='string'||!resultAnchorId.trim()
-      ||typeof actionAnchorId!=='string'||!actionAnchorId.trim()
+   if(!Array.isArray(row)||row.length!==4)
+     throw new Error('精简因果审核第'+(index+1)+'项必须恰好包含行动编号、桥接编号、状态与理由');
+   const [actionAnchorId,bridgeAnchorId,status,reason]=row;
+   if(typeof actionAnchorId!=='string'||!actionAnchorId.trim()
       ||typeof bridgeAnchorId!=='string'
       ||!['supported','gap','planned'].includes(status)
       ||(status==='supported'&&!bridgeAnchorId.trim())
       ||typeof reason!=='string'||reason.trim().length<8)
-      throw new Error('精简因果审核第'+(index+1)+'项引用、状态或实际解释缺失');
-   return {chapterNumber,resultAnchorId,actionAnchorId,bridgeAnchorId,status,reason};
+      throw new Error('精简因果审核第'+(index+1)+'项行动、成立条件、状态或实际解释缺失');
+   return {...expectedRows[index],actionAnchorId,bridgeAnchorId,status,reason};
  })};
 }
 
