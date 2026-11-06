@@ -2,7 +2,7 @@ import {bindModelRequestClock,remainingModelRequestTime} from './model-request-c
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
 import {chapterConditionReviewIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
-import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS } from './idea-discovery-contract';
+import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS, rankPremisePoolByMaturityScore } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
 import { completePremiseSourceProof, premiseSourceReviewWork, premiseSourceAuditView } from './premise-selection-review';
 import { premiseCausalReferenceExample, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
@@ -4965,6 +4965,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       // before full cards. No source credits are reserved for a later card
       // replacement phase: selected vetted premises are expanded together.
       const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls};
+      // Generated in the existing pool calls; ranking metadata never becomes canonical story fact.
+      const premiseMaturityScores=new Map<string,number>();
       const reselectionCompletionBudget={remaining:discoveryBudget.premiseReselectionMaxCalls};
       const chapterTuple = targetForLength(getPlatform(dto.platform), dto.storyType).chapterWords;
       const chapterRange = { min: chapterTuple[0], max: chapterTuple[1] };
@@ -5154,6 +5156,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           pool: [{
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
+            premiseMaturityScore: 0,
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
@@ -5179,8 +5182,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         // Actual narrative difference remains subject to the independent Gate.
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
-          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、阅读兑现与实质差异比较本批候选，弱方案在本次生成内重构；输出pool按成熟度由强到弱排序，不输出selectedPremises、分数、自评或淘汰过程；排序不能替代后续独立审核。\n'+PREMISE_READER_VALUE_POLICY,
-           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle在这次原池生成时就须从已经发生的冲突或反常关系中提炼出明确的利益、风险或未解后果，不能只是道具加动作的意象暂名；不能用补造事件、剧透最终结果替代点击动机。五节合计优先300—450汉字；首段必须有读者能立即代入的反常处境和风险，后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。',
+          '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、阅读兑现与实质差异比较本批候选，弱方案在本次生成内重构；输出pool按premiseMaturityScore由高到低排序，不输出selectedPremises、评分分析或淘汰过程；排序不能替代后续独立审核。\n'+PREMISE_READER_VALUE_POLICY,
+           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段和premiseMaturityScore（0到100整数；按冲突吸引、主动选择、因果可执行、兑现代价、平台分类及差异五项各20分合计；只按已经写出的事实评分，不得用分数补足缺失条件）以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle在这次原池生成时就须从已经发生的冲突或反常关系中提炼出明确的利益、风险或未解后果，不能只是道具加动作的意象暂名；不能用补造事件、剧透最终结果替代点击动机。五节合计优先300—450汉字；首段必须有读者能立即代入的反常处境和风险，后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。',
           '按已注入GEN-002的分类关系、必要条件、内部事实一致与实质差异要求构思。承担结果的人物选择与必要条件须已实际发生。初次生成时先确定可兑现的具体结果，再倒查谁实际执行、影响哪些对象、怎样取得证据或权限、对手为何会配合或反制；把必需的真实条件写在前四节里，不能仅在第五节贴流派标签。安排一次主动选择后的局势变化，再有真实新阻力和不同的第二次变化；普通短篇不必机械凑环节。若仅有被轻视、亮本事、众人服气，或者既有行动全部成立而所称结果仍可能不成立，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。同批不同身份不能共享一条低职位忍让、保留账本或日志、借第三方逼主管签批、公开对照记录、上级受罚而主角离职的完整胜负机制；同属扮猪吃虎可以，但具体获胜策略、意外升级与二次代价要从第一次生成就有真实差异，不得以职业、年代、道具变化冒充。输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
@@ -5191,7 +5194,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           dto.storyType, options.targetCount ?? ideaPreselectionCapacity(requestedCount,candidatePool.length),
           candidatePool.length, false, options.minimumCount ?? minimumSelectedCount, true,
         );
-        const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective;
+        const maturityRanking=promptPhase==='selection'
+          ?'\n【原池同次生成的成熟度评分（仅用于高分优先选优、原池备用排序，不是独立通过判定）】'
+            +JSON.stringify(rankPremisePoolByMaturityScore(options.pool??[],premiseMaturityScores)
+              .map(item=>({premiseId:item.premiseId,score:premiseMaturityScores.get(String(item.premiseId))??null})))
+            +'\n优先比较高分且真实可兑现的候选；明确的因果、分类、流派和同构缺陷优先淘汰，不允许以分数覆盖质量门。'
+          :'';
+        const promptDirective = promptPhase === 'pool' ? poolDirective : selectionDirective+maturityRanking;
         const promptSchema = promptPhase === 'pool'
           ? {pool:[{...premiseSchema.pool[0],premiseId:'B'+(batchIndex+1)+'-P1'}]}
           : {selectedPremises:[{premiseId:'固定原池真实ID',storyCategoryId:'原池实际K编号',readerQuestion:'仅追问本题材已有事实',causalPlan:premiseCausalReferenceExample()}]};
@@ -5392,6 +5401,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               continue;
             }
             candidatePool.push(bound);
+            if(typeof item.premiseMaturityScore==='number'&&Number.isInteger(item.premiseMaturityScore)
+              &&item.premiseMaturityScore>=0&&item.premiseMaturityScore<=100)
+              premiseMaturityScores.set(String(bound.premiseId),item.premiseMaturityScore);
             stats.retained += 1;
             const categoryKey = storyCategory || String(storyCategoryId || 'unknown');
             stats.categoryBindingCounts[categoryKey] = (stats.categoryBindingCounts[categoryKey] || 0) + 1;
@@ -5612,6 +5624,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,adaptiveDiscoveryConcurrency(candidatePool.length));
         if(!preselectionTarget)throw failWithPoolAudit(new Error('共享来源审核额度无法覆盖请求数量，未支付无法审核的选优调用'),
           'fixed_pool_selection','preselection_review_capacity_shortfall');
+        Object.assign(poolGenerationAudit,{maturityRanking:rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)
+          .map(item=>({premiseId:item.premiseId,score:premiseMaturityScores.get(String(item.premiseId))??null}))});
         const selectionStartedAt = Date.now();
         let selectionWallMs = 0;
         let parsedSelection: any = null;
@@ -5620,7 +5634,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let initialSelection = await (async () => {
           try {
             const selectionResponse = await this.realLLM.generate({
-              prompt: buildPremiseSelectionPrompt('selection', { pool: candidatePool,targetCount:preselectionTarget }),
+              prompt: buildPremiseSelectionPrompt('selection', { pool: rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores),targetCount:preselectionTarget }),
               scenario: 'idea_generate',
               timeout: discoveryBudget.complexTimeoutMs,
               maxEmptyRetries: 1,
@@ -6479,7 +6493,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     Object.assign(bound,freezePremiseCreationChoices(seed,dto,autoOptions,submissionForCategory(String(bound.storyCategory||dto.storyCategory))));
                   }catch{continue;}
                   existingKeys.add(titleKey);existingKeys.add(coreKey);
-                  unusedSeeds.push(bound);nextId++;
+                  unusedSeeds.push(bound);
+                  if(typeof seed.premiseMaturityScore==='number'&&Number.isInteger(seed.premiseMaturityScore)
+                    &&seed.premiseMaturityScore>=0&&seed.premiseMaturityScore<=100)
+                    premiseMaturityScores.set(String(bound.premiseId),seed.premiseMaturityScore);
+                  nextId++;
                 }
                 fulfillmentActions.push({phase:'lightweight_pool_refill',
                   requested:seedDeficit,retained:unusedSeeds.length-
@@ -6505,7 +6523,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               &&reselectionCompletionBudget.remaining>=1){
               try{
                 const selectionAnswer=await this.realLLM.generate({
-                  prompt:buildPremiseSelectionPrompt('selection',{pool:unusedSeeds,
+                  prompt:buildPremiseSelectionPrompt('selection',{pool:rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores),
                     targetCount:refillTarget,minimumCount:missingAfterFirstGate,
                      failureReasons:refillFailureReasons()}),
                   scenario:'idea_generate',responseFormat:'json_object',
@@ -8775,7 +8793,7 @@ ${protagonistName ? `【必须保留的主角（不得改名、不得换成别�
 - era——时代/时间线：具体年代、关键历史节点、与剧情的因果。
 - storyPremise——故事前提：一句话，**${protagonistName ? `必须保留已确认主角「${protagonistName}」的姓名与身份，不得改名` : '必须保留主角已确认身份；匿名第一人称不得被赋予新姓名'}**。
 - atmosphere——氛围基调：全书情绪定位，说明紧张/悬疑等从何而来、如何传递。
-- rules——核心规则数组：只列本故事真正需要的核心因果规则，不设固定条数；每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式，并写清作用对象、载体与可见范围（谁看得见、谁受影响）；每条规则只授予它字面写出的能力，规则之间不得互相否定——不得出现一条写某站只对某人可见、另一条又要求别人在此下车这类互斥设定；任何作用于他人的效果都必须写明该效果抵达他人的授权路径。
+- rules——核心规则数组：已确认题材明确的触发条件、作用对象与能力限制按原义继承，不增加未授权的共同在场人数、距离或时间门槛；只列本故事真正需要的核心因果规则，不设固定条数；每条写成"谁在什么条件下做什么会发生什么"的 if-then 形式，并写清作用对象、载体与可见范围（谁看得见、谁受影响）；每条规则只授予它字面写出的能力，规则之间不得互相否定——不得出现一条写某站只对某人可见、另一条又要求别人在此下车这类互斥设定；任何作用于他人的效果都必须写明该效果抵达他人的授权路径。
 - geography——地理：大陆/区域分布 + 关键地点（标剧情功能）。
 - locations——既定事件需要的核心地点名数组（简短，数量按故事需要）。
 - socialRules——行业规则/法律边界/社会行为规范数组（简短；**不得写社会结构或地点**）。

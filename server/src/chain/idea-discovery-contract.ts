@@ -280,6 +280,18 @@ export function capRankedPremiseSelections(rows:unknown,limit:number):unknown {
   return Array.isArray(rows)?rows.slice(0,limit):rows;
 }
 
+/** Preserve immutable premise IDs while ranking the original pool by the scores
+ * produced IN the existing candidate-generation calls. Scores decide screening
+ * priority only: independently evidenced causal, category and appeal Gates
+ * retain full authority. Missing legacy scores sort last without rejection. */
+export function rankPremisePoolByMaturityScore<T extends { premiseId?: unknown }>(
+  pool: readonly T[], scores: ReadonlyMap<string,number>,
+): T[] {
+  return pool.map((candidate,index)=>({candidate,index,score:scores.get(String(candidate.premiseId||''))}))
+    .sort((left,right)=>(right.score??-1)-(left.score??-1)||left.index-right.index)
+    .map(row=>row.candidate);
+}
+
 export function normalizePremiseSelectionPayload(
   payload: unknown,
   requestedCount: number,
@@ -416,7 +428,7 @@ ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生�
 ${fixedPoolRule}
 ${PREMISE_READER_VALUE_POLICY}
 ${selectionQuantityRule}
-按核对后的成熟程度由高到低排列selectedPremises，不得默认按原池编号或分类顺序排列；超额时仍只会保留已付款审核容量内的优先候选，其余留在原池备用。排名不能代替独立复审，不能给原池增加事实。
+先以同次原池生成的成熟度评分高低为选优顺序，再按真实因果、分类流派和实质差异剔除有证据缺陷者；不能为了高分牺牲作者条件或独立质量门；不得默认按原池编号或分类顺序排列；超额时仍只会保留已付款审核容量内的优先候选，其余留在原池备用。排名不能代替独立复审，不能给原池增加事实。
 ${storyTypeRule}
 必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
 ${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}
@@ -525,7 +537,10 @@ export function bindStructuredIdeaCardToPremise(
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId' && key !== 'causalPlan'),
   );
   const owned=Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>selectedPremise[field]!==undefined).map(field=>[field,structuredClone(selectedPremise[field])]));
-  const safeCard={...generatedCard,...owned};
+  const safeCard={...generatedCard,...owned,
+    ...(typeof selectedPremise.storyCategory==='string'&&selectedPremise.storyCategory.trim()
+      ? {storyCategory:selectedPremise.storyCategory}:{}),
+  };
   // This question already passed the selected premise's source review. It is
   // owned by that immutable identity, just like the inherited ending.
   // Other novelty claims remain generated and independently reviewed.

@@ -19,9 +19,24 @@ import {
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
   capRankedPremiseSelections,
+  rankPremisePoolByMaturityScore,
   selectedPremiseEvidenceForIdeaCard,
   presentationLockedPremiseView,
 } from './idea-discovery-contract';
+
+describe('original-pool same-generation maturity ranking',()=>{
+  it('ranks by stored original-pool scores, preserves identities and keeps legacy candidates without a score',()=>{
+    const pool=[{premiseId:'P1'},{premiseId:'P2'},{premiseId:'P3'}];
+    expect(rankPremisePoolByMaturityScore(pool,new Map([['P1',70],['P2',94]]))
+      .map(row=>row.premiseId)).toEqual(['P2','P1','P3']);
+    expect(pool.map(row=>row.premiseId)).toEqual(['P1','P2','P3']);
+  });
+  it('keeps the locked platform category when a generated full card attempts to relabel its premise',()=>{
+    const card=bindStructuredIdeaCardToPremise({premiseId:'P1',workingTitle:'原题材',storyCategory:'古言虐恋'},
+      [{title:'新标题',storyCategory:'宫斗宅斗'}]);
+    expect(card.storyCategory).toBe('古言虐恋');
+  });
+});
 
 const selectedPremise = (premiseId: string) => ({
   premiseId,
