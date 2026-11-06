@@ -46,7 +46,7 @@ describe('reader-facing source-bound card generation', () => {
     expect(prompt).toContain('逐个对照scopeBreakdown的outcome');
     expect(prompt).toContain('他人转念');
     expect(prompt).toContain('ending由服务器继承已审核');
-    expect(prompt).toContain('不得替换、合并、拆分、另造题材');
+    expect(prompt).toContain('禁止替换、合并、拆分、另造题材');
   });
 });
 
