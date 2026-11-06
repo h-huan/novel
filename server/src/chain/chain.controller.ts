@@ -7221,13 +7221,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         freshPoolCount+citationOnlySlots,
       ))
       :repairPlan.repairSlots;
-    // Spend the SAME bounded review allowance on as many original-pool replacements
-    // as can actually be independently audited: trim optional hedges first, then
-    // unfundable delivery replacements. A partial reviewed recovery is preferable
-    // to paying for an all-or-nothing request that cannot be audited. The author
-    // demand remains unchanged, and an unsatisfied delivery is still incomplete.
+    // Preserve the review floor needed for the actual delivery gap. Optional
+    // hedges are trimmed first; if even the mandatory slots cannot be audited,
+    // the preflight below must skip the futile paid reselection. Never shrink
+    // the author's requested number merely to spend otherwise idle credits.
     const recoveryGrouping=readGenerationBudgets();
-    while(shared && recoverySlots.length>0
+    while(shared && recoverySlots.length>neededReplacementSlots
       && minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
         recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode)>shared.reviews.remaining)
       recoverySlots=recoverySlots.slice(0,-1);
