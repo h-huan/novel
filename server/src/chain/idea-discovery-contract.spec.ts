@@ -38,6 +38,18 @@ const selectedPremise = (premiseId: string) => ({
   differentiation: '冲突由具体职业责任和不可替换关系共同推动，不靠换名套路',
 });
 
+describe('reader-facing source-bound card generation', () => {
+  it('requires a title understandable without the synopsis and forbids inventing stage outcomes', () => {
+    const prompt=ideaCardStructuringDirective(selectedPremise('P-readable'),[],false);
+    expect(prompt).toContain('只凭标题须能知道发生了何种反常关系');
+    expect(prompt).toContain('需要读完概要才懂的隐喻');
+    expect(prompt).toContain('逐个对照scopeBreakdown的outcome');
+    expect(prompt).toContain('他人转念');
+    expect(prompt).toContain('ending由服务器继承已审核');
+    expect(prompt).toContain('不得替换、合并、拆分、另造题材');
+  });
+});
+
 describe('locked-card historical exclusion transport', () => {
   it('does not repeat full historical story material once the premise is locked, while retaining every title', () => {
     const excludes = [
