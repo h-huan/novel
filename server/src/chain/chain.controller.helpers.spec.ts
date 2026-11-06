@@ -2097,7 +2097,7 @@ it('sends matching complete pool sources to source review and every selected ite
  const controller=Object.create(ChainController.prototype) as any;
  controller.llmCallWithRetry=vi.fn(async (_label:string,_prompt:string,options:any)=>{const data=options.stepKey==='idea_premise_source_drift_review'
   ? {sourceChecks:premiseSourceComparisonCatalog(selection).map(row=>({ref:row.ref,status:'preserved',reason:'当前展开字段保留原池的行动与结果约束'})),payoffChecks:[{ref:'S1.payoff',status:'supported',actionEvidenceRef:'S1.activeChoice',reason:'该普通行动能够直接造成规划中的对应结果'}]}
-  : {passed:true,issues:[],outcomeChecks:[{premiseId:'P1',status:'supported',claimQuote:'电话接通，双方开始交谈。',priorQuote:'她拨通电话并说明具体情况。',reason:'拨通电话并实际说明具体情况是此前发生的行动，双方接通可以直接形成交谈'}]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
+  : {passed:true,issues:[]};expect(options.validate(data)).toBe(true);return {data,warnings:[]};});
  const selection={pool:[{premiseId:'P1',storyCore:'保留原始骨架完整内容'},{premiseId:'P2',storyCore:'未选原池项专用标记'}],selected:[{premiseId:'P1',storyCore:'保留原始骨架完整内容',activeChoice:'她拨通电话并说明具体情况。',payoff:'电话接通，双方开始交谈。'}]};
  await controller.reviewPremiseSelection(selection,'既定标准','source_drift');
  const source=controller.llmCallWithRetry.mock.calls[0][1];expect(source).toContain('保留原始骨架完整内容');expect(source).not.toContain('未选原池项专用标记');
