@@ -274,14 +274,23 @@ export function causalPlanningProofPromptCatalog(
    .map(a=>[a.path!,a.id]));
  return entries.map((entry,index)=>{
    const actionLookup:Array<{resultAnchorId:string;actionAnchorId:string}>=[];
+   const reviewedResults=entry.resultAnchorIds.map(id=>byId.get(id)).filter(
+     (row):row is NonNullable<typeof row>=>!!row&&row.source==='body'&&row.path?.startsWith(index+'.')===true);
+   const actualResults=causalChapterResultAnchors(anchors,index);
    const actions=(chapters[index] as any)?.characterActions;
    if(Array.isArray(actions))for(let i=0;i<actions.length;i++){
      const path=index+'.characterActions.'+i;
      const actionId=fields.get(path+'.action');
      if(!actionId)continue;
-     for(const resultId of entry.resultAnchorIds)
-       if(byId.get(resultId)?.path===path+'.result')
-         actionLookup.push({resultAnchorId:resultId,actionAnchorId:actionId});
+     // The reviewer may own a scene outcome as the representative of an
+     // IDENTICAL characterActions.result. The sibling action is still a
+     // valid location hint for that result, even when the result's address
+     // points at scenes rather than at this character action.
+     for(const actualResult of actualResults.filter(row=>row.path===path+'.result'))
+       for(const reviewedResult of reviewedResults)
+         if(reviewedResult.text===actualResult.text
+           &&!actionLookup.some(hint=>hint.resultAnchorId===reviewedResult.id&&hint.actionAnchorId===actionId))
+           actionLookup.push({resultAnchorId:reviewedResult.id,actionAnchorId:actionId});
    }
    return {chapterNumber:entry.chapterNumber,bodyIndex:index,
      resultAnchorIds:[...entry.resultAnchorIds],actionLookup};

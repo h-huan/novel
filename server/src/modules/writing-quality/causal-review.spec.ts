@@ -689,10 +689,23 @@ it('large outline audit keeps every exact result but avoids resending all action
  expect(shown[0].resultAnchorIds).toEqual(entries[0].resultAnchorIds);
  expect(shown[0]).not.toHaveProperty('anchorIds');
  expect(shown[0].actionLookup.length).toBeGreaterThan(0);
+ const reviewedScene=anchors.find(a=>a.path==='0.scenes.0.outcome'&&shown[0].resultAnchorIds.includes(a.id));
+ const siblingAction=anchors.find(a=>a.path==='0.characterActions.0.action');
+ expect(reviewedScene).toBeDefined();
+ expect(siblingAction).toBeDefined();
+ // The scene result won the exact-text alias; its original character action
+ // must still be available as a hint, without being assumed causal proof.
+ expect(shown[0].actionLookup).toContainEqual({
+   resultAnchorId:reviewedScene!.id,actionAnchorId:siblingAction!.id,
+ });
  for(const hint of shown[0].actionLookup){
    const action=anchors.find(a=>a.id===hint.actionAnchorId)!;
    const result=anchors.find(a=>a.id===hint.resultAnchorId)!;
-   expect(result.path?.replace(/\.result$/,'.action')).toBe(action.path);
+   expect(action.source).toBe('body');
+   expect(action.path?.startsWith('0.characterActions.')).toBe(true);
+   expect(result.source).toBe('body');
+   expect(result.path?.startsWith('0.')).toBe(true);
+   expect(action.text).not.toEqual(result.text);
  }
  expect(JSON.stringify(shown).length).toBeLessThan(JSON.stringify(entries).length);
  expect(Object.values(aliasesByReview).flat().length).toBeGreaterThan(0);
