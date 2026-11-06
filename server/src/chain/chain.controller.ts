@@ -7602,8 +7602,16 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ...budgetPartialAudit, partial: true, excludedPremiseIds: [...unresolvedIds,...retained.excludedPremiseIds],
         reasons: [...(budgetPartialAudit.reasons || []),...retained.reasons], completeCardGatePending: true } };
     }
+    // A sound partial shortlist still cannot satisfy a larger author request.
+    // Keep its audited candidates, but never mark a budget-trimmed delivery gap
+    // as a complete preselection result.
+    const deliveryStillMissing=selected.selected.length<deliveryCount;
     return { ...selected, selectionAudit: { initialReview, reselectionAttempted: true, finalReview,
-      rejectedHistory, ...budgetPartialAudit } };
+      rejectedHistory, ...budgetPartialAudit,
+      ...(deliveryStillMissing?{partial:true,deliveryShortfall:deliveryCount-selected.selected.length,
+        selectionStopReason:'review_budget_limited_recovery',
+        completeCardGatePending:true}:{}),
+    } };
   }
 
   private async reviewChildSource(projectId: string, parentName: string, parent: unknown,
