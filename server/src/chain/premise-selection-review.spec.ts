@@ -199,6 +199,40 @@ it('aggregates five rejected preselection positions once, then retains independe
 
 });
 
+it('keeps the affordable original-pool subset rather than discarding all four required replacement slots',async()=>{
+ const pool='ABCDEFGHIJ'.split('').map(premise);
+ const selected=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,5)},5,10);
+ const c=Object.create(ChainController.prototype) as any;
+ c.logger={warn:vi.fn(),log:vi.fn()};
+ const budget={reviews:{remaining:4},reselection:{remaining:3}};
+ let sourceCalls=0;
+ c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string,credits:any)=>{
+  credits.remaining--;
+  if(mode==='overlap')return {passed:true,issues:[]};
+  if(sourceCalls++===0)return {passed:false,issues:['B','C','D','E'].map(id=>({
+   kind:'source_drift',premiseId:id,referencePremiseId:id,
+   quote:premise(id).activeChoice,referenceQuote:premise(id).storyCore,
+   reason:'所选展开缺失已确认的行动与结果桥接',
+  }))};
+  return {passed:true,issues:[]};
+ });
+ c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,opts:any)=>{
+  expect(prompt).toContain('replacements恰好3项');
+  const data={replacements:[['B','F'],['C','G'],['D','H']].map(([from,to])=>({
+   replacesPremiseId:from,premise:premise(to),
+  }))};
+  expect(opts.validate(data)).toBe(true);
+  opts.physicalCallBudget.remaining--;
+  return {data};
+ });
+ const result=await c.reconcilePremiseSelection(selected,5,10,['悬疑'],'',[],budget,5);
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','F','G','H']);
+ expect(result.selectionAudit).toMatchObject({reselectionAttempted:true,partial:true,completeCardGatePending:true});
+ expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
+ expect(budget.reviews.remaining).toBe(0);
+ expect(budget.reselection.remaining).toBe(2);
+});
+
 it('does not pay for an original-pool replacement when its mandatory independent reviews are unfunded',async()=>{
  const pool=['A','B','C','D','E','F'].map(premise);
  const selected=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,3)},3,6);
