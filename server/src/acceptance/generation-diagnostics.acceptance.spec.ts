@@ -18,22 +18,10 @@ import { HttpException } from '@nestjs/common';
 /** Return the existing reviewer call's full protocol from its actual selected
  * premise catalog. This is a deterministic fake model for acceptance tests,
  * not a bypass or fixture used by production generation. */
-function makeOverlapFixture(prompt:string){
-  const selected=JSON.parse(prompt.split('【待锁定已选胚子】')[1].split('\n')[0]) as Array<Record<string,any>>;
-  const ids=JSON.parse(prompt.split('【本次须独立复核胜负的实际题材ID】')[1].split('\n')[0]) as string[];
-  const getText=(row:Record<string,any>,field:string):string=>{
-    const value=row[field];
-    return typeof value==='string'?value
-      :value&&typeof value==='object'&&typeof value.sameTextAs==='string'
-        ?getText(row,value.sameTextAs):'';
-  };
-  return {passed:true,issues:[],outcomeChecks:ids.map(premiseId=>{
-    const row=selected.find(candidate=>candidate.premiseId===premiseId);
-    if(!row)throw Error('测试模拟缺少对应题材的真实来源身份');
-    return {premiseId,status:'supported',claimQuote:getText(row,'payoff'),
-      priorQuote:getText(row,'activeChoice'),
-      reason:'该模拟数据中先行主动行动已写入具体情节，结局仍须通过其它既有质量门审查'};
-  })};
+function makeOverlapFixture(_prompt:string){
+  // Pairwise review alone owns structural overlap; source/payoff causality is
+  // independently simulated by makePremiseReviewFixture in the same tests.
+  return {passed:true,issues:[]};
 }
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
