@@ -20,6 +20,32 @@ export function confirmedWorldProtagonistName(protagonist: unknown): string {
   return token;
 }
 
+/** Restore only an unambiguous complete world OBJECT from a provider's
+ * alternate JSON root. Do not extract a nested fragment, infer missing fields,
+ * add world facts or mark a failed semantic/source Gate as passed. */
+export function normalizeWorldSourceCandidate(value: unknown): unknown {
+ let candidate=value;
+ // A structured-mode provider may serialize the complete JSON object twice.
+ // Only whole-document JSON.parse is allowed; never salvage prose fragments.
+ for(let depth=0;depth<2&&typeof candidate==='string';depth++){
+  const text=candidate.trim();
+  if(!text.startsWith('{')&&!text.startsWith('['))break;
+  try{candidate=JSON.parse(text);}catch{break;}
+ }
+ if(Array.isArray(candidate)){
+  if(candidate.length!==1||!candidate[0]||typeof candidate[0]!=='object'||Array.isArray(candidate[0]))return candidate;
+  candidate=candidate[0];
+ }
+ if(candidate&&typeof candidate==='object'&&!Array.isArray(candidate)){
+  const entries=Object.entries(candidate);
+  if(entries.length===1&&['world','worldview','worldSetting'].includes(entries[0][0])){
+   const inner=entries[0][1];
+   if(inner&&typeof inner==='object'&&!Array.isArray(inner))return inner;
+  }
+ }
+ return candidate;
+}
+
 export function describeWorldSourceCandidate(value: unknown, protagonistName = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return ['世界观未返回JSON对象'];
   const world = value as Record<string, unknown>;
