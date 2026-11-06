@@ -607,11 +607,12 @@ it('losslessly reviews 105 independent chapter outcomes through compact tuples w
  const body=JSON.stringify(chapters), anchors=causalEvidenceAnchors(body,{});
  const {entries}=causalChapterEvidenceCatalog(chapters,anchors);
  const expected=entries.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId})));
+ let ordinal=0;
  const proofRows=entries.flatMap((entry,index)=>{
    const action=anchors.find(a=>a.path===index+'.content'&&a.source==='body');
    expect(action).toBeDefined();
    return entry.resultAnchorIds.map(()=>[
-     action!.id,'','gap','只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
+     ++ordinal,action!.id,'','gap','只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
    ]);
  });
  expect(proofRows).toHaveLength(105);
@@ -624,10 +625,13 @@ it('losslessly reviews 105 independent chapter outcomes through compact tuples w
  expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(105);
  const catalogIds=new Set(entries.flatMap(entry=>entry.resultAnchorIds));
  expect(new Set(bound.transitions.map((row:any)=>row.resultAnchorId))).toEqual(catalogIds);
+ const reordered=decodePlanningProofRows({status:'evaluated',reason:'结果地址由序号绑定而非输出位置',proofRows:[...proofRows].reverse()},expected);
+ expect(reordered.transitions.map((row:any)=>row.resultAnchorId)).toEqual([...expected].reverse().map(item=>item.resultAnchorId));
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'同序号不许重复',proofRows:[...proofRows.slice(0,104),proofRows[0]]},expected)).toThrow(/结果序号无效、重复或越界/);
  expect(()=>decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
    proofRows:proofRows.slice(0,104)},expected)).toThrow(/结果数量与服务器目录不一致/);
  const wrong=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
-   proofRows:[...proofRows.slice(0,104),['body:invalid:action','','gap','独立结果的行动证据必须来自同章实际原文']]},expected);
+   proofRows:[...proofRows.slice(0,104),[105,'body:invalid:action','','gap','独立结果的行动证据必须来自同章实际原文']]},expected);
  const wrongBound=materializeCausalAuditAnchors(wrong,body,{});
  expect(causalChapterEvidenceAddressIssues(wrongBound,entries).length).toBeGreaterThan(0);
  expect(validateCausalAudit(wrongBound,body,{}).verified).toBe(false);
@@ -640,7 +644,7 @@ it('compact initial proof removes repeated body prose but retains all result and
  const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({worldRules:'受理申请不等于准许最终登记。'})};
  const base=causalAuditRepairPrompt(null,[],body,sources,false,false);
  const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
- expect(compact.prompt).toContain('proofRows每行恰好4项');
+ expect(compact.prompt).toContain('proofRows每行恰好5项');
  expect(compact.prompt).toContain('受理申请不等于准许最终登记');
  const inventory=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,sources)).entries[0].resultAnchorIds;
  for(const id of inventory)expect(compact.prompt).toContain(id);
@@ -652,12 +656,12 @@ it('compact initial proof removes repeated body prose but retains all result and
  const expected=[{chapterNumber:1,resultAnchorId:'body:v2'}];
  for(const invalid of [
    {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
-   {status:'evaluated',reason:'拒绝假冒通过',proofRows:[['body:v1','', 'supported','没有独立桥接证据']]},
-   {status:'evaluated',reason:'拒绝缺项',proofRows:[['body:v1','gap','理由']]},
-   {status:'evaluated',reason:'拒绝伪造',proofRows:[['body:invented',null,'gap','独立状态与结果不成立的实际理由']]},
+   {status:'evaluated',reason:'拒绝假冒通过',proofRows:[[1,'body:v1','', 'supported','没有独立桥接证据']]},
+   {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v1','gap','理由']]},
+   {status:'evaluated',reason:'拒绝伪造',proofRows:[[1,'body:invented',null,'gap','独立状态与结果不成立的实际理由']]},
  ])expect(()=>decodePlanningProofRows(invalid,expected)).toThrow();
  expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不存在权威结果目录',proofRows:[
-   ['body:v1','','gap','未确认实际成立条件']]})).toThrow(/服务器结果目录/);
+   [1,'body:v1','','gap','未确认实际成立条件']]})).toThrow(/服务器结果目录/);
 });
 
 it('partitions a dominant chapter by server-owned result identities without omitting any result or chapter context',()=>{
