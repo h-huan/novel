@@ -9,7 +9,7 @@ const fixture=()=>{
  const value:any={reviews:[row]};value.reviews[0].readerGoals.immersion={supported:'',evidenceRef:'C1.description',reason:'她主动拒绝错误委托的选择与处境都有具体依据'};
  return value;
 };
-describe('full-card peer comparison context remains narrative-only',()=>{
+describe('full-card peer comparison retains narrative and authored dimensions without self-praise',()=>{
  it('retains all actual action-to-payoff and stage facts without repeated labels or self-praise',()=>{
   const peer={title:'老铺账目翻转',storyType:'short_story',targetPlatform:'fanqie',storyCategory:'都市日常',
    protagonist:'修鞋人守着摊位',setting:'门面产权和租期条件',
@@ -22,9 +22,10 @@ describe('full-card peer comparison context remains narrative-only',()=>{
    plotTags:['小人物'],submissionTags:['未认证标签'],pov:'第一人称'};
   const reference=compactIdeaPresentationReferences([peer])[0];
   for(const key of ['title','storyCategory','protagonist','setting','hook','description',
-   'coreConflict','mainReversal','ending','scopeBreakdown'] as const)expect(reference[key]).toEqual(peer[key]);
-  for(const key of ['uniquePoint','noveltyProof','storyTone','writingStyle',
-   'webNovelGenre','plotTags','submissionTags','pov'])expect(reference).not.toHaveProperty(key);
+   'coreConflict','mainReversal','ending','scopeBreakdown',
+   'storyTone','writingStyle','webNovelGenre','plotTags','submissionTags','pov'] as const)
+   expect(reference[key]).toEqual(peer[key]);
+  for(const key of ['uniquePoint','noveltyProof'])expect(reference).not.toHaveProperty(key);
   expect(JSON.stringify(reference).length).toBeLessThan(JSON.stringify(peer).length);
  });
 });
