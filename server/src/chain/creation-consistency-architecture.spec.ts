@@ -11,6 +11,7 @@ const patchSource = readFileSync(
   fileURLToPath(new URL('./cross-stage-patch.ts', import.meta.url)),
   'utf8',
 );
+const selectionDirectiveSource = readFileSync(fileURLToPath(new URL('./idea-discovery-contract.ts', import.meta.url)), 'utf8');
 const chapterDetailSource = readFileSync(
   fileURLToPath(new URL('./chapter-detail-contract.ts', import.meta.url)),
   'utf8',
@@ -73,8 +74,11 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
     expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
     expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
-    expect(controllerSource).toContain('【选优终检：不得留给后续长时复审才发现】');
-    expect(controllerSource).toContain('此为选优前的自检，不输出自评分，不代替后续全部独立审查。');
+    // The single authoritative fixed-pool directive owns the preselection criteria.
+    // A second copy in the controller adds tokens and can drift from the Gate.
+    expect(selectionDirectiveSource).toContain('逐对比较人物欲望、策略、对手反制、局势变化及不可逆代价');
+    expect(selectionDirectiveSource).toContain('每项兑现都必须有对应前置行动');
+    expect(controllerSource).not.toContain('【选优终检：不得留给后续长时复审才发现】');
     expect(controllerSource).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
     expect(controllerSource).toContain('先发生的话不能改称见证后来证据的反应');
     expect(controllerSource).toContain('沉默、询问或下一章计划升级为已执行结果');
