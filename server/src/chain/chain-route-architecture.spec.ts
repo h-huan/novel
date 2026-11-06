@@ -204,7 +204,11 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('affordableReviewedPremiseCount(');
     expect(source).toContain('sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,');
     expect(source).toContain('discoveryBudget.reviewGroupingMode,missingAfterFirstGate');
-    expect(source).toContain('failureReasons:rejectedReasons');
+    // Both stages of the SAME already-funded refill must inherit independently
+    // evidenced preselection failure modes, not only later full-card failures.
+    expect(source).toContain('const refillFailureReasons=()=>premiseRefillFailureReasons(');
+    expect(source.match(/failureReasons:refillFailureReasons\(\)/g)).toHaveLength(2);
+    expect(source).not.toContain('failureReasons:rejectedReasons');
     expect(source).not.toContain('minimumPresentationCredits');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
