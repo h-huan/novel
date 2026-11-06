@@ -36,6 +36,8 @@ describe('creation consistency architecture invariants', () => {
   it('carries the original scored pool ranking through selection, aggregate recovery and bounded refill',()=>{
     expect(controllerSource).toContain('const rankedOriginalPool=rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)');
     expect(controllerSource).toContain('pool: rankedOriginalPool,');
+    expect(controllerSource).toContain('rankPremisePoolByMaturityScore(shaped.selected,premiseMaturityScores)');
+    expect(controllerSource).toContain('rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)');
     expect(controllerSource).toContain('pool:rankedOriginalPool,selectedPremises:repaired.selected');
     expect(controllerSource).toContain('const rankedRefillPool=rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores)');
     expect(controllerSource).toContain('pool:rankedRefillPool,selectedPremises:planned.selected');

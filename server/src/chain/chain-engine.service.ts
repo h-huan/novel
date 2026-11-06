@@ -254,12 +254,32 @@ export class ChainEngineService {
     // An object with the wrong keys was previously marked "success", so a
     // long-running downstream node consumed undefined volumes/world facts.
     const outputIssues:string[]=[];
+    if(chain.id==='long-novel-init-foundation'&&node.id==='node_1_skeleton'){
+      const skeleton=parsedOutput as any;
+      const core=skeleton.coreSetting;
+      if(!core||typeof core!=='object'||Array.isArray(core))outputIssues.push('coreSetting必须包含已确认主角与主线事实');
+      else for(const field of ['protagonist','coreConflict','initialDilemma','emotionalEnding'])
+        if(typeof core[field]!=='string'||!core[field].trim())outputIssues.push('coreSetting缺少'+field+'，不能由后续世界或人物补造');
+      if(!Array.isArray(skeleton.skeletonVolumes)||!skeleton.skeletonVolumes.length)outputIssues.push('skeletonVolumes必须是非空分卷骨架');
+      else for(const [index,volume] of skeleton.skeletonVolumes.entries()){
+        if(!volume||!Number.isInteger(volume.estimatedChapters)||volume.estimatedChapters<=0
+          ||!['title','theme','description','chapterCountReason'].every(field=>typeof volume[field]==='string'&&volume[field].trim()))
+          outputIssues.push('第'+(index+1)+'卷缺少可执行阶段目标、章节数量依据或冲突推进');
+      }
+    }
     if(chain.id==='long-novel-init-foundation'&&node.id==='node_2_worldview'){
       const world=(parsedOutput as any).worldview;
       if(!world||typeof world!=='object'||Array.isArray(world))outputIssues.push('worldview必须是对象');
       else {
         if(!Array.isArray(world.geography)||!world.geography.length)outputIssues.push('worldview.geography缺少实际地点');
         if(!Array.isArray(world.factions)||!world.factions.length)outputIssues.push('worldview.factions缺少实际势力');
+        for(const field of ['socialStructure','powerSystem','economy','culture'])
+          if(typeof world[field]!=='string'||!world[field].trim())outputIssues.push('worldview缺少'+field+'的实际规则，不能交由下游补造');
+        if(!Array.isArray(world.history))outputIssues.push('worldview.history须为时间事件数组，不能由下游假定');
+        if(Array.isArray(world.geography)&&world.geography.some((item:any)=>!item||typeof item.name!=='string'||!item.name.trim()||typeof item.description!=='string'||!item.description.trim()))
+          outputIssues.push('worldview.geography缺少具名地点及其事件边界');
+        if(Array.isArray(world.factions)&&world.factions.some((item:any)=>!item||!['name','description','coreGoal','leader'].every(field=>typeof item[field]==='string'&&item[field].trim())))
+          outputIssues.push('worldview.factions缺少具名势力的行动边界与目标');
       }
     }
     if(chain.id==='long-novel-flexible-outline'&&node.id==='node_2_volumes'){

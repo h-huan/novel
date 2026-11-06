@@ -169,7 +169,7 @@ export class PromptRegistryService {
 故事设定：{{user_input.story_setting}}
 目标总字数：{{user_input.targetWords}}万字；分类：{{user_input.genre}}
 
-先确定主角起点、核心矛盾、不可撤销的关键选择、阶段推进、结局与代价，再依照这些因果节点划分卷。卷数与章数由故事决定，不得平均分配或套用固定数量。每章按${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字核对全书目标字数的可承载性。已选文风须落实为叙事单元与卷内结构；关系类标签须落实为具名人物、双方行动及关系变化；情节取向须落实为具体事件与代价。现实题材不得无依据添加穿越、修炼或超能力。
+先从已确认题材锁定主角身份、能力触发对象与条件、关键行动及其可达结果；未知限制保持未知，不得为了分卷临时新增否定原题材行动的规则。再确定主角起点、核心矛盾、不可撤销的关键选择、阶段推进、结局与代价，依照这些因果节点划分卷。卷数与章数由故事决定，不得平均分配或套用固定数量。每章按${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字核对全书目标字数的可承载性。已选文风须落实为叙事单元与卷内结构；关系类标签须落实为具名人物、双方行动及关系变化；情节取向须落实为具体事件与代价。现实题材不得无依据添加穿越、修炼或超能力。
 
 只输出合法 JSON 对象，包含：
 {"coreSetting":{"title":"书名","type":"类型","coreSellingPoints":["具体卖点"],"targetReaders":"目标读者","setting":"故事背景","coreConflict":"不可调和的主线矛盾","protagonist":"具名主角与身份","initialDilemma":"开篇困境","wantMost":"长期目标","fearMost":"内心恐惧","antagonist":"阻碍力量","emotionalEnding":"结局情绪与代价","highConcept":"高概念","narrativeForm":"文风如何成为全书叙事单元","keyRelationships":"具名关系及变化事件","volumePlan":[{"volume":1,"theme":"阶段主题","goal":"阶段目标","conflict":"核心冲突","turningPoint":"人物变化","climax":"卷末高潮"}]},"skeletonVolumes":[{"volumeNumber":1,"title":"卷名","theme":"主题","description":"阶段目标与因果事件链","estimatedChapters":1,"chapterCountReason":"依据事件链、节奏及目标字数说明章数","narrativeFormExecution":"叙事形式如何落到本卷","relationshipEvent":"具名人物的关系行动"}]}

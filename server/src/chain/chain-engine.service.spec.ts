@@ -104,9 +104,9 @@ describe('ChainEngineService', () => {
   it('passes accepted upstream skeleton into the next node input mapping',async()=>{
     const registry=new ChainTemplateService(service);
     const chain=registry.getDetail('long-novel-init-foundation');
-    const skeleton={coreSetting:{title:'现有世界'},opening:'已有起因'};
+    const skeleton={coreSetting:{title:'现有世界',protagonist:'阿舟，列车调度员',coreConflict:'停运封锁与乘客救援冲突',initialDilemma:'必须查明列车停运来源',emotionalEnding:'揭晓责任后接受离别代价'},skeletonVolumes:[{volumeNumber:1,title:'铁轨',theme:'真相',description:'追查停运与保全证据',estimatedChapters:8,chapterCountReason:'八个独立的行动与反制阶段'}]};
     generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
-      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城'}],factions:[{name:'维护班组'}]}})});
+      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城',description:'主线查证地点'}],factions:[{name:'维护班组',description:'负责线路维护',coreGoal:'恢复车站运营',leader:'陈明'}],socialStructure:'调度系统按责任归属管理',powerSystem:'正常工程核验与调度权限',economy:'城市运输收益与应急成本',culture:'职员以乘客安全为首要价值',history:[]}})});
     const render=(service as any).promptRegistry.render as ReturnType<typeof vi.fn>;
     const result=await service.execute(chain,{story_setting:'锁定题材',targetWords:20000,genre:'现实'});
     expect(result.status).toBe('completed');
@@ -145,7 +145,7 @@ describe('ChainEngineService', () => {
   it('stops a malformed long-novel world at its producer, without marking it as a completed foundation',async()=>{
     const registry=new ChainTemplateService(service);
     const chain=registry.getDetail('long-novel-init-foundation');
-    const skeleton={coreSetting:{title:'桥下的账'},skeletonVolumes:[{estimatedChapters:8,chapterCountReason:'八个独立阶段'}]};
+    const skeleton={coreSetting:{title:'桥下的账',protagonist:'韩星，账房',coreConflict:'旧账牵涉家族争议',initialDilemma:'遗失了关键账页',emotionalEnding:'交出真实账册承担代价'},skeletonVolumes:[{title:'账本',theme:'查账',description:'获取账册与理解缺口',estimatedChapters:8,chapterCountReason:'八个独立阶段'}]};
     generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
       .mockResolvedValueOnce({...mockLLMOutput,content:'{"wrongWorld":{"geography":[]}}'});
     const result=await service.execute(chain,{story_setting:'锁定主线',targetWords:20000});
@@ -156,6 +156,24 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects incomplete long foundation world dimensions at their producer, without paying for characters or chapter outlines',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_2_worldview')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{node_1_skeleton:{}},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城'}],factions:[{name:'组织'}]}})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');expect(result.error).toContain('worldview缺少socialStructure');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it('rejects long skeleton missing independently important confirmed facts at the producer',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_1_skeleton')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({coreSetting:{title:'只写标题'},skeletonVolumes:[{estimatedChapters:8}]})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');expect(result.error).toContain('coreSetting缺少protagonist');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
   it('rejects an incomplete volume count before sending it into long-novel chapter outlining',async()=>{
     const registry=new ChainTemplateService(service);
     const chain=registry.getDetail('long-novel-flexible-outline');

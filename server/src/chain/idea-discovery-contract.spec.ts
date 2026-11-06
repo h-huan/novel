@@ -26,6 +26,13 @@ import {
 } from './idea-discovery-contract';
 
 describe('original-pool same-generation maturity ranking',()=>{
+  it('prioritizes an already-selected shortlist without changing source identities or dropping unscored items',()=>{
+    const selected=[{premiseId:'P9',storyCategory:'都市',causalPlan:[{action:'a'}]},{premiseId:'P3',storyCategory:'悬疑',causalPlan:[{action:'b'}]},{premiseId:'P1',storyCategory:'现实',causalPlan:[{action:'c'}]}];
+    const sorted=rankPremisePoolByMaturityScore(selected,new Map([['P3',96],['P1',82]]));
+    expect(sorted.map(row=>row.premiseId)).toEqual(['P3','P1','P9']);
+    expect(sorted.find(row=>row.premiseId==='P3')).toBe(selected[1]);
+    expect(selected.map(row=>row.premiseId)).toEqual(['P9','P3','P1']);
+  });
   it('accepts integer wire scores without fabricating missing, invalid or negative scores',()=>{
     expect(readPremiseMaturityScore(93)).toBe(93);
     expect(readPremiseMaturityScore('87')).toBe(87);

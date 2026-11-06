@@ -5183,7 +5183,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const poolDirective = [
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、阅读兑现与实质差异比较本批候选，弱方案在本次生成内重构；输出pool按premiseMaturityScore由高到低排序，不输出selectedPremises、评分分析或淘汰过程；排序不能替代后续独立审核。\n'+PREMISE_READER_VALUE_POLICY,
-           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段和premiseMaturityScore（0到100整数；按冲突吸引、主动选择、因果可执行、兑现代价、平台分类及差异五项各20分合计；只按已经写出的事实评分，不得用分数补足缺失条件）以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle在这次原池生成时就须从已经发生的冲突或反常关系中提炼出明确的利益、风险或未解后果，不能只是道具加动作的意象暂名；不能用补造事件、剧透最终结果替代点击动机。五节合计优先300—450汉字；首段必须有读者能立即代入的反常处境和风险，后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。',
+           'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段和premiseMaturityScore（0到100整数；按冲突吸引、主动选择、因果可执行、兑现代价、平台分类及差异五项各20分合计；只按已经写出的事实评分，不得用分数补足缺失条件）以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle在这次原池生成时就须从已经发生的冲突或反常关系中提炼出明确的利益、风险或未解后果，不能只是道具加动作的意象暂名；不能用补造事件、剧透最终结果替代点击动机。五节合计优先300—450汉字；首段必须有读者能立即代入的反常处境和风险，后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。尤其倒查三类实测失误：甲的行动能否把决定性信息实际传到乙、乙为什么改变决定；证据到底证明哪次、哪个对象的行为，不能仅凭合法通道的使用就定违规；能力触发所需的人与物在前后节块是否同一对象。所有关键结果都必须能由已写条件成立。',
           '按已注入GEN-002的分类关系、必要条件、内部事实一致与实质差异要求构思。承担结果的人物选择与必要条件须已实际发生。初次生成时先确定可兑现的具体结果，再倒查谁实际执行、影响哪些对象、怎样取得证据或权限、对手为何会配合或反制；把必需的真实条件写在前四节里，不能仅在第五节贴流派标签。安排一次主动选择后的局势变化，再有真实新阻力和不同的第二次变化；普通短篇不必机械凑环节。若仅有被轻视、亮本事、众人服气，或者既有行动全部成立而所称结果仍可能不成立，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。同批不同身份不能共享一条低职位忍让、保留账本或日志、借第三方逼主管签批、公开对照记录、上级受罚而主角离职的完整胜负机制；同属扮猪吃虎可以，但具体获胜策略、意外升级与二次代价要从第一次生成就有真实差异，不得以职业、年代、道具变化冒充。输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
@@ -5672,7 +5672,11 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                 return story;
               }) : rawSelected,
             }, preselectionTarget, premisePoolSize, discoveryCategories, minimumSelectedCountForPool(candidatePool.length));
-            const indexed = { ...shaped, selected: shaped.selected.map(item => bindPremiseCausalPlan({
+            // Keep the same generation-time score priority through source
+            // review and early card dispatch. Immutable IDs and every later
+            // independent Gate remain authoritative; ties retain model order.
+            const indexed = { ...shaped, selected: rankPremisePoolByMaturityScore(shaped.selected,premiseMaturityScores)
+              .map(item => bindPremiseCausalPlan({
               ...item, causalPlan: rawSelected.find((row: any) => row?.premiseId === item.premiseId)?.causalPlan,
             })) };
             const finishSelection=async()=>{
@@ -6547,7 +6551,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     return story;
                   }),
                 },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
-                const withPlans={...prelim,selected:prelim.selected.map(item=>bindPremiseCausalPlan({
+                const withPlans={...prelim,selected:rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)
+                  .map(item=>bindPremiseCausalPlan({
                   ...item,causalPlan:source.find((row:any)=>row?.premiseId===item.premiseId)?.causalPlan,
                 }))};
                 // Refill may contain an OPTIONAL hedge beyond the real missing delivery
