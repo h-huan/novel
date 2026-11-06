@@ -1,6 +1,37 @@
 import { resolveQualityEvidence } from './quality-issue';
 import { STORY_CAUSAL_REVIEW_POLICY } from '../../../shared/src/system-workflow-rules.registry';
 
+/** Keep every real source clause, its original address and all original text,
+ * but don't retransmit the SAME text at the JSON field, sentence and clause
+ * levels for the initial compact framework proof. A parent's literal text may
+ * be omitted from the model transport only if its immediate children
+ * concatenate back to exactly those bytes, in original order. The complete
+ * source/address catalog remains unchanged for strict server validation.
+ * An unsupported/partial segmentation retains the full parent text.
+ */
+export function compactCausalProofSourceCatalog<
+ T extends {id:string;source:string;text:string;path?:string}
+>(catalog:readonly T[]):Array<{id:string;source:string;path?:string;text?:string}> {
+ const children=new Map<string,T[]>();
+ for(const entry of catalog){
+  const match=entry.id.match(/^(.*):(c\\d+|s\\d+)$/);
+  if(!match)continue;
+  const group=children.get(match[1])||[];
+  group.push(entry);children.set(match[1],group);
+ }
+ return catalog.map(entry=>{
+  if(entry.source==='body')return entry;
+  const parts=children.get(entry.id);
+  if(!parts||parts.length<2||parts.some(row=>row.source!==entry.source))return entry;
+  const ordered=[...parts].sort((a,b)=>{
+   const num=(id:string)=>Number(id.match(/:(?:c|s)(\\d+)$/)?.[1]||0);
+   return num(a.id)-num(b.id);
+  });
+  if(ordered.map(row=>row.text).join('')!==entry.text)return entry;
+  return {id:entry.id,source:entry.source,...(entry.path?{path:entry.path}:{})};
+ });
+}
+
 export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false, compactPlanningProof = false, requiredResultSubset?:readonly string[]) {
   const targets=causalAuditRepairTargets(audit,errors);
   // This is the SAME selectable catalog used by the citation resolver. For
@@ -43,15 +74,18 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   // The initial outline call already carries the unabridged chapter JSON.
   // Do not retransmit its non-result prose in a second evidence list. The
   // original text is located by the SAME path and ID in that JSON. Keep
-  // every required outcome's exact text (including punctuation-level IDs)
-  // and keep all external world/planning text. Full evidence remains on the
-  // server for the unchanged literal validator, with no semantic shortcuts.
+  // every required outcome's exact text (including punctuation-level IDs).
+  // External world/planning text is retained losslessly across leaf clauses;
+  // omit only parent-level duplicate text when the children exactly rebuild
+  // it. Full evidence stays on the server for the unchanged literal validator.
   const requiredResultIds=compactPlanningProof&&chapterRows.length
     ?new Set(causalChapterEvidenceCatalog(chapterRows,visibleAnchors.filter(a=>a.source==='body'))
         .entries.flatMap(entry=>entry.resultAnchorIds).filter(id=>!requiredResultSubset||requiredResultSubset.includes(id)))
     :new Set<string>();
+  const proofSourceCatalog=compactPlanningProof
+    ?compactCausalProofSourceCatalog(focusedAnchors):focusedAnchors;
   const promptAnchors=compactPlanningProof
-    ?focusedAnchors.map(anchor=>
+    ?proofSourceCatalog.map(anchor=>
       anchor.source==='body'&&!requiredResultIds.has(anchor.id)
         ?{id:anchor.id,source:anchor.source,...(anchor.path?{path:anchor.path}:{})}
         :anchor)
