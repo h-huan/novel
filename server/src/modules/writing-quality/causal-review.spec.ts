@@ -1,9 +1,37 @@
-import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,quarantineUnprovedCausalBridges} from './causal-review';
+import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,quarantineUnprovedCausalBridges,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions} from './causal-review';
 import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
 import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
+
+it('compacts external source citations without omitting any literal clause or address',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她递交了材料。',
+   scenes:[{outcome:'管理人已收到材料，产权人尚未批准。'}]}];
+ const sources={project_context:JSON.stringify({
+  worldRules:'因为管理人只有收件权限，最终批准仍需产权人签名，申请必须等待签字。'
+ }),chapter_plan:JSON.stringify({priorLedger:
+  '收件人核对了原始记录，保管人保留第一份副本，产权人尚未核查。'})};
+ const full=causalEvidenceAnchorOptions(JSON.stringify(chapters),sources);
+ const compact=compactCausalProofSourceCatalog(full);
+ expect(compact.map(row=>row.id)).toEqual(full.map(row=>row.id));
+ expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length);
+ expect(compact.some(row=>row.source==='project_context'&&row.text?.includes('申请必须等待签字'))).toBe(true);
+ const originalById=new Map(full.map(row=>[row.id,row]));
+ for(const row of compact.filter(row=>row.text===undefined)){
+  const original=originalById.get(row.id)!;
+  const children=compact.filter(child=>child.id.startsWith(row.id+':')
+    &&!child.id.slice(row.id.length+1).includes(':')
+    &&child.text!==undefined);
+  expect(children.length).toBeGreaterThan(1);
+  expect(children.map(child=>child.text).join('')).toBe(original.text);
+ }
+ const prompt=causalAuditRepairPrompt(null,[],JSON.stringify(chapters),sources,false,false,true);
+ expect(prompt.prompt).toContain('产权人尚未核查');
+ expect(prompt.prompt).toContain('申请必须等待签字');
+ const after=causalEvidenceAnchorOptions(JSON.stringify(chapters),sources);
+ expect(after).toEqual(full);
+});
 
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
