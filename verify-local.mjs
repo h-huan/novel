@@ -92,6 +92,13 @@ function triageThreeIssues(report) {
         doesNotStartBackend: true,
       },
     },
+    effectiveGenerationBudget: {
+      evidenceStatus: !serverReady ? 'not_collected_server_unavailable'
+        : runtime.generationBudgets?.source?.ok && runtime.generationBudgets?.settings
+          ? 'current_backend_runtime_configuration' : 'unavailable',
+      settings:runtime.generationBudgets?.settings??null,
+      limitation:'当前后端持久化配置仅代表诊断时刻，不能当成历史请求的配置或8分钟目标的成功证明。单次模型超时上限不等于灵感发现墙钟预算。',
+    },
     ideaLatency: {
       evidenceStatus: !serverReady ? 'not_collected_server_unavailable'
         : activity.status==='running_calls_visible'?'incomplete_model_calls_observed'
@@ -137,6 +144,8 @@ function triageThreeIssues(report) {
         ? ['后端运行提交与本地 HEAD 不一致或未知：当前证据只能用于历史诊断，不能证明最新修复已生效；请先确认正在生成的任务已完成，再安全重启同一项目后端并复验。'] : []),
       ...(serverReady && !audit.available ? ['缺少最近一次灵感请求审计；实际执行发现后再验收。'] : []),
       ...(serverReady && !metricsAvailable ? ['缺少已完成审计的模型步骤指标；不能推断调用次数。'] : []),
+      ...(serverReady && runtime.generationBudgets?.source?.ok !== true
+        ? ['未取得当前后端实际生成预算，无法确认持久化批次/超时是否覆盖仓库默认值。'] : []),
       ...(serverReady && !activity.sourceAvailable ? ['进行中/取消的灵感模型运行记录未获取，不能据此认为没有执行中的模型调用。'] : []),
       ...(serverReady && activity.running>0 ? ['检测到仍在运行的灵感模型调用；所示已完成审计耗时和合格数不能代表这批未完成请求。'] : []),
       ...(serverReady && activity.staleRunning>0 ? ['检测到旧进程遗留的running记录，不能当作当前进程仍在生成；其状态需与已取消请求区别。'] : []),
@@ -159,6 +168,12 @@ function threeIssueMarkdown(triage) {
       + '；错误：' + show(triage.prerequisite.healthError)
       + '；后端修订匹配：' + show(triage.prerequisite.backendLoadedRevision)
       + '；证据适用范围：' + show(triage.prerequisite.evidenceScope),
+    '- 当前后端实际生成预算（诊断时刻，非历史运行）：' + triage.effectiveGenerationBudget.evidenceStatus
+      + '；审核模式=' + show(triage.effectiveGenerationBudget.settings?.reviewGroupingMode)
+      + '；来源批大小=' + show(triage.effectiveGenerationBudget.settings?.sourceBatchSize)
+      + '；完整卡批大小=' + show(triage.effectiveGenerationBudget.settings?.presentationBatchSize)
+      + '；复杂调用超时ms=' + show(triage.effectiveGenerationBudget.settings?.complexTimeoutMs)
+      + '。此值是单次调用保护上限，灵感发现8分钟是独立的端到端验收目标。',
     '- ① 灵感耗时：' + latency.evidenceStatus + '；**上次完成审计的历史墙钟**（非当前未完成请求）ms：' + show(latency.wallMs)
       + '；历史审计ID：' + show(latency.requestId)
       + '；该审计早于当前后端：' + show(latency.completedAuditHistorical)

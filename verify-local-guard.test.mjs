@@ -32,6 +32,14 @@ const root = path.dirname(fileURLToPath(import.meta.url));
   assert.match(diagnosticScript,/new URLSearchParams\(\{ discoveryRequestId, limit: '500' \}\)/u);
   assert.match(diagnosticScript,/row\.discoveryRequestId !== savedDiscoveryAudit\.discoveryRequestId/u);
   assert.match(diagnosticScript,/Date\.parse\(String\(row\.startedAt/u);
+  // Diagnostics must read the backend's live persisted budget instead of
+  // reporting the repository default as the user's actual running setting.
+  assert.match(diagnosticScript,/request\('\/routing\/generation-budgets'\)/u);
+  assert.match(diagnosticScript,/generationBudgets: \{/u);
+  assert.match(diagnosticScript,/current_backend_at_diagnostic_time_not_historical_request/u);
+  const wrapperScript=fs.readFileSync(path.join(root,'verify-local.mjs'),'utf8');
+  assert.match(wrapperScript,/当前后端实际生成预算（诊断时刻，非历史运行）/u);
+  assert.match(wrapperScript,/effectiveGenerationBudget/u);
 }
 
 

@@ -450,6 +450,22 @@ const ideaDiscoveryResponse = health.ok
 const standardsResponse = health.ok
   ? await request('/module-standards')
   : skippedRuntimeRequest('module-standards');
+// The persisted runtime overrides repository defaults. Capture the ACTUAL
+// current backend settings in the existing evidence report (no model calls).
+// This snapshot cannot retroactively establish the configuration of an older run.
+const generationBudgetResponse = health.ok
+  ? await request('/routing/generation-budgets')
+  : skippedRuntimeRequest('generation-budgets');
+const savedRuntimeBudgets = unwrap(generationBudgetResponse.data)?.settings;
+const effectiveRuntimeBudgets = generationBudgetResponse.ok
+  && savedRuntimeBudgets && typeof savedRuntimeBudgets === 'object'
+  && !Array.isArray(savedRuntimeBudgets)
+  ? Object.fromEntries(Object.entries(savedRuntimeBudgets).filter(([key,value])=>
+      ['reviewGroupingMode','structuredOutputTokens','structuredOutputCeiling',
+       'sourceMaxPhysicalCalls','presentationMaxPhysicalCalls','premiseReselectionMaxCalls',
+       'sourceBatchSize','presentationBatchSize','complexTimeoutMs'].includes(key)
+      && Number.isInteger(value)))
+  : null;
 const standards = asArray(standardsResponse.data);
 const rawIdeaDiscovery = ideaDiscoveryResponse.ok
   ? unwrap(ideaDiscoveryResponse.data)
@@ -547,6 +563,12 @@ const runtime = redactDiagnosticValue({
   ideaActivity: latestIdeaActivity,
   discoveryCallTrace,
   activeRequestCallTraces,
+  generationBudgets: {
+    source: {ok:generationBudgetResponse.ok,status:generationBudgetResponse.status,
+      error:generationBudgetResponse.error??null},
+    settings:effectiveRuntimeBudgets,
+    scope:'current_backend_at_diagnostic_time_not_historical_request',
+  },
   standards: {
     codeSeedVersion,
     discoveryMaxWallMs: discoveryWallBudgetMs(),
