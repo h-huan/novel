@@ -467,15 +467,14 @@ export function ideaCardStructuringDirective(
   const safePremise = Object.fromEntries(
     Object.entries(projectedPremisePromptView(selectedPremise || {})).filter(([key]) => key !== 'premiseId'),
   );
-  // Peers are difference boundaries, not sources to be expanded again.
-  // Keep every causal action, condition, reversal and consequence for comparison;
-  // avoid retransmitting raw storyCore, internal causalPlan and novelty self-claims
-  // in each of the other selected cards' independent structuring requests.
+  // Peers were already independently checked for pairwise structural overlap.
+  // A formatting model only needs the other cards' winning paths as boundaries,
+  // not their duplicate conflict summaries, career carrier or complete source.
+  // The independent final Gate still compares the FULL narrative references;
+  // this transport change cannot approve any card or alter a locked fact.
   const peerDifferenceFields = new Set([
-    // Full server-owned facts were reviewed before structuring; keep the
-    // distinct causal paths here. Final review still sees all full cards.
-    'workingTitle','storyCategory','coreConflict','activeChoice','escalation',
-    'reversalEffect','payoff','irreplaceableCarrier',
+    'workingTitle','storyCategory','activeChoice','escalation',
+    'reversalEffect','payoff',
   ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>
     compactRepeatedPremiseText(Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key)))));
