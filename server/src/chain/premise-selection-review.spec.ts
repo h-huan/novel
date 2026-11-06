@@ -199,6 +199,33 @@ it('aggregates five rejected preselection positions once, then retains independe
 
 });
 
+it('does not pay for an original-pool replacement when its mandatory independent reviews are unfunded',async()=>{
+ const pool=['A','B','C','D','E','F'].map(premise);
+ const selected=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,3)},3,6);
+ const c=Object.create(ChainController.prototype) as any;
+ c.logger={warn:vi.fn(),log:vi.fn()};
+ const budget={reviews:{remaining:2},reselection:{remaining:4}};
+ c.reviewPremiseSelection=vi.fn(async(_input:any,_standard:string,mode:string,credits:any)=>{
+  credits.remaining--;
+  if(mode==='overlap')return {passed:true,issues:[]};
+  return {passed:false,issues:['B','C'].map(id=>({
+   kind:'source_drift',premiseId:id,referencePremiseId:id,
+   quote:premise(id).activeChoice,referenceQuote:premise(id).storyCore,
+   reason:'原始故事缺少主线胜负必要的事实条件',
+  }))};
+ });
+ c.llmCallWithRetry=vi.fn(async()=>{throw Error('must not spend an unfunded reselection call')});
+ const result=await c.reconcilePremiseSelection(selected,3,6,['悬疑'],'',[],budget,3);
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A']);
+ expect(result.selectionAudit).toMatchObject({
+  partial:true,reselectionAttempted:false,
+  selectionStopReason:'mandatory_recovery_review_budget_shortfall',
+ });
+ expect(c.llmCallWithRetry).not.toHaveBeenCalled();
+ expect(budget.reselection.remaining).toBe(4);
+ expect(budget.reviews.remaining).toBe(0);
+});
+
 it('does not spend an optional hedge when reselection allowance is unavailable',async()=>{
    const ids='ABCDEFGHIJK'.split('');
    const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
