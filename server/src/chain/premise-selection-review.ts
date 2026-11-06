@@ -429,6 +429,31 @@ export function premiseSelectionFailureReasons(audit: unknown): string[] {
   return [...new Set(items.map(item => typeof item?.reason === 'string' ? item.reason.trim() : '').filter(Boolean))];
 }
 
+
+/** Feed proven preselection failures back into the EXISTING original-pool
+ * refill, instead of asking it to reproduce already-rejected causal stories.
+ * Keep source and late-card errors under the same eight-item prompt budget.
+ * Protocol-incomplete findings are not proven story-quality failures. */
+export function premiseRefillFailureReasons(
+ selectionAudit:unknown, completeCardReasons:readonly string[], limit=8,
+):string[]{
+ if(!Number.isSafeInteger(limit)||limit<1)throw Error('补位缺陷样例数量限制无效');
+ const audit=selectionAudit as {reasons?:unknown[];finalReview?:{issues?:unknown[]}}|undefined;
+ const entries=Array.isArray(audit?.reasons)?audit.reasons
+   :Array.isArray(audit?.finalReview?.issues)?audit.finalReview.issues:[];
+ const early=[...new Set(entries.flatMap(item=>{
+   if(!item||typeof item!=='object'||Array.isArray(item)
+     ||(item as any).protocolIncomplete===true)return [];
+   const reason=(item as any).reason;
+   return typeof reason==='string'&&reason.trim()?[reason.trim()]:[];
+ }))];
+ const late=[...new Set(completeCardReasons.map(reason=>String(reason||'').trim()).filter(Boolean))];
+ const lateSlots=Math.min(late.length,early.length?Math.floor(limit/2):limit);
+ const earlyChosen=early.slice(-(limit-lateSlots));
+ const lateChosen=late.slice(-(limit-earlyChosen.length));
+ return [...new Set([...earlyChosen,...lateChosen])].slice(-limit);
+}
+
 /** Reused old pairs cannot veto an unrelated replacement. Out-of-scope findings
  * are protocol errors; they must never be silently discarded to obtain a pass. */
 export function premiseOverlapScopeIssues(value:unknown,selection:PremiseSelectionResult,focusIds?:string|readonly string[]):string[]{

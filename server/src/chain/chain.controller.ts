@@ -56,7 +56,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, type PremiseSelectionReview } from './premise-selection-review';
+import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, premiseRefillFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -6356,6 +6356,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // preparation may overlap the initial Gate; full-card generation waits
       // for the original initial identity checks. All calls retain their owners.
       const runBoundedRefill=(missingAfterFirstGate:number,preparing=false)=>withGenerationSignal(refillPreparationAbort.signal,async()=>{
+        // The original refill already owns this call allowance. Do not lose
+        // the earlier independent source, causal and overlap rejection facts.
+        const refillFailureReasons=()=>premiseRefillFailureReasons(
+          premiseDiscovery.selectionAudit,rejectedReasons);
         if(missingAfterFirstGate){
           // A rejected preselection identity is already consumed evidence, even
           // when it never became a full card. Reusing it in the refill wave is
@@ -6409,7 +6413,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                       const answer=await this.realLLM.generate({
                         prompt:buildPremiseSelectionPrompt('pool',{pool:premiseDiscovery.pool,
                           batchIndex:index,batchCount,batchSize:size,
-                          failureReasons:rejectedReasons}),
+                          failureReasons:refillFailureReasons()}),
                         scenario:'idea_generate',responseFormat:'json_object',
                         timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
                         physicalCallBudget:budget,
@@ -6505,7 +6509,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               try{
                 const selectionAnswer=await this.realLLM.generate({
                   prompt:buildPremiseSelectionPrompt('selection',{pool:unusedSeeds,
-                    targetCount:refillTarget,minimumCount:missingAfterFirstGate}),
+                    targetCount:refillTarget,minimumCount:missingAfterFirstGate,
+                     failureReasons:refillFailureReasons()}),
                   scenario:'idea_generate',responseFormat:'json_object',
                   timeout:discoveryBudget.complexTimeoutMs,maxEmptyRetries:0,
                   physicalCallBudget:reselectionCompletionBudget,

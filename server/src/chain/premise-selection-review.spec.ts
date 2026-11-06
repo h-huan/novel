@@ -4,7 +4,7 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseOutcomeCounterfactualReviewIssues, materializePremiseOutcomeCounterfactualReview, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
@@ -1361,4 +1361,33 @@ it('does not turn missing silver into missing physical offerings or carry stale 
   expect(retained).toEqual(checked.issues);
   expect(retainUnchangedOverlapIssues(checked,new Set(['B']))).toEqual([]);
   expect(premiseOutcomeCounterfactualReviewIssues({...judgment,outcomeChecks:[]},selected).length).toBeGreaterThan(0);
+});
+
+
+it('carries already-proven preselection causes into the existing refill while retaining later card failures',()=>{
+ const audit={reasons:[
+  {kind:'selection_fit',reason:'存在独立任免决定但缺少有权者采纳依据'},
+  {kind:'selection_fit',reason:'关键移交只有提出要求没有实际执行'},
+  {kind:'selection_fit',reason:'引用字段不全属于协议错误',protocolIncomplete:true},
+ ]};
+ const fullCard=['开头缺少迫切冲突和具体代价','关键移交只有提出要求没有实际执行'];
+ const copy=structuredClone({audit,fullCard});
+ const reasons=premiseRefillFailureReasons(audit,fullCard);
+ expect(reasons).toContain('存在独立任免决定但缺少有权者采纳依据');
+ expect(reasons).toContain('开头缺少迫切冲突和具体代价');
+ expect(reasons.filter(x=>x==='关键移交只有提出要求没有实际执行')).toHaveLength(1);
+ expect(reasons).not.toContain('引用字段不全属于协议错误');
+ expect(reasons.length).toBeLessThanOrEqual(8);
+ expect(premiseRefillFailureReasons(audit,[])).toContain('关键移交只有提出要求没有实际执行');
+ expect(premiseRefillFailureReasons(undefined,fullCard)).toContain('开头缺少迫切冲突和具体代价');
+ expect({audit,fullCard}).toEqual(copy);
+});
+it('does not let final-card rejection overflow evict all earlier independently evidenced causes',()=>{
+ const audit={finalReview:{issues:Array.from({length:10},(_,i)=>({reason:'首轮独立来源因果缺口'+i}))}};
+ const fullCard=Array.from({length:12},(_,i)=>'完整卡未通过质量门'+i);
+ const result=premiseRefillFailureReasons(audit,fullCard);
+ expect(result).toHaveLength(8);
+ expect(result.some(x=>x.startsWith('首轮独立来源因果缺口'))).toBe(true);
+ expect(result.some(x=>x.startsWith('完整卡未通过质量门'))).toBe(true);
+ expect(new Set(result).size).toBe(8);
 });

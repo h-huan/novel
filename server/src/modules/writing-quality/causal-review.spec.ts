@@ -707,7 +707,11 @@ it('large outline audit keeps every exact result but avoids resending all action
    expect(result.path?.startsWith('0.')).toBe(true);
    expect(action.text).not.toEqual(result.text);
  }
- expect(JSON.stringify(shown).length).toBeLessThan(JSON.stringify(entries).length);
+ // Small examples can grow when a valid cross-field address hint is added.
+ // Preserve the complete proof inventory and avoid a misleading size claim.
+ expect(shown[0]).not.toHaveProperty('anchorIds');
+ expect(new Set(shown[0].resultAnchorIds).size).toBe(entries[0].resultAnchorIds.length);
+ expect(shown[0].actionLookup.every(hint=>shown[0].resultAnchorIds.includes(hint.resultAnchorId))).toBe(true);
  expect(Object.values(aliasesByReview).flat().length).toBeGreaterThan(0);
  const hint=shown[0].actionLookup[0];
  const checked=materializeCausalAuditAnchors({status:'evaluated',reason:'核对主管实际处分或批准的前置条件',
