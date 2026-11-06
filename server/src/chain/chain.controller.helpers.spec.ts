@@ -29,6 +29,7 @@ import {
 } from './chain.controller';
 import { GateRejectionError, classifyGateFailure } from '../modules/writing-quality/gate-failure';
 import { IdeaAppealGateService } from './idea-appeal-gate.service';
+import { normalizeWorldSourceCandidate, describeWorldSourceCandidate } from './source-rule-consistency';
 import { STANDARD_PRECONDITIONS } from '../acceptance/test-standards';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import { DECISIVE_CHOICE_CONDITION_POLICY, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/执行标准';
@@ -2695,4 +2696,20 @@ it('provides category-specific submission samples for every locked discovery poo
   }
   expect(catalog[0].options).not.toEqual(catalog[1].options);
  }
+});
+
+
+it('uses one actual world model call when its complete source JSON is double encoded', async()=>{
+ const world={era:'当代',storyPremise:'甲调查一个现实事件',atmosphere:'紧张',endingDirection:'甲完成应有选择',
+  rules:['当既有真实条件成立后，行动才产生结果'],locations:['主角住所']};
+ const controller=Object.create(ChainController.prototype) as any;
+ controller.logger={warn:vi.fn(),log:vi.fn(),error:vi.fn()};
+ controller.realLLM={generate:vi.fn(async()=>({content:JSON.stringify(JSON.stringify(world)),runId:'run-world'}))};
+ const result=await controller.llmCallWithRetry('世界观生成','输出单个JSON对象',{
+  scenario:'world_building',validate:(value:unknown)=>describeWorldSourceCandidate(normalizeWorldSourceCandidate(value),'甲').length===0,
+  describeValidation:(value:unknown)=>describeWorldSourceCandidate(normalizeWorldSourceCandidate(value),'甲'),
+ });
+ expect(normalizeWorldSourceCandidate(result.data)).toEqual(world);
+ expect(result.runId).toBe('run-world');
+ expect(controller.realLLM.generate).toHaveBeenCalledOnce();
 });
