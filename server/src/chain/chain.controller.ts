@@ -8814,7 +8814,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
           }
           // Normalize only the exact already-validated JSON root; the unchanged
           // source audit and durable Canon guard own all meaning and persistence.
-          let worldCandidate = normalizeWorldSourceCandidate(worldResult.data);
+          let worldCandidate = normalizeWorldSourceCandidate(worldResult.data) as Record<string, any>;
           let worldCandidateRunId = worldResult.runId;
           const originalWorldCandidate=structuredClone(worldCandidate);
           activeFailureOrigin = 'source_review_incomplete';
