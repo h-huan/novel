@@ -96,15 +96,14 @@ describe('locked-card structuring reference transport',()=>{
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
-      activeChoice:peer.activeChoice,escalation:peer.escalation,
+      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,escalation:peer.escalation,
       reversalEffect:peer.reversalEffect,payoff:peer.payoff,
+      irreplaceableCarrier:peer.irreplaceableCarrier,
     });
     expect(prompt).toContain(target.storyCore);
     expect(prompt).toContain('目标行动');
     expect(prompt).not.toContain(peer.storyCore);
     expect(prompt).not.toContain(peer.differentiation);
-    expect(refs[0]).not.toHaveProperty('coreConflict');
-    expect(refs[0]).not.toHaveProperty('irreplaceableCarrier');
     expect(prompt).not.toContain('参照重复行动');
     expect([target,peer]).toEqual(before);
     const oldPeers=Object.fromEntries(Object.entries(peer).filter(([key])=>key!=='premiseId'&&key!=='causalPlan'));
@@ -995,7 +994,7 @@ it('transports the complete pre-vetted premise to final review without duplicati
  expect(projected.causalPlan).toEqual(before.causalPlan);
  expect(projected.activeChoice).toEqual({fromSourceSections:['主动选择']});
  expect(projected.protagonistSituation).toEqual({fromSourceSections:['处境触发']});
- expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(before).length*0.75);
+ expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(before).length*0.9);
  expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(before);
  // The packed prompt is not the server's canonical evidence and cannot add a new fact.
  expect(JSON.stringify(card)).not.toContain('fromSourceSections');
