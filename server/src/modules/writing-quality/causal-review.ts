@@ -14,7 +14,7 @@ export function compactCausalProofSourceCatalog<
 >(catalog:readonly T[]):Array<{id:string;source:string;path?:string;text?:string}> {
  const children=new Map<string,T[]>();
  for(const entry of catalog){
-  const match=entry.id.match(/^(.*):(c\\d+|s\\d+)$/);
+  const match=entry.id.match(/^(.*):(c\d+|s\d+)$/);
   if(!match)continue;
   const group=children.get(match[1])||[];
   group.push(entry);children.set(match[1],group);
@@ -24,7 +24,7 @@ export function compactCausalProofSourceCatalog<
   const parts=children.get(entry.id);
   if(!parts||parts.length<2||parts.some(row=>row.source!==entry.source))return entry;
   const ordered=[...parts].sort((a,b)=>{
-   const num=(id:string)=>Number(id.match(/:(?:c|s)(\\d+)$/)?.[1]||0);
+   const num=(id:string)=>Number(id.match(/:(?:c|s)(\d+)$/)?.[1]||0);
    return num(a.id)-num(b.id);
   });
   if(ordered.map(row=>row.text).join('')!==entry.text)return entry;
