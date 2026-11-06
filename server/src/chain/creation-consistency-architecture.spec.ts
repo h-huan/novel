@@ -71,6 +71,13 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
   it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
+    // A five-card delivery already backed by five independently approved
+    // premises must not trigger a paid optional seven-slot reselection.
+    // Genuine final-card shortfalls retain the original refill path.
+    expect(controllerSource).toContain('const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length)');
+    expect(controllerSource).toContain('&& missingSlots > 0');
+    expect(controllerSource).not.toContain('&& partialSelection.selected.length < requestedCount');
+    expect(controllerSource).toContain('if(!refillPreparation&&missingAfterFirstGate)refillPreparation=prepareRefill(missingAfterFirstGate);');
     expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
     expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
     expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
