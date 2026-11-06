@@ -961,3 +961,11 @@ it('full-card structuring must preserve the original proof material and its actu
  expect(prompt).toContain('scopeBreakdown');
  expect(prompt).toContain('不能在description或scopeBreakdown新增');
 });
+
+it('fixed-pool selection requires evidence for each independent result before paid review',()=>{
+ const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+ expect(prompt).toContain('同一段同时写出证据查明与另行处分');
+ expect(prompt).toContain('证明前者不自动证明后者');
+ expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
+ expect(prompt).toContain('只返回selectedPremises');
+});
