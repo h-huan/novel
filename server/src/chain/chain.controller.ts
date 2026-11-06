@@ -7262,12 +7262,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
-        // A surviving 5/5 preselection is NOT five approved final cards. If
-        // this very review proved that other preselected premises are bad,
-        // use the existing fixed-pool correction slots for a small vetted
-        // hedge while the first approved cards can already be structured.
-        // Do not add provider credits, invent extra slots, or demand eight
-        // final deliveries from a five-card author request.
+        // The user-requested delivery count is the only mandatory deficit.
+        // Once that many premises have independent source/payoff/category/
+        // genre/overlap approval, do NOT spend another original-pool reselection
+        // solely to refill optional screening surplus. Full-card quality gates
+        // still run; any genuine post-card shortfall uses the existing bounded
+        // refill path and its unchanged shared budgets.
         const enoughOriginalCandidates = repairPlan.availableCandidates.length >= recoverySlots.length;
         const group=readGenerationBudgets();
         const requiredRecoveryReviewCalls=recoverySlots.length
@@ -7276,7 +7276,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const enoughSharedBudget = !shared || (shared.reselection.remaining > 0
           && shared.reviews.remaining >= requiredRecoveryReviewCalls);
         const affordablePreselectionHedge = recoverySlots.length > 0
-          && partialSelection.selected.length < requestedCount
+          && missingSlots > 0
           && enoughOriginalCandidates && enoughSharedBudget;
         // Stop ONLY if the original, unchanged call allowance cannot fund
         // the optional hedge. Final quality acceptance remains independent.
@@ -7294,7 +7294,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           } };
         }
         this.logger?.log('锁定前已有 '+partialSelection.selected.length+' 个审核合格预选候选；目标交付 '+deliveryCount
-          +' 张，使用原有预算补齐可选预选容量。');
+          +' 张，仍存在真实交付缺额，使用原有预算定向补足。');
         break;
       }
     }
