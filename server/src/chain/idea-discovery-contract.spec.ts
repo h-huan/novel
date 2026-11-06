@@ -96,14 +96,15 @@ describe('locked-card structuring reference transport',()=>{
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
-      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,escalation:peer.escalation,
+      activeChoice:peer.activeChoice,escalation:peer.escalation,
       reversalEffect:peer.reversalEffect,payoff:peer.payoff,
-      irreplaceableCarrier:peer.irreplaceableCarrier,
     });
     expect(prompt).toContain(target.storyCore);
     expect(prompt).toContain('目标行动');
     expect(prompt).not.toContain(peer.storyCore);
     expect(prompt).not.toContain(peer.differentiation);
+    expect(refs[0]).not.toHaveProperty('coreConflict');
+    expect(refs[0]).not.toHaveProperty('irreplaceableCarrier');
     expect(prompt).not.toContain('参照重复行动');
     expect([target,peer]).toEqual(before);
     const oldPeers=Object.fromEntries(Object.entries(peer).filter(([key])=>key!=='premiseId'&&key!=='causalPlan'));
