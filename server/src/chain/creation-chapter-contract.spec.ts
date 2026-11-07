@@ -1,15 +1,17 @@
 import {describe,expect,it,vi} from 'vitest';
 import {creationChapterContracts,creationResponsibilityPlan} from './creation-chapter-contract';
-import {buildChapterResponsibilityAuditPrompt,chapterResponsibilityAuditOutputContract} from '../../shared/src/chapter-responsibility-review';
+import {buildChapterResponsibilityAuditPrompt,chapterResponsibilityAuditOutputContract,chapterResponsibilityPlanningDirective} from '../../shared/src/chapter-responsibility-review';
 import {buildNarrativeBeatPlan} from './adaptive-narrative';
 import {ChainController} from './chain.controller';
 import {findChapterOutline,creationTimelineFallbackChapters} from './chapter-outline-coordinate';
-import {OUTLINE_PROJECTION_POLICY,STORY_CAUSAL_REVIEW_POLICY} from '../../shared/src/system-workflow-rules.registry';
+import {OUTLINE_PROJECTION_POLICY,STORY_CAUSAL_REVIEW_POLICY,CHAPTER_OUTCOME_EVIDENCE_POLICY} from '../../shared/src/system-workflow-rules.registry';
 const plan=()=>({chapterResponsibilities:[{chapter:1,title:'进入',function:'opening',responsibility:'住户取出旧钥匙并开门，让主角进入',prerequisites:['住户持有仍有效的旧钥匙并在场'],timeline:'当夜，钥匙尚未被收回',exitState:'主角进入屋内，尚未找到文件'},{chapter:2,title:'取得',function:'climax',responsibility:'主角在屋内找到并取得文件',prerequisites:['已进入屋内且屋内文件尚在'],timeline:'进入以后、清场以前',exitState:'主角持有文件'}]});
 describe('source contract regression',()=>{
 it('enforces the same evidenced-outcome and reputation boundaries during chapter generation and causal review',()=>{
  const factRule='无评价依据时生成与修订只陈述实际可证明的事件';
  expect(OUTLINE_PROJECTION_POLICY).toContain(factRule);
+ expect(OUTLINE_PROJECTION_POLICY).toContain(CHAPTER_OUTCOME_EVIDENCE_POLICY);
+ expect(chapterResponsibilityPlanningDirective(false)).toContain(CHAPTER_OUTCOME_EVIDENCE_POLICY);
  expect(STORY_CAUSAL_REVIEW_POLICY).toContain(factRule);
  expect(STORY_CAUSAL_REVIEW_POLICY.split(factRule)).toHaveLength(2);
  expect(OUTLINE_PROJECTION_POLICY).toContain('highlights、characterStates');
