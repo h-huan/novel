@@ -788,6 +788,20 @@ describe('RealLLMService structured output guard', () => {
     expect(callModel.mock.calls.map(call => call[8])).toEqual([undefined, undefined, true]);
   });
 
+  it('does not accept a nonempty but length-truncated fallback after an empty response', async () => {
+    const service = createService();
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ content: '', finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: '{"partial":', finishReason: 'length' });
+    (service as any).callModel = callModel;
+    await expect(service.generate({
+      prompt: '完整JSON审核', scenario: 'outline', responseFormat: 'json_object', maxEmptyRetries: 0,
+    })).rejects.toThrow('模型返回空内容或截断');
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(callModel.mock.calls[0][8]).toBeUndefined();
+    expect(callModel.mock.calls[1][8]).toBe(true);
+  });
+
   it('rejects a length-truncated structured response for a clean retry', async () => {
     const service = createService();
     (service as any).callModel = vi.fn().mockResolvedValue({ content: '{"partial":', finishReason: 'length' });
