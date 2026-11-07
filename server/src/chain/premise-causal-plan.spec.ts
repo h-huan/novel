@@ -64,6 +64,9 @@ it('keeps numbered evidence examples purely structural, never a copyable fake so
 describe('plan critical prerequisites before full story cards',()=>{
   it('models intermediate result before payoff and teaches generation to keep later prerequisites separate',()=>{
     const steps=premiseCausalPlanExample();
+    const sourceRefExample=premiseCausalReferenceExample();
+    expect(sourceRefExample).toHaveLength(steps.length);
+    expect(sourceRefExample.every(link=>!!link.action.sourceRef&&!!link.result.sourceRef&&link.conditions.length===1)).toBe(true);
     expect(steps).toHaveLength(2);
     expect(steps[0].result.field).toBe('escalation');
     // A later payoff must be attributed to an executed verification/decision,
