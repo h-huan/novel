@@ -9858,8 +9858,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
           // quality Gate's isGateRejection flag. The previous predicate
           // silently left proven conflicting chapter checkpoints reusable.
           // A transport/contract failure does not invalidate valid chapters.
-          const confirmedConflict=hasProvenOutlineCheckpointConflict(error,aggregateHadProvenConflict)
-            ||isGateRejection(error);
+          const confirmedConflict=hasProvenOutlineCheckpointConflict(error,aggregateHadProvenConflict);
           if(confirmedConflict){
             try{outlineWork.clear(projectId);}
             catch(cleanError){this.logger.warn('有证据冲突的章纲检查点清理失败：'+String(cleanError));}

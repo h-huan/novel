@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict } from './creation-outline-checkpoint';
+import { classifyGateFailure, GateRejectionError } from '../modules/writing-quality/gate-failure';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
@@ -9,6 +10,29 @@ describe('fact-based outline checkpoint invalidation',()=>{
     expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'review_unavailable'})).toBe(false);
     expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'review_contract_invalid'})).toBe(false);
     expect(hasProvenOutlineCheckpointConflict(new Error('DeepSeek 500'))).toBe(false);
+  });
+  it('preserves previously reviewed chapters when a structured 503 Gate reports an incomplete review',()=>{
+    const unavailable = new GateRejectionError(classifyGateFailure({
+      topic:'outline_alignment', evaluationStatus:'not_evaluated',
+      buckets:{review_incomplete:['独立行动复核服务超时']},
+    }));
+    expect(unavailable.report.status).toBe(503);
+    expect(hasProvenOutlineCheckpointConflict(unavailable)).toBe(false);
+    // The real planning-action reviewer uses GeneratedQualityGateError.
+    expect(hasProvenOutlineCheckpointConflict({
+      name:'GeneratedQualityGateError', gateRejection:true, report:unavailable.report,
+    })).toBe(false);
+  });
+  it('still clears checkpoints for a structured, evidenced 422 Gate rejection',()=>{
+    const conflict = new GateRejectionError(classifyGateFailure({
+      topic:'outline_alignment', evaluationStatus:'evaluated',
+      buckets:{outline_alignment:['第3章实际行动缺少独立结果条件']},
+    }));
+    expect(conflict.report.status).toBe(422);
+    expect(hasProvenOutlineCheckpointConflict(conflict)).toBe(true);
+    expect(hasProvenOutlineCheckpointConflict({
+      name:'GeneratedQualityGateError', gateRejection:true, report:conflict.report,
+    })).toBe(true);
   });
   it('invalidates confirmed contradictory facts even though they are not prose Gate rejections',()=>{
     expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'fact_conflict'})).toBe(true);

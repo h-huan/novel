@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isGateRejection } from '../modules/writing-quality/gate-failure';
 
 /** Creation fact reviews use outlineFactFailureKind, not a prose-Gate
  * marker. Only proven story conflicts invalidate previously vetted source
@@ -6,8 +7,13 @@ import { createHash } from 'node:crypto';
  * resume from the same accepted stages. */
 export function hasProvenOutlineCheckpointConflict(error: unknown, repairWasRequired = false): boolean {
   if(repairWasRequired)return true;
-  return !!error && typeof error==='object'
-    && (error as { outlineFactFailureKind?:unknown }).outlineFactFailureKind==='fact_conflict';
+  if(error && typeof error==='object'
+    && (error as { outlineFactFailureKind?:unknown }).outlineFactFailureKind==='fact_conflict')return true;
+  // A 503 Gate rejection means the independent reviewer is unavailable, not
+  // that the saved draft has a proven conflict. Keep prior source-bound work
+  // for the same strict re-review on resume; 422 retains the original
+  // fail-closed invalidation for actual story/quality failures.
+  return isGateRejection(error) && error.report.status === 422;
 }
 
 interface CheckpointDb {
