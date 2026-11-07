@@ -979,6 +979,34 @@ describe('automatic plot-tag metadata never discards valid story facts',()=>{
  });
 });
 
+describe('shared original and refill pool title envelope before paid model selection',()=>{
+ const seed=(title:string)=>({premiseId:'B1-P1',workingTitle:title,storyCategoryId:'K1',premiseMaturityScore:90,
+   storySections:{
+    '处境触发':'掌柜临时将一笔未核对的欠款写到学徒名下，明天必须交付。',
+    '主动选择':'学徒留下来查明订单的实际签收人，并决定承担追查的代价。',
+    '必要条件':'店铺真实保留两份签收底联，原始签收人愿意在会上出示。',
+    '反转兑现':'学徒查出记录被修改，签收人提供独立原件，掌柜撤回指控。',
+    '分类流派机制':'学徒放弃稳定职位，选择公开证据保护受连累的同事。',
+   }});
+ it('rejects title lengths that the unchanged full-card Gate would reject',()=>{
+  for(const title of ['线索','这个故事标题长度已经超过十六个字仍然不能直接用于平台']){
+   const initial=screenPremisePoolBatch([seed(title)]);
+   const refill=screenPremisePoolBatch([seed(title)]);
+   expect(initial.candidates).toHaveLength(0);
+   expect(refill.candidates).toHaveLength(0);
+   expect(initial.invalidFieldReasons['暂名不在4-16字内或故事正文缺失']).toBe(1);
+   expect(refill.invalidFieldReasons).toEqual(initial.invalidFieldReasons);
+  }
+ });
+ it('retains an actual four-to-sixteen-character premise and never treats self-score as a pass',()=>{
+  const result=screenPremisePoolBatch([seed('学徒替谁背债')]);
+  expect(result.candidates).toHaveLength(1);
+  expect(result.candidates[0].premiseMaturityScore).toBe(90);
+  expect(result.candidates[0].storyCore).toContain('【必要条件】');
+  expect(result.candidates[0].storySections).toBeUndefined();
+ });
+});
+
 describe('bounded pool JSON partial transport recovery never invents weak candidate facts',()=>{
  const section=(label:string)=>label+'这一条有对应行动与现有权力的真实条件，双方在明确时间内互相阻挡，实际执行后产生不同结果。';
  const card=(id:string)=>({premiseId:id,workingTitle:'对应机制'+id,storyCategoryId:'K1',storySections:{
