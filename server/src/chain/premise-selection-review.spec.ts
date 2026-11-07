@@ -768,10 +768,10 @@ it('does not repair fiction if either independent audit fails to complete', asyn
       .map(row=>({ref:row.ref,status:'preserved',reason:'当前字段保留原池的行动对象和结果方向'})), categoryChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.category',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主线人物选择体现该分类的具体机制'})),payoffChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主角主动行动与既有条件支撑反转阶段变化'},reason:'逐项核对既定行动和已有成立条件后确认结果'})) } });
     await c.reviewPremiseSelection(selection(), '', 'source_drift');
     const prompt = c.llmCallWithRetry.mock.calls[0][1] as string;
-    expect(IDEA_SOURCE_EVENT_POLICY).toContain('先核实展开是否仍保留请求发生');
-    expect(IDEA_SOURCE_EVENT_POLICY).toContain('不把后来变化倒推为前一事件未发生');
-    expect(IDEA_SOURCE_EVENT_POLICY).toContain('原文没有写明的角色关系不得由评审补成确定事实');
-    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不能只因原池未提及候选细节而判未知');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('展开仍保留原请求实际发生时');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('先在某处、后来到场可以同时成立');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('未明写的角色关系不得由评审补成确定事实');
+    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不能仅因原池未提及就判drift或unknown');
     expect(prompt).toContain('按已注入GEN-002锁定前继承与差异规则执行');
     expect(prompt).toContain('逐字段核对同ID原池明确的触发');
     expect(prompt).toContain('多方行动须区分发起者、执行者与接收者');
