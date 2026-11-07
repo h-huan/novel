@@ -1,5 +1,5 @@
 import {bindModelRequestClock,remainingModelRequestTime} from './model-request-clock';
-import { CreationOutlineCheckpoint } from './creation-outline-checkpoint';
+import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict } from './creation-outline-checkpoint';
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
 import {chapterConditionReviewIssues, chapterConditionPlanningGapIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
@@ -9773,8 +9773,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
           // quality Gate's isGateRejection flag. The previous predicate
           // silently left proven conflicting chapter checkpoints reusable.
           // A transport/contract failure does not invalidate valid chapters.
-          const confirmedConflict=aggregateHadProvenConflict
-            ||(error&&typeof error==='object'&&(error as any).outlineFactFailureKind==='fact_conflict')
+          const confirmedConflict=hasProvenOutlineCheckpointConflict(error,aggregateHadProvenConflict)
             ||isGateRejection(error);
           if(confirmedConflict){
             try{outlineWork.clear(projectId);}
