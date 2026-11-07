@@ -680,7 +680,9 @@ it('compact initial proof removes repeated body prose but retains all result and
  const inventory=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,sources)).entries[0].resultAnchorIds;
  for(const id of inventory)expect(compact.prompt).toContain(id);
  expect(base.prompt).toContain('她提交了核对清单。');
- expect(compact.prompt).not.toContain('"text":"她提交了核对清单。"');
+ // Existing action evidence must be visible; non-action background stays compact.
+ expect(compact.prompt).toContain('"text":"她提交了核对清单。"');
+ expect(compact.prompt).not.toContain('"text":"第0项已有独立核验记录但最终批准权限仍属于管理员。"');
  expect(compact.prompt.length).toBeLessThan(base.prompt.length);
  expect(decodePlanningProofRows({status:'evaluated',reason:'旧版本完整结果账目',
    transitions:[{chapterNumber:1,resultAnchorId:'body:v1',status:'gap'}]}).transitions).toHaveLength(1);
