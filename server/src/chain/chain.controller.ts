@@ -8813,7 +8813,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const worldPrompt = `为这部小说整理服务于剧情的完整世界观设定，不是另写一个同名故事。
 【唯一故事基准】${canonicalCreativeBrief}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
-保留基准的时代、类型、地点、冲突、主角和结局方向；禁止把现实题材改成末世/修仙/科幻/超能力/架空制度。
+保留基准的时代、类型、地点、冲突、主角和结局方向。不得凭空新增末世、修仙、科幻、超能力或架空制度等未确认设定；如果已确认题材明确包含特异能力或架空规则，即使背景属于现实或都市，也必须保留其原有触发者、作用对象、人数条件、范围、代价与后果，不得自行删减、扩大或另加限制。
 能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准；不得新增与已确认事实互斥的限制、万能证据或调查渠道。口述、记忆与原始记录应按本故事已确认的能力和证据边界区别处理。
 ${protagonistName ? `【必须保留的主角（不得改名、不得换成别人）】${protagonistName}\n` : '【主角身份约束】题材未确认主角实名时，保留第一人称/匿名叙述身份，不得为主角新增姓名、姓氏或绰号；可用“我”指代。\n'}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留原名）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}${dto.selectedIdea?.hook ? `【必须呼应的高概念钩子】${dto.selectedIdea.hook}\n` : ''}
 
