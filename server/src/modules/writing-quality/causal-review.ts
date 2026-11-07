@@ -129,16 +129,27 @@ export function decodePlanningProofRows(
  return {...header,transitions:proofRows.map((row:any,index:number)=>{
    if(!Array.isArray(row)||row.length!==5)
      throw new Error('精简因果审核第'+(index+1)+'项必须恰好包含结果序号、行动编号、桥接编号、状态与理由');
-   const [ordinal,actionAnchorId,bridgeAnchorId,status,reason]=row;
+   const [rawOrdinal,rawAction,rawBridge,status,reason]=row;
+   // A digit-string ordinal is an unambiguous transport spelling of an
+   // already-owned result. Never accept leading zeros, decimals or extra rows.
+   const ordinal=typeof rawOrdinal==='string'&&/^[1-9]\d*$/.test(rawOrdinal)
+     ?Number(rawOrdinal):rawOrdinal;
    if(!Number.isSafeInteger(ordinal)||ordinal<1||ordinal>expectedRows.length||usedOrdinals.has(ordinal))
      throw new Error('精简因果审核第'+(index+1)+'项结果序号无效、重复或越界');
    usedOrdinals.add(ordinal);
-   if(typeof actionAnchorId!=='string'||!actionAnchorId.trim()
+   // null means no bridge for a genuine negative/planned verdict, exactly
+   // like the documented empty string; it NEVER certifies a supported link.
+   // All actual action/result/bridge IDs remain subject to the full source
+   // and per-chapter coverage validators after decoding.
+   const actionAnchorId=typeof rawAction==='string'?rawAction.trim():rawAction;
+   const bridgeAnchorId=rawBridge===null&&['gap','planned'].includes(status)
+     ?'':typeof rawBridge==='string'?rawBridge.trim():rawBridge;
+   if(typeof actionAnchorId!=='string'||!actionAnchorId
       ||typeof bridgeAnchorId!=='string'
       ||!['supported','gap','planned'].includes(status)
-      ||(status==='supported'&&!bridgeAnchorId.trim())
+      ||(status==='supported'&&!bridgeAnchorId)
       ||typeof reason!=='string'||reason.trim().length<8)
-      throw new Error('精简因果审核第'+(index+1)+'项行动、成立条件、状态或实际解释缺失');
+     throw new Error('精简因果审核第'+(index+1)+'项行动、成立条件、状态或实际解释缺失');
    return {...expectedRows[ordinal-1],actionAnchorId,bridgeAnchorId,status,reason};
  })};
 }

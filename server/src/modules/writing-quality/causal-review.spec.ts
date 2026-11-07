@@ -686,7 +686,7 @@ it('compact initial proof removes repeated body prose but retains all result and
    {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
    {status:'evaluated',reason:'拒绝假冒通过',proofRows:[[1,'body:v1','', 'supported','没有独立桥接证据']]},
    {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v1','gap','理由']]},
-   {status:'evaluated',reason:'拒绝伪造',proofRows:[[1,'body:invented',null,'gap','独立状态与结果不成立的实际理由']]},
+
  ])expect(()=>decodePlanningProofRows(invalid,expected)).toThrow();
  expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不存在权威结果目录',proofRows:[
    [1,'body:v1','','gap','未确认实际成立条件']]})).toThrow(/服务器结果目录/);
@@ -787,4 +787,34 @@ it('large outline audit keeps every exact result but avoids resending all action
      bridgeAnchorId:'',status:'gap',reason:'递交记录或申请并不自动证明处分或审批已经发生'}]},body,{});
  expect(validateCausalAudit(checked,body,{}).verified).toBe(true);
  expect(validateCausalAudit(checked,body,{}).issues).toHaveLength(1);
+});
+
+it('decodes only lossless negative-proof transport and retains full causal and chapter Gates',()=>{
+ const chapters=[{chapterNumber:1,content:'她先提交申请，机关尚未作出决定。',
+   scenes:[{outcome:'申请最终被批准，但本章没有记录谁作出批准。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const inventory=causalChapterEvidenceCatalog(chapters,anchors).entries;
+ const expected=inventory.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({
+   chapterNumber:entry.chapterNumber,resultAnchorId})));
+ const action=anchors.find(a=>a.path==='0.content');
+ expect(action).toBeDefined();
+ expect(expected).toHaveLength(1);
+ const negative=decodePlanningProofRows({status:'evaluated',reason:'没有实际的审批者和决定条件',
+   proofRows:[['1',' '+action!.id+' ',null,'gap','只提出申请，未交代有权者批准及生效动作']]},expected);
+ expect(negative.transitions[0].bridgeAnchorId).toBe('');
+ expect(negative.transitions[0].actionAnchorId).toBe(action!.id);
+ const bound=materializeCausalAuditAnchors(negative,body,{});
+ expect(causalChapterEvidenceAddressIssues(bound,inventory)).toEqual([]);
+ expect(validateCausalAudit(bound,body,{}).verified).toBe(true);
+ expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(1);
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'没有实际审批证据',
+   proofRows:[['1',action!.id,null,'supported','没有决定证据也不能判定审批已经成立']]},expected)).toThrow(/成立条件/);
+ for(const ordinal of ['1.0','01','-1','2','1e0']){
+   expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不得使用不合法结果编号',
+     proofRows:[[ordinal,action!.id,'','gap','本章没有合法批准行动的证据']]},expected)).toThrow(/结果序号/);
+ }
+ const forged=decodePlanningProofRows({status:'evaluated',reason:'拒绝结论也不能使用伪造行动编号',
+   proofRows:[['1','body:invented',null,'gap','本章没有合法批准行动的证据']]},expected);
+ const forgedBound=materializeCausalAuditAnchors(forged,body,{});
+ expect(validateCausalAudit(forgedBound,body,{}).verified).toBe(false);
 });
