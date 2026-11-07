@@ -335,6 +335,8 @@ export function retainPremiseReviewEvidence(
       }
       if (Array.isArray(mapped.links)) mapped.links = mapped.links.map((link: any) => link && typeof link === 'object'
         ? { ...link, ref: remapReference(link.ref, oldIndex, newIndex) } : link);
+      if (Array.isArray(mapped.unmappedChecks)) mapped.unmappedChecks = mapped.unmappedChecks.map((item:any)=>item&&typeof item==='object'
+        ? {...item,actionEvidenceRef:remapReference(item.actionEvidenceRef,oldIndex,newIndex)}:item);
       return [mapped as T];
     });
   };
