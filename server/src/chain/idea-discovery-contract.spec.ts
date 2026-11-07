@@ -43,7 +43,7 @@ describe('source-owned scored pool skips redundant model selection only with val
   it('uses scores to select exact source facts, without a second authoring call or changing identity',()=>{
     const first=create('P1','公开旧协议之后','都市');
     const second=create('P2','赶在搬家前核对','都市');
-    const result=sourceReadyScoredPremiseSelection([first,second],new Map([['P1',70],['P2',93]]),2,['都市']);
+    const result=sourceReadyScoredPremiseSelection([first,second],new Map([['P1',70],['P2',93]]),2,3,['都市']);
     expect(result?.selected.map(row=>row.premiseId)).toEqual(['P2','P1']);
     expect(result?.selected.every(row=>Array.isArray(row.causalPlan) && row.payoff.includes('签署人核对记录后'))).toBe(true);
     expect(result?.pool.map(row=>row.premiseId)).toEqual(['P1','P2']);
@@ -51,7 +51,7 @@ describe('source-owned scored pool skips redundant model selection only with val
   it('preserves mixed-category exploration without changing any source category or score',()=>{
     const seeds=[create('P1','赶在查封前救家','都市'),
       create('P2','邻居为何退出协议','都市'),create('P3','旧协议的签字疑云','悬疑')];
-    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P1',95],['P2',92],['P3',86]]),2,['都市','悬疑']);
+    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P1',95],['P2',92],['P3',86]]),2,3,['都市','悬疑']);
     expect(result?.selected.map(row=>row.premiseId)).toEqual(['P1','P3']);
     expect(result?.selected.map(row=>row.storyCategory)).toEqual(['都市','悬疑']);
   });
@@ -59,12 +59,12 @@ describe('source-owned scored pool skips redundant model selection only with val
     const good=create('P1','归还旧合同之前','都市');
     const missing=create('P2','卖房前的旧协议','都市');
     const scores=new Map([['P1',88],['P2',81]]);
-    expect(sourceReadyScoredPremiseSelection([good,{...missing,causalPlan:[]}],scores,2,['都市'])).toBeNull();
-    expect(sourceReadyScoredPremiseSelection([good,{...missing,readerQuestion:''}],scores,2,['都市'])).toBeNull();
-    expect(sourceReadyScoredPremiseSelection([good,missing],new Map([['P1',88]]),2,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,causalPlan:[]}],scores,2,3,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,readerQuestion:''}],scores,2,3,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,missing],new Map([['P1',88]]),2,3,['都市'])).toBeNull();
     expect(sourceReadyScoredPremiseSelection([good,{...missing,
       causalPlan:[{action:{field:'activeChoice',quote:'不存在于原池的行动'},conditions:[],
-        result:{field:'payoff',quote:'不存在于原池的结果'}}]}],scores,2,['都市'])).toBeNull();
+        result:{field:'payoff',quote:'不存在于原池的结果'}}]}],scores,2,3,['都市'])).toBeNull();
   });
 });
 
