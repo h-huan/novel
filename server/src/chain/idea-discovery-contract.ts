@@ -1,9 +1,9 @@
 import { jsonrepair } from 'jsonrepair';
-import { projectedPremisePromptView, compactRepeatedPremiseText } from './premise-source-bindings';
+import { projectedPremisePromptView, compactRepeatedPremiseText, projectPremiseSourceChoices } from './premise-source-bindings';
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
 import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE,premiseSourceSections} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
 import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
@@ -334,6 +334,51 @@ export function rankPremisePoolByMaturityScore<T extends { premiseId?: unknown }
   return pool.map((candidate,index)=>({candidate,index,score:scores.get(String(candidate.premiseId||''))}))
     .sort((left,right)=>(right.score??-1)-(left.score??-1)||left.index-right.index)
     .map(row=>row.candidate);
+}
+
+/** Reuse causal references AUTHORED with the scored source pool.
+ * This is only an alternate transport into the SAME normalizer and independent
+ * source/payoff/category/genre/overlap/final-card Gates. A missing, ambiguous,
+ * unbound or undersupplied source plan falls back to the existing model
+ * selector; a model self-score is never treated as a quality verdict. */
+export function sourceReadyScoredPremiseSelection(
+  pool: readonly Record<string, unknown>[],
+  scores: ReadonlyMap<string, number>,
+  target: number,
+  categoryOptions?: readonly string[],
+): PremiseSelectionResult | null {
+  if (!Number.isSafeInteger(target) || target < 1 || pool.length < target) return null;
+  const ranked=rankPremisePoolByMaturityScore(pool,scores);
+  const ready: Array<{ row: Record<string,unknown>; category: string }>=[];
+  for (const seed of ranked) {
+    const id=String(seed.premiseId||'');
+    const question=typeof seed.readerQuestion==='string'?seed.readerQuestion.trim():'';
+    if (!scores.has(id) || question.length<8 || !Array.isArray(seed.causalPlan) || !seed.causalPlan.length) continue;
+    const row={premiseId:id,storyCategoryId:seed.storyCategoryId,
+      readerQuestion:question,causalPlan:structuredClone(seed.causalPlan)};
+    try {
+      const projected=projectPremiseSourceChoices([row],pool);
+      const sample=normalizePremiseSelectionPayload({pool,selectedPremises:projected},
+        1,pool.length,categoryOptions,1);
+      if(sample.selected.length===1 && premiseCausalPlanIssues(sample.selected[0]).length===0)
+        ready.push({row,category:String(sample.selected[0].storyCategory||'')});
+    } catch { /* No semantic relaxation: the existing selector handles this pool. */ }
+  }
+  if(ready.length<target)return null;
+  const chosen=ready.slice(0,target);
+  // A mixed-category batch retains its original diversity contract. Swap
+  // only the lowest-ranked already selected seed; do not rewrite any label.
+  if(target>1 && categoryOptions && new Set(categoryOptions).size>1
+    && new Set(chosen.map(item=>item.category)).size<2){
+    const alternative=ready.slice(target).find(item=>item.category!==chosen[0].category);
+    if(!alternative)return null;
+    chosen[chosen.length-1]=alternative;
+  }
+  try {
+    return normalizePremiseSelectionPayload({
+      pool,selectedPremises:projectPremiseSourceChoices(chosen.map(item=>item.row),pool),
+    },target,pool.length,categoryOptions,target);
+  } catch { return null; }
 }
 
 export function normalizePremiseSelectionPayload(
