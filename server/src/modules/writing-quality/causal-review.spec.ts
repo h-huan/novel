@@ -748,6 +748,12 @@ it('large outline audit keeps every exact result but avoids resending all action
  expect(shown[0].resultAnchorIds).toEqual(entries[0].resultAnchorIds);
  expect(shown[0]).not.toHaveProperty('anchorIds');
  expect(shown[0].actionLookup.length).toBeGreaterThan(0);
+ // The reviewer now sees actual prior actions in the same chapter rather
+ // than guessing a supporting condition from the result's parent paragraph.
+ // IDs are location hints only; they do not grant a supported verdict.
+ expect(shown[0].actionAnchorIds).toHaveLength(2);
+ expect(shown[0].actionAnchorIds.every(id=>anchors.some(a=>a.id===id
+   &&a.path?.startsWith('0.characterActions.')&&a.path.endsWith('.action')))).toBe(true);
  const reviewedScene=anchors.find(a=>a.path==='0.scenes.0.outcome'&&shown[0].resultAnchorIds.includes(a.id));
  const siblingAction=anchors.find(a=>a.path==='0.characterActions.0.action');
  expect(reviewedScene).toBeDefined();
