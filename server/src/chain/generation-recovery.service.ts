@@ -260,7 +260,7 @@ export class GenerationRecoveryService {
     // before any chapter plan can consume these saved rows.
     const db = this.database.getDb();
     const roles = db.prepare(
-      'SELECT id,name,identity,is_pov_character FROM characters WHERE project_id=?',
+      'SELECT * FROM characters WHERE project_id=?',
     ).all(projectId) as Array<{ id:string; name:string; identity:string; is_pov_character:number }>;
     const profiles = db.prepare(
       'SELECT character_id FROM character_extended_profiles WHERE project_id=?',
