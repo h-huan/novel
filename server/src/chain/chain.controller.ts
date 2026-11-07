@@ -9373,6 +9373,44 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             allowedMin, allowedMax, chapterNumber: order + 1, totalChapters: chapterTitles.length,
           });
 
+          // A failed later chapter must not discard independently checked
+          // earlier chapter work. The key binds the full immutable prompt,
+          // accepted prior story, fact ledger and existing quality standard.
+          // Recovery is allowed only for runs that still have valid receipts.
+          const detailSourceHash=CreationOutlineCheckpoint.fingerprint({
+            chapterPrompt,chapterJsonExample,executionStandardForReview,
+            acceptedOutlineSources,priorOutlineFactLedger,
+          });
+          const previousChapterWork=outlineWork.load<{
+            chapter:Record<string,any>;
+            prepared:typeof preparedChapters[number];
+            acceptedSource:Record<string,unknown>;
+            ledger:OutlineFactLedgerEntry[];
+            runIds:string[];
+          }>(projectId,'chapter_'+order,detailSourceHash);
+          if(previousChapterWork){
+            try{
+              const record=previousChapterWork;
+              if(!record.prepared || record.prepared.order!==order
+                || !record.chapter || assessChapter(record.chapter).length
+                || !record.acceptedSource || !Array.isArray(record.ledger)
+                || !Array.isArray(record.runIds) || !record.runIds.length
+                || record.runIds.some(id=>typeof id!=='string'||!id))throw Error('旧章纲阶段数据不完整');
+              for(const runId of record.runIds)this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,runId,expectedStages:['outline'],expectedScenarios:['outline'],
+              });
+              preparedChapters.push(record.prepared);
+              acceptedOutlineSources.push(record.acceptedSource);
+              priorOutlineFactLedger=record.ledger;
+              plannedChapterWords+=record.prepared.targetWords;
+              for(const runId of record.runIds)shortOutlineSourceRunIds.add(runId);
+              this.logger.log('创建大纲：复用原有独立审核合格的第'+(order+1)+'章阶段成果 project='+projectId);
+              continue;
+            }catch(error){
+              this.logger.warn('第'+(order+1)+'章旧检查点不再符合原证据合同，重新生成：'+String(error));
+            }
+          }
+          const previousChapterRunIds=new Set(shortOutlineSourceRunIds);
           const chapterResult = await this.llmCallWithRetry<any>(
             `第${order + 1}章详细大纲`,
             chapterPrompt + chapterJsonExample,
@@ -9617,7 +9655,16 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             scenes: JSON.stringify(chapterScenes),
           });
           plannedChapterWords += chapterTargetWords;
-          acceptedOutlineSources.push(normalizeOutlineChaptersForFactReview([chapterFactsForReview(order, chData)])[0] as Record<string, unknown>);
+          const acceptedChapterSource=normalizeOutlineChaptersForFactReview([chapterFactsForReview(order, chData)])[0] as Record<string, unknown>;
+          acceptedOutlineSources.push(acceptedChapterSource);
+          // Save only after the chapter's structure, facts, actions, original
+          // obligations and continuity checks have all passed. Final book
+          // reconciliation and the Canon transaction are still mandatory.
+          outlineWork.save(projectId,'chapter_'+order,detailSourceHash,{
+            chapter:chData,prepared:preparedChapters[preparedChapters.length-1],
+            acceptedSource:acceptedChapterSource,ledger:priorOutlineFactLedger,
+            runIds:[...shortOutlineSourceRunIds].filter(id=>!previousChapterRunIds.has(id)),
+          });
         }
 
         // 字数合计校正：LLM 各章 targetWords 之和不一定恰好等于项目目标，逐个"硬碰硬"失败。
@@ -10118,6 +10165,9 @@ ${STORY_ENTITY_MODELING_POLICY}
       // otherwise SSE can report 100% on a still-incomplete project.
       const shortActivation=db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ? AND status IN ('creating','generation_failed','active')`).run(now(), projectId);
       if(Number(shortActivation.changes)!==1)throw new Error('短篇激活状态未成功持久化，不能报告项目创建完成');
+      // Only a fully active project can retire temporary stage work.
+      if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get())
+        db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
       emit('done', 100, '全部内容生成完成', 'done');
       this.logger.log(`create-project-async: 完成 project=${projectId}`);
       this.emitProjectProgress(projectId, {
