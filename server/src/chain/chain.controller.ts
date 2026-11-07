@@ -5489,6 +5489,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           uniqueBeyondTarget: poolFilterTotals.uniqueBeyondTarget,
           generated: candidatePool.length,
           actual: candidatePool.length,
+          // Keep the generator's original self-scores observable beside the
+          // immutable premise IDs. A high score is NOT an audit verdict; the
+          // subsequent independently failed IDs can now be correlated in one
+          // latest report without any extra model call or new scoring Gate.
+          maturityRanking: rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)
+            .map(item=>({premiseId:String(item.premiseId),
+              score:premiseMaturityScores.get(String(item.premiseId))??null})),
           shortfall: Math.max(0, premisePoolSize - candidatePool.length),
           targetMet: candidatePool.length >= premisePoolSize,
           supplementAttempted: poolSupplementAttempted,
@@ -6138,6 +6145,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           candidateAssessments.push({
             title: String(candidate?.title || ''),
             sourcePremiseId: String(candidate?.sourcePremiseId || '').trim(),
+            premiseMaturityScore:premiseMaturityScores.get(String(candidate?.sourcePremiseId||''))??null,
             attempt,
             // 未通过候选不会进入前端，但必须保留足够文本证据供 latest.json 复盘 Gate 是否误杀。
             candidate: {
