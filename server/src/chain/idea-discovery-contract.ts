@@ -287,8 +287,13 @@ export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
   if(!item){reject('五节原文不完整或与另一版本冲突');continue;}
   const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
   const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
-  if(title.length<2||core.length<20||!normalize(title)||!normalize(core)){
-   reject('标题或故事正文过短或缺失');continue;
+  // Share the SAME visible-title envelope as the final card Gate. Before
+  // this check, two-character seeds could consume paid selection and full-card
+  // work despite being unable to meet the author's 4-16-character title rule.
+  // Semantic click-worthiness still belongs to the independent reader Gate.
+  const compactTitle=normalize(title);
+  if(compactTitle.length<4||compactTitle.length>16||core.length<20||!normalize(core)){
+   reject('暂名不在4-16字内或故事正文缺失');continue;
   }
   const issues=premiseSeedFactIssues(core);
   if(issues.length){reject(issues[0]);continue;}
