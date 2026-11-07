@@ -12,7 +12,7 @@ import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremis
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
 import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, neededFreshPremiseSeeds, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanExample, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,cacheVerifiedSourceReview,type PremiseSourceReceipts} from './premise-source-reuse';
 import {premiseOverlapScopeIssues,premiseOverlapPairs} from './premise-selection-review';
@@ -5173,9 +5173,10 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             // model selection. Unbound plans are ignored; they never pass a
             // semantic review without the existing independent model Gates.
             readerQuestion:'首屏触发的具体危险及未解结果是什么？',
-            causalPlan:[{action:{field:'activeChoice',quote:'直接摘录主动选择节已经执行的行动'},
-              conditions:[{field:'protagonistSituation',quote:'直接摘录处境触发节已有的必要条件'}],
-              result:{field:'payoff',quote:'直接摘录反转兑现节已经发生的核心结果'}}],
+            // One canonical dynamic causal-link example: the older inline
+            // one-step schema incorrectly taught direct opening-action->final-payoff
+            // even when this story needs an intermediate executor/decision.
+            causalPlan:premiseCausalPlanExample(),
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
