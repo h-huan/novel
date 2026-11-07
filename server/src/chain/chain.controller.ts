@@ -8751,7 +8751,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // ====== 短篇：按新流程顺序生成 ======
       let outlineWriteCount = 0;
       let volumeWriteCount = 1;
-      let outlineContextPrefix = '';
+      let outlineEnvironmentContext = '';
       let volId = '';
       let chapterTitles: any[] = [];
 
@@ -8946,7 +8946,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
         activeFailureOrigin = 'persistence_readback';
-        const savedWorld = db.prepare(`SELECT id, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`).get(projectId) as any;
+        const savedWorld = db.prepare(`SELECT id, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`).get(projectId) as any;
         if (!savedWorld) {
           throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
         }
@@ -8954,31 +8954,17 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         // Execute the original world-rule completeness Gate here, before paying
         // for the story card and per-chapter outlines. Do not repeat it late.
         this.assertProjectSourceCompleteness(projectId);
-        if (savedWorld) {
-          const parseMaybeArray = (v: unknown): any[] => {
-            if (v == null) return [];
-            if (Array.isArray(v)) return v as any[];
-            try { const p = JSON.parse(String(v)); return Array.isArray(p) ? p : [p]; } catch { return []; }
-          };
-          const parseConstraints = (): Record<string, any> => {
-            if (!savedWorld.constraints) return {};
-            try { const p = JSON.parse(String(savedWorld.constraints)); return p && typeof p === 'object' ? p : {}; } catch { return {}; }
-          };
-          const wd2 = {
-            era: savedWorld.era,
-            geography: parseMaybeArray(savedWorld.geography),
-            factions: parseMaybeArray(savedWorld.factions),
-            rules: parseMaybeArray(savedWorld.rules),
-            atmosphere: savedWorld.atmosphere,
-            constraints: parseConstraints(),
-            storyPremise: savedWorld.story_premise,
-            locations: parseMaybeArray(savedWorld.locations),
-            socialRules: savedWorld.social_rules,
-            specialSettings: savedWorld.special_settings,
-            settingType: savedWorld.setting_type,
-          };
-          outlineContextPrefix = JSON.stringify(wd2);
-        }
+        // The world-rule/character authority is sent once in worldContinuityDirective.
+        // This supplementary VIEW carries only scene-level environment data;
+        // never transmit a second competing rules/constraints/story source.
+        outlineEnvironmentContext=JSON.stringify({
+          era:savedWorld.era,
+          geography:worldPromptValue(savedWorld.geography),
+          factions:worldPromptValue(savedWorld.factions),
+          atmosphere:savedWorld.atmosphere,
+          locations:worldPromptValue(savedWorld.locations),
+          settingType:savedWorld.setting_type,
+        });
       }
 
       // 世界观步骤到此结束：停掉 short heartbeat，避免它持续把 world 刷成 running/高进度，
@@ -8996,7 +8982,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         let chapterCount = 0;
         let shortStoryCard: Record<string, any> | null = null;
         const worldRowForOutline = db.prepare(`SELECT atmosphere, story_premise, rules, special_settings, social_rules, constraints
-          FROM world_settings WHERE project_id = ? LIMIT 1`).get(projectId) as any;
+          FROM world_settings WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`).get(projectId) as any;
         // Saved world fields may be JSON-encoded arrays/objects in SQLite.
         // Decode the prompt VIEW only, never mutate the canonical saved world
         // or the independent review input. Otherwise `rules` is double-escaped
@@ -9272,7 +9258,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           allowedMax: number;
           scenes: string;
         }> = [];
-        const ideaSpan = `${worldContinuityDirective}\n${outlineContextPrefix ? `世界观上下文:${outlineContextPrefix}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
+        const ideaSpan = `${worldContinuityDirective}\n${outlineEnvironmentContext ? `已保存世界背景（只含未在规则块中传递的环境字段）:${outlineEnvironmentContext}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
         // 叙事节拍来自每章真实职责。章节位置只定义开篇/终章边界，不再按固定章数制造爽点弧。
         const chapterResponsibilityPlan = buildNarrativeBeatPlan(creationResponsibilityPlan(chapterTitles));
 
@@ -9303,6 +9289,7 @@ ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || 
 ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)}
 【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
+${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩子；兑现本段压力与行动，不提前泄露全篇终局】${String(dto.selectedIdea.hook)}`:''}
 【已通过前置审查的完整本章合同；条件须在实际事件中取得，不是结果自证】${JSON.stringify(creationResponsibilityPlan([expectedChapter]).map(row=>({...row,chapter:order+1}))[0])}
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
 【本章职责的实际完成条件】先按已确认前章事实核对该任务是否已经完成。若前章已通过联名、决定、交付或对手改口实现目标，本章不能再把保管同一文件、重述既有决定写成第二次实现该目标；本章只展开仍未兑现的具体行动、代价、关系变化与独立结果。因上游章职能措辞重复而无法以新行动完成时，保留已确认结果并写出本章实际的后续推进，不伪造前章成果重新发生。content、scenes.outcome、characterActions.result、characterStates及伏笔回收须据同一当前章行动投影。
@@ -9315,10 +9302,7 @@ ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, 
             【硬性连续性】人物姓名保持一致；亲属关系、责任归属、既定事件真相和结局须在事实与因果上遵守确认题材，允许不改变事实的表达差异；不得无因新增伤病、物证、神秘气味、秘密关系或新事件。已经在前文完成的推进任务不得换一种说法再次发生（判据 CR-4）。人物改变立场、回头相助或突然交出关键材料，必须写明前文已有动机及本章可见触发。新增细节必须在本章产生作用，或明确写入foreshadowing并在后续既定事件中有回收位置。
             【制度与权限程序】${chapterResponsibilityCriteriaText(['CR-6', 'CR-7'])}
 【人物关键选择】按已注入QLT-003的同源人物选择条件生成，候选、细纲及其结果字段使用同一触发与变化范围，不在此追加另一套人物判据。
-${(() => {
-  const ideaNames = outlineCharacterSources.map(character=>String(character.name||'')).filter(Boolean);
-  return ideaNames.length > 0 ? `【已保存人物基准（保留身份与既定关系，不代表全书封闭名单）】${ideaNames.join('、')}\n` : '';
-})()}【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
+【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
 【本章事件与状态唯一来源】content按时序记录本章实际发生的行动、成立条件、直接结果与未完成目标；scenes.outcome、characterActions.result、characterStates.stateAfter及伏笔回收必须从同一已发生事件投影，不得把准备、猜测、沉默、询问或下一章计划升级为已执行结果。物件保管权转移须有可见交付、时间与双方；同一时点不得同时在两个人手中或两个地点。人物位置、知情、关系和立场变化须有本章可见触发。任何角色认出真相、确定他人身份、当众认错或依据证据改变立场时，都必须在相应事件发生前写出其实际看到、听到或收到的可信来源、传递者与时序；缺少来源就只能保持尚未知情，不能靠结尾台词补造已知事实。先发生的话不能改称见证后来证据的反应。
