@@ -9001,14 +9001,24 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         let shortStoryCard: Record<string, any> | null = null;
         const worldRowForOutline = db.prepare(`SELECT atmosphere, story_premise, rules, special_settings, social_rules, constraints
           FROM world_settings WHERE project_id = ? LIMIT 1`).get(projectId) as any;
+        // Saved world fields may be JSON-encoded arrays/objects in SQLite.
+        // Decode the prompt VIEW only, never mutate the canonical saved world
+        // or the independent review input. Otherwise `rules` is double-escaped
+        // as an opaque string and chapter generation overlooks restrictions on
+        // incidental actions, even though the later Gate correctly catches them.
+        const worldPromptValue=(value:unknown):unknown=>{
+          if(typeof value!=='string'||!/^\\s*[\\[{]/.test(value))return value;
+          try {const parsed=JSON.parse(value);return parsed&&typeof parsed==='object'?parsed:value;}
+          catch{return value;}
+        };
         const worldContinuityDirective = (worldRowForOutline
           ? `\n【已确认世界规则（不得覆盖已确认题材的核心事实）】${JSON.stringify({
             storyPremise: worldRowForOutline.story_premise,
-            rules: worldRowForOutline.rules,
-            specialSettings: worldRowForOutline.special_settings,
-            socialRules: worldRowForOutline.social_rules,
-            constraints: worldRowForOutline.constraints,
-          })}\n本世界规则在保存前已按已确认题材进行来源审查，后续只可补充不冲突的细节；不可为了迎合世界观新增条款而改变已确认题材的触发条件、事件机制、人物身份、真相、反转、结局或固定代价。若二者存在真实互斥，停止下游改写并将冲突交由既有一致性审核处理，不擅自修改任何已锁定事实。\n`
+            rules: worldPromptValue(worldRowForOutline.rules),
+            specialSettings: worldPromptValue(worldRowForOutline.special_settings),
+            socialRules: worldPromptValue(worldRowForOutline.social_rules),
+            constraints: worldPromptValue(worldRowForOutline.constraints),
+          })}\n本世界规则在保存前已按已确认题材进行来源审查，后续只可补充不冲突的细节；不可为了迎合世界观新增条款而改变已确认题材的触发条件、事件机制、人物身份、真相、反转、结局或固定代价。世界规则也约束次要场景与过场动作：若写签收、交接、批准、核销、能力触发等已规定完成条件的事件，必须由规则允许的实际主体及动作完成；无推进价值的过场可不写，不能把不满足规则的事件写成正常完成。若二者存在真实互斥，停止下游改写并将冲突交由既有一致性审核处理，不擅自修改任何已锁定事实。\n`
           : '')+'\n【已生成并保存的人物资料；不能覆盖已确认题材或世界规则】'+JSON.stringify(outlineCharacterSources)+'\n未定字段不得当作新权限或事实；人物资料不得修改确认题材或冻结世界规则。';
         if (isShort) {
           const unwrapStoryCard = (value: any): Record<string, any> | null => {
