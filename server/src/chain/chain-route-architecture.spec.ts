@@ -125,6 +125,16 @@ describe('chain HTTP architecture', () => {
     expect(shared).toContain('每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明');
     expect(source).toContain('chapterResponsibilityPlanningDirective(false)');
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+    const env=source.split('outlineEnvironmentContext=JSON.stringify({')[1]?.split('});')[0]||'';
+    expect(env).toContain('era:savedWorld.era');
+    expect(env).toContain('locations:worldPromptValue(savedWorld.locations)');
+    expect(env).not.toContain('rules:');
+    expect(env).not.toContain('constraints:');
+    expect(env).not.toContain('storyPremise:');
+    expect(source).not.toContain('outlineContextPrefix');
+    expect(source).not.toContain('【本章事件与状态唯一来源】');
+    expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(source).toContain('【首章已确认的原始吸睛钩子');
   });
 
   it('uses existing plan-only reselection support instead of requesting unchanged whole stories', () => {
