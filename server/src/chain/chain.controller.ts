@@ -273,6 +273,17 @@ const normalizeOutlineChapterFunction = (
   return 'paving';
 };
 
+/** Decode only an existing JSON-encoded SQLite world column for model-facing
+ * continuity context. Preserve raw invalid or ordinary prose; this is never
+ * a world-rule repair and cannot mutate the canonical fact source. */
+export function worldPromptValue(value:unknown):unknown {
+  if(typeof value!=='string'||!/^\s*(?:\[|\{)/.test(value))return value;
+  try {
+    const parsed=JSON.parse(value);
+    return parsed&&typeof parsed==='object' ? parsed : value;
+  }catch{return value;}
+}
+
 export const parsePositiveTargetWords = (value: unknown): number | null => {
   if (typeof value === 'number') return Number.isInteger(value) && value > 0 ? value : null;
   if (typeof value !== 'string') return null;
@@ -9032,11 +9043,6 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         // or the independent review input. Otherwise `rules` is double-escaped
         // as an opaque string and chapter generation overlooks restrictions on
         // incidental actions, even though the later Gate correctly catches them.
-        const worldPromptValue=(value:unknown):unknown=>{
-          if(typeof value!=='string'||!/^\\s*[\\[{]/.test(value))return value;
-          try {const parsed=JSON.parse(value);return parsed&&typeof parsed==='object'?parsed:value;}
-          catch{return value;}
-        };
         const worldContinuityDirective = (worldRowForOutline
           ? `\n【已确认世界规则（不得覆盖已确认题材的核心事实）】${JSON.stringify({
             storyPremise: worldRowForOutline.story_premise,
