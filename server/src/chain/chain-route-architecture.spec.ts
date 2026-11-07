@@ -274,7 +274,7 @@ describe('chain HTTP architecture', () => {
     const source=read('chain.controller.ts');
     expect(source).toContain('partial:retained.selection.selected.length<deliveryCount');
     expect(source).toContain('screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length)');
-    expect(source).toContain('这些胚子尚未通过完整卡终审');
+    expect(source).toContain('个真实合格预选（尚非完整卡）');
     expect(source).toContain('停止可选冗余换选，直接成卡及独立终审');
     expect(source).toContain("selectionStopReason:'delivery_capacity_met'");
     expect(source).not.toContain('affordablePreselectionHedge');
