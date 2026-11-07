@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {ChainController} from './chain.controller';
-import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence,normalizePremisePayoffGapRoutes,premiseDecisionEvidenceIssues} from './premise-payoff-review';
+import {premisePayoffReviewIssues,materializePremisePayoffReview,premisePayoffReviewDirective,premiseUnmappedOutcomeClaims,quarantineUnprovenReversalEvidence,normalizePremisePayoffGapRoutes,premiseDecisionEvidenceIssues,premiseUnmappedOutcomeReviewIssues} from './premise-payoff-review';
 import {retainReviewedPremises,premiseReselectionPlan} from './premise-selection-review';
 import { PREMISE_PAYOFF_REVIEW_POLICY, PREMISE_REPLACEMENT_COMPARISON_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -346,4 +346,50 @@ it('cannot certify an earlier decision using its own or a future outcome as a pr
  // A previously established result is not mechanically banned as evidence
  // for a later decision. Its *semantic* sufficiency remains independently judged.
  expect(premiseDecisionEvidenceIssues({...established,basisQuote:item.reversalEffect},item,'S1.causalPlan[1]',item.payoff)).toEqual([]);
+});
+
+it('does not approve a second consequential outcome merely because the author indexed an earlier successful action',()=>{
+ const base=selection.selected[0];
+ const candidate={...base,
+   reversalEffect:'我把核对材料交到登记窗口。随后机构封存记录，负责人被带走。',
+   payoff:'我把核对材料交到登记窗口。随后机构封存记录，负责人被带走。',
+   causalPlan:[{action:{field:'activeChoice',quote:base.activeChoice},conditions:[],
+     result:{field:'payoff',quote:'我把核对材料交到登记窗口'}}]};
+ const input={...selection,selected:[candidate]};
+ const uncovered=premiseUnmappedOutcomeClaims(input);
+ expect(uncovered).toContainEqual({ref:'S1.reversalEffect',claim:'随后机构封存记录，负责人被带走'});
+ const positive={...supported,reversalCheck:{status:'supported',actionEvidenceRef:'S1.activeChoice',
+   reason:'原先主角的行动与后续机构处理必须分别核验'},links:[{ref:'S1.causalPlan[0]',status:'supported',
+   decisionCheck:{status:'not_required',reason:'这里的原行动只交付材料，并不代表其它机构处罚'},
+   reason:'原计划仅证明确实把资料提交窗口'}]};
+ expect(premiseUnmappedOutcomeReviewIssues({payoffChecks:[positive]},input)).toEqual([
+   expect.stringContaining('须逐项核对1条因果计划未覆盖的结果')]);
+ expect(premisePayoffReviewIssues({payoffChecks:[positive]},input,true)).toEqual(
+   expect.arrayContaining([expect.stringContaining('因果计划未覆盖')]));
+ const invented={...positive,unmappedChecks:[{ordinal:1,status:'supported',
+   actionEvidenceRef:'S1.reversalEffect',actionEvidenceQuote:'负责人被带走',
+   reason:'只用结果本身解释结果，没有实际权限或有效执行证据'}]};
+ expect(premiseUnmappedOutcomeReviewIssues({payoffChecks:[invented]},input).join(''))
+   .toContain('不能以结果自身');
+ const independent={...positive,unmappedChecks:[{ordinal:1,status:'supported',
+   actionEvidenceRef:'S1.activeChoice',actionEvidenceQuote:'她留下录音并向警方报告具体地点',
+   reason:'已有真实行动，但仍需独立语义判别该行动能否支持另一结果'}]};
+ expect(premiseUnmappedOutcomeReviewIssues({payoffChecks:[independent]},input)).toEqual([]);
+ const negative={...positive,unmappedChecks:[{ordinal:1,status:'gap',
+   reason:'原池只有提交材料，没有负责人被带走所需的有权决定者和执行事实'}]};
+ const normalized=normalizePremisePayoffGapRoutes({payoffChecks:[negative]},input);
+ expect(normalized.payoffChecks[0]).toMatchObject({status:'gap',gapRepair:'replace_from_pool'});
+ expect(materializePremisePayoffReview(normalized,input,true)).toEqual([
+   expect.objectContaining({kind:'selection_fit',premiseId:'P1',repairMode:'replace_from_pool'})]);
+ expect(premisePayoffReviewDirective(input)).toContain('unmappedChecks');
+ expect(premisePayoffReviewDirective(input)).toContain('第三方被带走');
+});
+it('does not demand duplicate outcome receipts after an existing independent gate has already rejected a story',()=>{
+ const candidate={...selection.selected[0],reversalEffect:'审核后另有人员受到处罚。',
+   causalPlan:[{action:{field:'activeChoice',quote:selection.selected[0].activeChoice},conditions:[],
+     result:{field:'payoff',quote:selection.selected[0].payoff}}]};
+ const input={...selection,selected:[candidate]};
+ const negative={...supported,status:'gap',gapRepair:'replace_from_pool',reason:'执行处罚的独立权源尚未写出'};
+ expect(premiseUnmappedOutcomeReviewIssues({payoffChecks:[negative]},input)).toEqual([]);
+ expect(premisePayoffReviewIssues({payoffChecks:[negative]},input,true)).toEqual([]);
 });
