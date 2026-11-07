@@ -84,9 +84,16 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
     :new Set<string>();
   const proofSourceCatalog=compactPlanningProof
     ?compactCausalProofSourceCatalog(focusedAnchors):focusedAnchors;
+  // In a compact proof, retain the exact action text and its server ID.
+  // Otherwise the reviewer sees explicit outcome text but only opaque action
+  // addresses, which encourages result-only bridge citations. This transport
+  // change never supplies a verdict, invents a condition or relaxes validation.
+  const isPlanningActionText=(anchor:typeof focusedAnchors[number])=>
+    anchor.source==='body'&&/^body:v\d+$/.test(anchor.id)
+    &&/^\d+\.(?:characterActions\.\d+\.action|scenes\.\d+\.(?:action|event)|content)$/.test(anchor.path||'');
   const promptAnchors=compactPlanningProof
     ?proofSourceCatalog.map(anchor=>
-      anchor.source==='body'&&!requiredResultIds.has(anchor.id)
+      anchor.source==='body'&&!requiredResultIds.has(anchor.id)&&!isPlanningActionText(anchor)
         ?{id:anchor.id,source:anchor.source,...(anchor.path?{path:anchor.path}:{})}
         :anchor)
     :focusedAnchors;
