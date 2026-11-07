@@ -1,5 +1,5 @@
 /** Chapter criteria are rendered from ARCH-005; no parallel rule definitions. */
-import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, STORY_CAUSAL_REVIEW_POLICY } from './system-workflow-rules.registry';
+import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, STORY_CAUSAL_REVIEW_POLICY, CHAPTER_OUTCOME_EVIDENCE_POLICY } from './system-workflow-rules.registry';
 
 const responsibilityRule = getSystemWorkflowRule('ARCH-005')!;
 
@@ -131,6 +131,7 @@ export function chapterResponsibilityPlanningDirective(includeSharedPolicies = t
   return [
     "【生成前规则执行编译 · 判据与审查/修复同源】逐项核对所有受世界规则约束的事件、程序与效果：作用主体、作用对象、载体、全部前置条件、人数/数量、证据组合、触发时点和能力范围都必须与已确认世界规则一致；不得因章纲压缩而省略会改变是否生效的必要条件。",
     responsibilityJudgmentRules(includeSharedPolicies),
+    CHAPTER_OUTCOME_EVIDENCE_POLICY,
     "【条件取得动作与证据同源】每章先分清已经具备的资源、需要本章新取得的条件和无需外部条件的自主动作。prerequisites只登记进入条件及其已知来源，不代表人物已经实际取得；如果本章结果取决于新取得的授权、证据、钥匙、他人同意或其它条件，必须在本章responsibility中明确安排由谁、对谁、通过何种可执行动作取得它，再安排依赖它的结果；已由前章取得且仍有效的条件必须能在前章responsibility找到取得动作。若此路径在原故事中不成立，应调整本章可实现的状态或保持等待，不得靠exitState结果反证已取得。普通自主行动不用编造第三方许可或行政手续。这条同时供章节规划和独立审查执行，不增加独立审核步骤。",
     "【跨章已完成结果不得重复兑现】规划章节唯一责任时，为每章分别明确此前尚未完成的结果和本章实际新增的行动。前章已经通过联名、审批、签字或其它决定完成的保全、留任、撤销、救助，后章仅持有同一张纸、回忆旧事或重复强调既定承诺，不能再次声称完成同一结果；后章须承接真实尚未发生的经营、付出代价、关系转变、剩余危机或新的有效行动。每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明，而不是借前章的结果自证。不要制造多余反转或额外条件；保持已确认故事结果及合法重复发生的日常机制。",
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
