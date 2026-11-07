@@ -57,6 +57,6 @@ it('creation audit keeps the complete fact inventory and never auto-converts a s
  expect(results.some(row=>row.path==='0.characterActions.0.result')).toBe(true);
  const audit={status:'evaluated',transitions:[{status:'gap',reason:'旧评审只因台词措辞不同判缺失'}]},before=structuredClone(audit);
  const prompt=causalAuditRepairPrompt(audit,[],body,{});
- expect(prompt.prompt).toContain(OUTLINE_PROJECTION_POLICY);expect(prompt.prompt).toContain('要求重报不等于已调整');
+ expect(prompt.prompt).toContain(OUTLINE_PROJECTION_POLICY);expect(prompt.prompt).toContain('要求、交代、安排只证明发起');
  expect(audit).toEqual(before);
 });
