@@ -389,7 +389,8 @@ it('does not demand duplicate outcome receipts after an existing independent gat
    causalPlan:[{action:{field:'activeChoice',quote:selection.selected[0].activeChoice},conditions:[],
      result:{field:'payoff',quote:selection.selected[0].payoff}}]};
  const input={...selection,selected:[candidate]};
- const negative={...supported,status:'gap',gapRepair:'replace_from_pool',reason:'执行处罚的独立权源尚未写出'};
+ const negative={...supported,status:'gap',gapRepair:'replace_from_pool',reason:'执行处罚的独立权源尚未写出',
+   reversalCheck:{status:'gap',reason:'缺少已发生的实际处罚权限与决定'},links:[{ref:'S1.causalPlan[0]',status:'gap',reason:'原始故事未给出有权处罚的事实条件'}]};
  expect(premiseUnmappedOutcomeReviewIssues({payoffChecks:[negative]},input)).toEqual([]);
  expect(premisePayoffReviewIssues({payoffChecks:[negative]},input,true)).toEqual([]);
 });
