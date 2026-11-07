@@ -35,7 +35,6 @@ const CONDITION_ERROR='逐章条件核对缺少取得路径、有效性证据或
  * transport errors instead of repeating an opaque entire-plan rejection. */
 export function chapterConditionReviewIssues(value:any,plan:any[],sources:string,
  resolveAnchors:false|((check:any)=>boolean)=false,requireExitState=false):string[]{
- const contradictions=Array.isArray(value?.contradictions)?value.contradictions:[];
  const checks=value?.conditionChecks;
  if(!Array.isArray(checks))return [CONDITION_ERROR,'conditionChecks不是逐章数组，须每章恰好一项'];
  const details:string[]=[];
@@ -57,8 +56,9 @@ export function chapterConditionReviewIssues(value:any,plan:any[],sources:string
    details.push(`第${n}章缺少实际条件取得和出口结果的解释`);
   if(!['supported','gap','not_required'].includes(check.status))
    details.push(`第${n}章conditionChecks.status必须是supported、gap或not_required`);
-  if(check.status==='gap'&&!contradictions.some((finding:any)=>finding.chapter===n))
-   details.push(`第${n}章gap未对应有来源证据的contradictions`);
+  // A missing acquisition action is a real planning gap even when it does
+  // not violate a frozen CR rule. The caller must route every gap into the
+  // existing plan repair, never upgrade it to a passed audit.
   if(check.status==='supported'){
    const valid=Array.isArray(check.bridgeAnchorIds)
     ?typeof resolveAnchors==='function'&&resolveAnchors(check)
@@ -95,4 +95,17 @@ export function chapterConditionBridgeAnchorsVerified(check:any,plan:any[],byId:
   const index=task?Number(task[1])-1:field?Number(field[1]):-1;
   return index>=0&&index<chapter&&resolveQualityEvidence(allowedBody,anchor.text).verified;
  });
+}
+
+/** Planning gaps are blocking repair inputs, not fabricated CR violations.
+ * Structural validation happens in chapterConditionReviewIssues; the project
+ * creation caller must reject these even when contradictions is empty. */
+export function chapterConditionPlanningGapIssues(value:any,plan:readonly any[]):string[]{
+ if(!Array.isArray(value?.conditionChecks))return [];
+ return value.conditionChecks.filter((check:any)=>check?.status==='gap'
+   &&Number.isInteger(check.chapter)&&check.chapter>=1&&check.chapter<=plan.length)
+  .map((check:any)=>{
+   const original=plan[check.chapter-1];
+   return `第${check.chapter}章条件取得缺口：${String(check.reason||'').trim()}；当前规划动作：${String(original?.responsibility||'').trim()}；预定出口：${String(original?.exitState||'').trim()}。须在本章或有效前章规划可执行的取得动作，不能凭出口断言自证。未建立的独立结果不得提前兑现。`;
+  });
 }
