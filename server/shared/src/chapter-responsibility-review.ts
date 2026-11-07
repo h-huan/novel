@@ -183,7 +183,8 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     ...(input.entryExitContract&&Array.isArray(input.plan)
       ?[`【本次逐章审核身份目录】${JSON.stringify(input.plan.map((row:any,index:number)=>({
         chapter:Number(row?.chapter)||index+1,
-        taskAnchorId:'chapter:c'+String(Number(row?.chapter)||index+1)+':task',
+        ...(input.evidenceMode==='anchors'
+          ?{taskAnchorId:'chapter:c'+String(Number(row?.chapter)||index+1)+':task'}:{}),
       })))}。conditionChecks必须与该目录一一对应且每章一行；不得仅复制单章JSON示例，也不得为凑supported引用prerequisites或出口目标。核对外部依赖是否在本章responsibility中真正安排取得，或在前章已执行且仍有效；普通自主行动按not_required解释，不编造额外手续。`]:[]),
     "若某任务冲突，必须返回可直接替换章节责任的 fix，而不是只批评。",
     chapterResponsibilityAuditOutputContract(input.entryExitContract===true,input.evidenceMode||'quotes'),
