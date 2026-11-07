@@ -21,6 +21,15 @@ it('keeps a substantive gap negative when the model omits its repair route, and 
  expect(premisePayoffReviewDirective(selection)).toContain('gapRepair');
  expect(premisePayoffReviewDirective(selection)).toContain('"gapRepair":"replace_from_pool"');
 });
+it('keeps every payoff and plan-external result check while trimming verbose supported explanations',()=>{
+ const directive=premisePayoffReviewDirective(selection);
+ expect(directive).toContain('【保持逐项实审，压缩重复输出】');
+ expect(directive).toContain('gap或unknown仍完整说明实际缺口');
+ expect(directive).toContain('reversalCheck');
+ expect(directive).toContain('unmappedChecks');
+ expect(directive).toContain('gapRepair');
+ expect(premisePayoffReviewIssues({payoffChecks:[]},selection)).toContain('payoffChecks须逐卡覆盖全部兑现必要条件审查');
+});
 it('does not reuse a claimed capture as its own prior reversal action when the plan only concludes a later reward',()=>{
  const item={...selection.selected[0],reversalEffect:'第三夜对手在后山取走旧批货物，被负责人当场截住并指认。',
   payoff:'主角被调入核心部门，从此失去原有清净生活。',
