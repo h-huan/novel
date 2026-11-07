@@ -71,7 +71,9 @@ describe('reader-facing source-bound card generation', () => {
     const prompt=ideaCardStructuringDirective(selectedPremise('P-readable'),[],false);
     expect(prompt).toContain('只凭标题须能知道发生了何种反常关系');
     expect(prompt).toContain('需要读完概要才懂的隐喻');
-    expect(prompt).toContain('逐个对照scopeBreakdown的outcome');
+    expect(prompt).toContain('每个scopeBreakdown.outcome只写本阶段已由原池行动支持的状态变化');
+     expect(prompt).toContain('同一证据的反复解释写成两次新的反转');
+     expect(prompt).toContain('每个alternateTitles是否能被没看过本卡');
     expect(prompt).toContain('他人转念');
     expect(prompt).toContain('ending由服务器继承已审核');
     expect(prompt).toContain('禁止替换、合并、拆分、另造题材');
