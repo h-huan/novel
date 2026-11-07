@@ -120,7 +120,9 @@ export function mergePremiseSourceBatches(selection: PremiseSelectionResult, bat
       ...(check.conditionEvidenceRef?{conditionEvidenceRef:rebind(check.conditionEvidenceRef)}:{}),
       ...(check.reversalCheck?{reversalCheck:{...check.reversalCheck,
         ...(check.reversalCheck.actionEvidenceRef?{actionEvidenceRef:rebind(check.reversalCheck.actionEvidenceRef)}:{})}}:{}),
-      ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{})};
+      ...(check.links?{links:check.links.map(link=>({...link,ref:rebind(link.ref)}))}:{}),
+      ...(check.unmappedChecks?{unmappedChecks:check.unmappedChecks.map(row=>({...row,
+        ...(row.actionEvidenceRef?{actionEvidenceRef:rebind(row.actionEvidenceRef)}:{})}))}:{})};
   }));
   const owner=(row:{ref:string})=>Number(/^S(\d+)\./.exec(row.ref)?.[1]||0);
   for(const rows of [result.sourceChecks,result.payoffChecks,result.genreChecks,result.categoryChecks])rows?.sort((a,b)=>owner(a)-owner(b));
