@@ -252,9 +252,28 @@ export class GenerationRecoveryService {
     const preserveWorld = Boolean(
       this.database.getDb().prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId),
     );
-    // 普通恢复永远保留已经建立的世界观，只清理可再生的下游资料。
-    // “按题材重建”仍走 clearForExplicitSourceRebuild，并在存在世界观时明确拒绝。
-    await this.clearGeneratedAssets(projectId, { preserveWorld });
+    // A successful role batch already belongs to the same immutable world and
+    // selected idea. Recreating it on every fourth-outline transport failure
+    // changes the downstream source hashes and wastes another full model call.
+    // Preserve roles only with a complete canonical + extended-profile batch.
+    // prepareCreationCharacters rechecks protagonist identity and every role
+    // before any chapter plan can consume these saved rows.
+    const db = this.database.getDb();
+    const roles = db.prepare(
+      'SELECT id,name,identity,is_pov_character FROM characters WHERE project_id=?',
+    ).all(projectId) as Array<{ id:string; name:string; identity:string; is_pov_character:number }>;
+    const profiles = db.prepare(
+      'SELECT character_id FROM character_extended_profiles WHERE project_id=?',
+    ).all(projectId) as Array<{ character_id:string }>;
+    const profileIds = new Set(profiles.map(row => String(row.character_id)));
+    const names = roles.map(row => String(row.name || '').trim());
+    const preserveCharacters = preserveWorld && roles.length > 0
+      && names.every(Boolean) && new Set(names).size === roles.length
+      && roles.every(row => !!String(row.identity || '').trim() && profileIds.has(String(row.id)))
+      && roles.filter(row => Number(row.is_pov_character) === 1).length === 1;
+    // Normal recovery retains verified upstream Canon; it regenerates only
+    // missing/incomplete downstream data. Explicit source rebuild is separate.
+    await this.clearGeneratedAssets(projectId, { preserveWorld, preserveCharacters });
   }
 
   async clearForExplicitSourceRebuild(projectId: string): Promise<void> {
@@ -284,11 +303,13 @@ export class GenerationRecoveryService {
       )`).get(projectId, projectId, projectId, projectId, projectId) as { n: number }).n);
     if (otherManual) throw new ConflictException('世界观、角色或伏笔有作者修改，不能自动覆盖。');
     await this.clearGeneratedAssets(projectId);
+    const checkpoints = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get();
+    if (checkpoints) db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
   }
 
   private async clearGeneratedAssets(
     projectId: string,
-    options: { preserveWorld?: boolean } = {},
+    options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {},
   ): Promise<void> {
     await this.deleteProjectVectors(projectId);
     const db = this.database.getDb();
@@ -379,10 +400,11 @@ export class GenerationRecoveryService {
     }
   }
 
-  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean } = {}): void {
+  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {}): void {
     const db = this.database.getDb();
     for (const table of RECOVERY_PROFILE_TABLES) {
       if (options.preserveWorld && table === 'world_system_profiles') continue;
+      if (options.preserveCharacters && table === 'character_extended_profiles') continue;
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
         db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId);
       }
@@ -394,7 +416,7 @@ export class GenerationRecoveryService {
     db.prepare('DELETE FROM foreshadowings WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM map_points WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM organizations WHERE project_id=?').run(projectId);
-    db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
+    if (!options.preserveCharacters) db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
     if (!options.preserveWorld) {
       db.prepare('DELETE FROM world_settings WHERE project_id=?').run(projectId);
     }
