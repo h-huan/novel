@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
 import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseReviewSourcePool, expandPremiseSourceCheckRows, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
+import { IDEA_SOURCE_EVENT_POLICY, IDEA_PRESELECTION_REVIEW_POLICY } from '../../shared/src/system-workflow-rules.registry';
 
 it('compact source-check transport preserves every independently validated verdict',()=>{
  const selected=selection(),catalog=premiseSourceComparisonCatalog(selected);
@@ -767,16 +768,15 @@ it('does not repair fiction if either independent audit fails to complete', asyn
       .map(row=>({ref:row.ref,status:'preserved',reason:'当前字段保留原池的行动对象和结果方向'})), categoryChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.category',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主线人物选择体现该分类的具体机制'})),payoffChecks:selection().selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'当前主角主动行动与既有条件支撑反转阶段变化'},reason:'逐项核对既定行动和已有成立条件后确认结果'})) } });
     await c.reviewPremiseSelection(selection(), '', 'source_drift');
     const prompt = c.llmCallWithRetry.mock.calls[0][1] as string;
-    expect(prompt).toContain('先核实展开是否仍保留请求发生');
-    expect(prompt).toContain('不把后来变化倒推为前一事件未发生');
-    expect(prompt).toContain('原文没有写明的角色关系不得由评审补成确定事实');
-    expect(prompt).toContain('不要求所有展开句都已逐字写入骨架');
-    expect(prompt).toContain('不能只因原池未提及候选细节而判未知');
-    expect(prompt).not.toContain('不能确认则unknown');
-    expect(prompt).toContain('同次审核');
-    expect(prompt).toContain('反转兑现核对');
-    expect(prompt).toContain('来源继承这一部分');
-    expect(prompt).toContain('本次仍须完成上文因果兑现、分类与流派结论');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('先核实展开是否仍保留请求发生');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('不把后来变化倒推为前一事件未发生');
+    expect(IDEA_SOURCE_EVENT_POLICY).toContain('原文没有写明的角色关系不得由评审补成确定事实');
+    expect(IDEA_PRESELECTION_REVIEW_POLICY).toContain('不能只因原池未提及候选细节而判未知');
+    expect(prompt).toContain('按已注入GEN-002锁定前继承与差异规则执行');
+    expect(prompt).toContain('逐字段核对同ID原池明确的触发');
+    expect(prompt).toContain('多方行动须区分发起者、执行者与接收者');
+    expect(prompt).toContain('来源兼容不能代替因果、分类或流派通过');
+    expect(prompt).not.toContain('本次来源继承这一部分逐项核对');
     expect(prompt).not.toContain('本次只核对每个已选项');
   });
 
