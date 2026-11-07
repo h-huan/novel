@@ -7198,9 +7198,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // independently vetted survivors together.
     const minimumSelectableCount = deliveryCount;
     if (initialReview.passed) {
-      const partial = initial.selected.length < requestedCount;
+      const deliveryShortfall=Math.max(0,deliveryCount-initial.selected.length);
+      const screeningCapacityGap=Math.max(0,requestedCount-initial.selected.length);
       return { ...initial, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
-        ...(partial ? { partial: true, minimumSelectableCount, selectionStopReason: 'mature_selection_shortfall', completeCardGatePending: true } : {}) } };
+        screeningCapacityGap, partial:deliveryShortfall>0,
+        ...(deliveryShortfall ? {deliveryShortfall,minimumSelectableCount,
+          selectionStopReason:'mature_selection_shortfall'} : {}),
+        completeCardGatePending:true } };
     }
     // Preserve evidenced negative candidates across THIS request. A replacement
     // model must not lose the prior round's independently verified failure modes.
@@ -7315,14 +7319,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           if(capacityMet)this.logger?.log(capacityMessage);
           else this.logger?.warn(capacityMessage);
           return { ...partialSelection, selectionAudit: {
-            initialReview, reselectionAttempted: false, finalReview: partialReview, partial: true,
+            initialReview, reselectionAttempted: false, finalReview: partialReview,
+            partial:missingSlots>0, screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length),
             minimumSelectableCount, deliveryShortfall:missingSlots, selectionStopReason:capacityMet?'delivery_capacity_met':'original_pool_or_budget_shortfall',
             excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
             completeCardGatePending: true,
           } };
         }
-        this.logger?.log('锁定前已有 '+partialSelection.selected.length+' 个审核合格预选候选；目标交付 '+deliveryCount
-          +' 张，使用原有预算补齐可选预选容量。');
+        this.logger?.log('固定原池首次前审保留 '+partialSelection.selected.length+' 个来源/因果/分类合格胚子，目标是最终交付 '+deliveryCount
+          +' 张完整题材卡；这些胚子尚未通过完整卡终审。仅在本次原池已授权的一次换选中增加已付款审核的备用胚子，不另起循环或补造题材。');
         break;
       }
     }
@@ -7347,7 +7352,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if(retained.selection.selected.length<deliveryCount)this.logger?.warn(retainedPoolMessage);
       else this.logger?.log(retainedPoolMessage);
       return { ...retained.selection, selectionAudit: { initialReview, reselectionAttempted: false, finalReview: initialReview,
-        partial: true, selectionStopReason:recoveryReviewUnfunded?'mandatory_recovery_review_budget_shortfall':'original_pool_shortfall',
+        partial:retained.selection.selected.length<deliveryCount,
+        screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length),
+        selectionStopReason:recoveryReviewUnfunded?'mandatory_recovery_review_budget_shortfall':'original_pool_shortfall',
         excludedPremiseIds: retained.excludedPremiseIds, reasons: retained.reasons, completeCardGatePending: true } };
     }
     // One scoped response can correct all current problems. Partition only after
@@ -7592,7 +7599,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         return {...retained.selection,selectionAudit:{
           initialReview,reselectionAttempted:true,finalReview:retainedReview,
           reviewedRecoveryCandidates:recoverySlots.length,deliveryCount,
-          partial:retained.selection.selected.length<requestedCount,
+          partial:retained.selection.selected.length<deliveryCount,
+          screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length),
           excludedPremiseIds:[...new Set([...isolatedIds,...retained.excludedPremiseIds])],
           discardedSurplusPremiseIds:rejectedExtraIds,
           discardedHedgeIds:retained.excludedPremiseIds,
