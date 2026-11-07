@@ -270,6 +270,32 @@ describe('chain HTTP architecture', () => {
     expect(jsonRetry).toContain('if (parsedAnyResponse && lastValidationIssues.length > 0)');
   });
 
+  it('does not confuse optional preselection screening hedge with the requested five final cards',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('partial:retained.selection.selected.length<deliveryCount');
+    expect(source).toContain('screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length)');
+    expect(source).toContain('这些胚子尚未通过完整卡终审');
+    expect(source).toContain('本次原池已授权的一次换选');
+  });
+
+  it('retains full model reasoning for evidence-bearing causal selection, not only the downstream review',()=>{
+    const real=read('real-llm.service.ts');
+    const steps=real.match(/const preliminarySteps=\\[([\\s\\S]*?)\\];/)?.[1]||'';
+    expect(steps).toContain('idea_premise_pool_generation');
+    expect(steps).not.toContain('idea_premise_selection');
+    expect(steps).not.toContain('idea_premise_pool_reselection');
+    expect(real).toContain("if(scenario==='idea_generate'&&stepKey&&preliminarySteps.includes(stepKey))return 'low'");
+  });
+
+  it('presents saved world rule arrays directly to short outline generation before incidental scenes',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('rules: worldPromptValue(worldRowForOutline.rules)');
+    expect(source).toContain("const parsed=JSON.parse(value)");
+    expect(source).toContain('世界规则也约束次要场景与过场动作');
+    expect(source).toContain('无推进价值的过场可不写');
+    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+  });
+
   it('does not promote a nested JSON fragment into an independently reviewed result', () => {
     const source = read('chain.controller.ts');
     const safeJson = source.slice(source.indexOf('private safeExtractJson'), source.indexOf('private loadChapterOutlineConsistencyRows'));
