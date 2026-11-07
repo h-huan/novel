@@ -1,3 +1,4 @@
+import { independentOutcomeStubReceipts } from './premise-payoff-review.fixture';
 import {describe,it,expect,vi,beforeEach,afterEach} from 'vitest';
 import * as budgetConfig from '../config/generation-budgets';
 beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,reviewGroupingMode:1}));
@@ -80,7 +81,7 @@ describe('source batches through the production JSON retry helper',()=>{
   c.realLLM={generate:vi.fn(async(request:any)=>{
    expect(request.physicalCallBudget.remaining).toBe(1);
    request.physicalCallBudget.remaining--;
-   const batch=batches[index++],value:any={payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'人物已有实际选择与因果条件支撑反转变化'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'原池明确行动和当前展开事件及后果可同时成立'})),...fit(batch)};
+   const batch=batches[index++],value:any={payoffChecks:batch.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',unmappedChecks:independentOutcomeStubReceipts(batch,index),actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'人物已有实际选择与因果条件支撑反转变化'},reason:'逐项核对既定行动与必要条件后确认结果成立'})),sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'原池明确行动和当前展开事件及后果可同时成立'})),...fit(batch)};
    value.genreChecks=value.genreChecks.map(({field,quote,...row}:any)=>({...row,evidenceRef:row.ref.split('.')[0]+'.'+field}));
    if(broken)for(const [index,item] of batch.selected.entries())if(['A','D'].includes(String(item.premiseId)))value.genreChecks.find((row:any)=>row.ref==='S'+(index+1)+'.genre1').evidenceRef='S'+(index+1)+'.storyCore';
    return {content:JSON.stringify(value)};
