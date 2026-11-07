@@ -1,4 +1,4 @@
-import {STORY_PREREQUISITE_POLICY,IDEA_PREMISE_DIFFERENCE_POLICY} from '../../shared/src/执行标准';
+import {STORY_PREREQUISITE_POLICY,IDEA_PREMISE_DIFFERENCE_POLICY,OUTLINE_PROJECTION_POLICY} from '../../shared/src/执行标准';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -166,7 +166,9 @@ describe('chain HTTP architecture', () => {
     const source = read('chain.controller.ts');
     expect(source).toContain('口头要求、自愿配合和合法实际控制不可混同');
     expect(source).toContain('缺权限或执行动作时不得写成强制留置');
-    expect(source).toContain('scenes.outcome、characterActions.result、characterStates.stateAfter及伏笔回收必须从同一已发生事件投影');
+    expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('详细章纲先形成content的事件、人物、时间与结果');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能在辅助字段虚构交付、完成或授权');
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
     expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
   });
