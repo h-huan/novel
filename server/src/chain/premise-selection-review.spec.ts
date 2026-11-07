@@ -4,9 +4,27 @@ beforeEach(()=>vi.spyOn(budgetConfig,'readGenerationBudgets').mockReturnValue({.
 afterEach(()=>vi.restoreAllMocks());
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ChainController } from './chain.controller';
-import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseReviewSourcePool, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
+import { materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, retainReviewedPremises, retainPremiseReviewEvidence, normalizePremiseReselection, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, sourceReviewSelectionView, overlapReviewSelectionView, premiseReselectionPromptSelection, premiseReviewSourcePool, expandPremiseSourceCheckRows, premiseOverlapPairs, retainUnchangedOverlapIssues, premiseRefillFailureReasons, type PremiseSelectionReview } from './premise-selection-review';
 import { ideaCardStructuringDirective, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
+it('compact source-check transport preserves every independently validated verdict',()=>{
+ const selected=selection(),catalog=premiseSourceComparisonCatalog(selected);
+ const raw={sourceChecks:catalog.map(row=>[row.ref,'preserved','原池既定事实与展开字段可以同时成立'])};
+ const snapshot=structuredClone(raw);
+ const expanded=expandPremiseSourceCheckRows(raw);
+ expect(raw).toEqual(snapshot);
+ expect(premiseSourceReviewIssues(expanded,selected)).toEqual([]);
+ const incomplete={sourceChecks:raw.sourceChecks.slice(1)};
+ expect(premiseSourceReviewIssues(expandPremiseSourceCheckRows(incomplete),selected))
+   .toContain(catalog[0].ref+'尚未核查');
+ const duplicate={sourceChecks:[...raw.sourceChecks.slice(1),raw.sourceChecks[1]]};
+ expect(premiseSourceReviewIssues(expandPremiseSourceCheckRows(duplicate),selected)).toContain('来源核查编号未知或重复');
+ const unsupported={sourceChecks:raw.sourceChecks.map((row,index)=>index===0?[row[0],'supported',row[2]]:row)};
+ expect(premiseSourceReviewIssues(expandPremiseSourceCheckRows(unsupported),selected)
+   .some(issue=>issue.includes('缺少明确状态'))).toBe(true);
+ const mixed={sourceChecks:[raw.sourceChecks[0],{ref:catalog[1].ref,status:'preserved',reason:'逐字成立'}]};
+ expect(expandPremiseSourceCheckRows(mixed)).toEqual(mixed);
+});
 const premise = (id: string) => ({ premiseId: id, workingTitle: '题材' + id, storyCore: '具有人物选择与兑现的原池骨架' + id,
   storyCategory: '悬疑', storyCategoryId:'K1', protagonistSituation: '为家人争取生存机会', openingEvent: '具体异常迫使人物亲自行动',
   coreConflict: '具体利益与主动对手对撞', activeChoice: '救人需要承担被遗忘的代价' + id,

@@ -10,6 +10,18 @@ export interface PremiseSourceCheck {
   reason: string;
   protocolIncomplete?: boolean;
 }
+/** Compact model-facing transport only; all original independent field
+ * verdicts, evidence references and reasons pass the same strict Gate. */
+export function expandPremiseSourceCheckRows(value:unknown):unknown {
+ if(!value||typeof value!=='object'||Array.isArray(value))return value;
+ const record=value as Record<string,unknown>;
+ if(!Array.isArray(record.sourceChecks)||!record.sourceChecks.some(Array.isArray))return value;
+ const rows=record.sourceChecks;
+ // Reject malformed/mixed records in the original validator; never infer a
+ // missing status or reason or silently drop a check.
+ if(!rows.every(row=>Array.isArray(row)&&row.length===3))return value;
+ return {...record,sourceChecks:rows.map(([ref,status,reason])=>({ref,status,reason}))};
+}
 export const PREMISE_REVIEW_PROTOCOL_REASON = '本题材独立审核的证据协议未完成';
 
 export interface PremiseSelectionReview {
