@@ -9743,9 +9743,14 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
         // Bulk audit uses the exact merged content/scenes that persistence will consume.
         // Per-chapter verdicts do not substitute for reconciliation across the whole framework.
         const pendingOutlineFacts = preparedChapters.map(chapter => ({ order: chapter.order, title: chapter.title, content: chapter.content, scenes: chapter.scenes }));
+        let aggregateHadProvenConflict=false;
         try{
         await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
           currentWorldForOutlineReview, pendingOutlineFacts, async (batch, review) => {
+            // This callback runs only for evidenced contradictions, not
+            // network errors or an invalid review protocol. Cached chapter
+            // projections become stale whether the repair succeeds or fails.
+            aggregateHadProvenConflict=true;
             const repair = await this.repairPendingOutlineFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
               currentWorldForOutlineReview, pendingOutlineFacts, batch, review);
             for (const candidate of repair.candidates) {
@@ -9756,13 +9761,24 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             }
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
           });
+          if(aggregateHadProvenConflict){
+            // The accepted final candidate now differs from the per-chapter
+            // draft. Keep the source-bound chapter responsibility plan, but
+            // never replay stale chapter outcome or fact-ledger receipts.
+            try{outlineWork.invalidateChapters(projectId);}
+            catch(cleanError){this.logger.warn('合并修复后旧章纲检查点清理失败：'+String(cleanError));}
+          }
         }catch(error){
-          // A proven aggregate fact contradiction means some supposedly
-          // accepted chapter work is not final, so a later recovery must
-          // regenerate it; transport failures retain earlier good work.
-          if(isGateRejection(error)){
+          // outlineFactGateError uses outlineFactFailureKind, not the prose
+          // quality Gate's isGateRejection flag. The previous predicate
+          // silently left proven conflicting chapter checkpoints reusable.
+          // A transport/contract failure does not invalidate valid chapters.
+          const confirmedConflict=aggregateHadProvenConflict
+            ||(error&&typeof error==='object'&&(error as any).outlineFactFailureKind==='fact_conflict')
+            ||isGateRejection(error);
+          if(confirmedConflict){
             try{outlineWork.clear(projectId);}
-            catch(cleanError){this.logger.warn('失效章纲检查点清理失败：'+String(cleanError));}
+            catch(cleanError){this.logger.warn('有证据冲突的章纲检查点清理失败：'+String(cleanError));}
           }
           throw error;
         }
