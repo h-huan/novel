@@ -39,7 +39,7 @@ import { premisePayoffReviewDirective, premisePayoffReviewIssues, materializePre
 import { quarantineIncompletePremiseReviews } from './premise-review-quarantine';
 import { createReviewLimiter } from './review-limiter';
 import { DiscoveryCardWork, type DiscoveryCardResult } from './discovery-card-work';
-import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity } from './idea-discovery-contract';
+import { ideaDiscoveryAuthorContext, ideaCardHistoryTitleReminder, ideaPreselectionCapacity, sourceReadyScoredPremiseSelection } from './idea-discovery-contract';
 import { ideaReviewResponseExample } from './idea-review-evidence';
 import { foreshadowEnrichmentSources, foreshadowEnrichmentOutputIssues } from './foreshadow-enrichment-source';
 import { ideaReaderGoalRepairPlan,applyIdeaReaderGoalRepair,ideaMissingPresentationRowsPlan, missingIdeaPresentationRetryPrompt,applyIdeaMissingPresentationRows } from './idea-review-protocol-repair';
@@ -5169,6 +5169,13 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             premiseId: 'P1',
             workingTitle: '4-16字暂名',
             premiseMaturityScore: 0,
+            // Optional source-owned metadata can avoid the second full-pool
+            // model selection. Unbound plans are ignored; they never pass a
+            // semantic review without the existing independent model Gates.
+            readerQuestion:'首屏触发的具体危险及未解结果是什么？',
+            causalPlan:[{action:{field:'activeChoice',quote:'直接摘录主动选择节已经执行的行动'},
+              conditions:[{field:'protagonistSituation',quote:'直接摘录处境触发节已有的必要条件'}],
+              result:{field:'payoff',quote:'直接摘录反转兑现节已经发生的核心结果'}}],
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
@@ -5196,6 +5203,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、阅读兑现与实质差异比较本批候选，弱方案在本次生成内重构；输出pool按premiseMaturityScore由高到低排序，不输出selectedPremises、评分分析或淘汰过程；排序不能替代后续独立审核。\n'+PREMISE_READER_VALUE_POLICY,
            'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段和premiseMaturityScore（0到100整数；按标题及首屏的真实点击动机、主动选择、因果可执行、兑现代价、平台分类及实质差异五项各20分合计；只按这五节已经写出的实际事件评分，缺乏可定位事实证据的维度计0分，不以自称创新、专业术语或将来能补写的桥梁给分；不得用分数补足缺失条件）以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle须为4-16字，按已注入的唯一读者竞争力规则从首节实际发生的事件提炼标题；单独看标题就能理解人物眼前的损失或反常后果。只写职业、隐藏能力、预知时间却不说具体危险、普通道具或谜语的标题，点击动机维度不能自评为高分；本次生成内改写既有事实的标题表达，不补造事件、不剧透终局。五节合计优先300—450汉字；首节第一句直接写人物眼前已经发生的具体反常事件、利益或关系损失，未读概要也能看懂风险与接下来必须做的选择，不能从人物职业介绍或背景设定开篇；后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。尤其倒查实测失败的四种源头：甲的行动是否真的把决定性信息传到乙、乙为何改变决定；证据究竟证明哪个人在何时做了什么，记录仅表明某人到场不能直接证明其身份及罪责；同一封信、样本或原始证据在各节的持有人、是否发出、毁损和可用性必须连续，已经发出或交付的原件不能仍留在主角手中作第二次证明，除非原池已写明实际取回或另有可核副本；能力触发的人、物、范围和时间在前后节必须一致。最终的处分、任命和转移财产还须分别落实有权决定者的实际采纳与生效条件，不能拿主线调查成功自动担保。这里发现不成立的结果，就在本次原池生成调用内改为仍然真实、有分量的兑现；不得把来源缺口交给后续选优、成卡或独立终审。',
+          '【随原池同步提供因果引用以免重复全池选优】每项readerQuestion只从已写首屏问题提炼具体追问，不编造条件。causalPlan应在同次原池生成中按真正状态变化填写一环或必要的多环，每环action、conditions、result使用{field,quote}逐字引用当前候选五节投影后的原文，最后必须指向实际payoff；不得摘取结果作行动或条件。引用字段和五节的服务器固定映射如下：'+JSON.stringify(SOURCE_BINDING_EXAMPLE)+'。原池自身故事不足以形成可信关键行动—条件—结果时不虚构引文，保持该候选可由后续独立筛选淘汰。原池已提供且通过全部引用协议的足量高分题材会由服务器直接按评分选优，再照常经过独立来源、因果兑现、分类、流派、同构及完整卡终审；不能因这条捷径把自评分当作合格判定。',
           '按已注入GEN-002完成分类、因果、事实一致与差异核对；每项先确定具体可兑现的结果，倒查执行者、信息实际传递、决定权限与对手真实反制；承担结果的人物选择与必要条件须已实际发生，尤其反问既有行动全部成立而所称结果仍可能不成立的缺口，再将必要事实写入前四节，不能仅在末节贴类型标签。同一流派可有共同的类型期待，但同批各项应具有不同的人物欲望、主动策略、对手响应、局势转向与实际代价；职业、年代、道具变化不能把同一取证翻案链伪装成新题材。仅有能力展示、众人改口而没有后续现实阻力或可信兑现的，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。只输出最终故事事实，不输出检查过程，不增加调用。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
@@ -5384,6 +5392,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
                 premiseId: 'P' + (candidatePool.length + 1),
                 workingTitle,
                 storyCore,
+                ...(typeof item.readerQuestion==='string'?{readerQuestion:item.readerQuestion}:{}),
+                ...(Array.isArray(item.causalPlan)?{causalPlan:item.causalPlan}:{}),
                 storyCategoryId,
                 storyCategory,
               }, discoveryCategories, false);
@@ -5646,6 +5656,21 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
         let selectionFailureStopReason='fixed_pool_selection_failed';
         let initialCausalPreparation:PremiseSourcePreparation|undefined;
         let initialSelection = await (async () => {
+          // Original pool already owns scores and may own exact causal
+          // references. Skipping the redundant LLM selector is safe ONLY
+          // when sufficient top-ranked candidates pass the original strict
+          // projection/causal-index protocol. All independent semantic Gates
+          // still run below, with identical funded review capacity.
+          const sourceReady=sourceReadyScoredPremiseSelection(rankedOriginalPool,
+            premiseMaturityScores,preselectionTarget,discoveryCategories);
+          if(sourceReady){
+            Object.assign(poolGenerationAudit,{strategy:'scored_pool_source_ready_selection',
+              sourceReadyCount:sourceReady.selected.length,
+              selectorModelCallsSaved:1});
+            selectionWallMs=Date.now()-selectionStartedAt;
+            this.logger.log('idea-discover: 原池因果引用与成熟度足量，免除重复全池模型选优；独立来源及全部质量门不变。');
+            return sourceReady;
+          }
           try {
             const selectionResponse = await this.realLLM.generate({
               prompt: buildPremiseSelectionPrompt('selection', { pool: rankedOriginalPool,targetCount:preselectionTarget }),
@@ -6508,6 +6533,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     bound=bindPremiseCategory({
                       premiseId:'R-P'+nextId,
                       workingTitle:title,storyCore:core,
+                      ...(typeof seed.readerQuestion==='string'?{readerQuestion:seed.readerQuestion}:{}),
+                      ...(Array.isArray(seed.causalPlan)?{causalPlan:seed.causalPlan}:{}),
                       storyCategoryId:variedCategories?seed.storyCategoryId:'K1',
                       storyCategory:variedCategories?undefined:dto.storyCategory,
                     },discoveryCategories,false);
