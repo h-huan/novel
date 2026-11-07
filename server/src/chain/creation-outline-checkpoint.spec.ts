@@ -1,8 +1,20 @@
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CreationOutlineCheckpoint } from './creation-outline-checkpoint';
+import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict } from './creation-outline-checkpoint';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
+
+describe('fact-based outline checkpoint invalidation',()=>{
+  it('reuses vetted chapters after transport or reviewer protocol failures',()=>{
+    expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'review_unavailable'})).toBe(false);
+    expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'review_contract_invalid'})).toBe(false);
+    expect(hasProvenOutlineCheckpointConflict(new Error('DeepSeek 500'))).toBe(false);
+  });
+  it('invalidates confirmed contradictory facts even though they are not prose Gate rejections',()=>{
+    expect(hasProvenOutlineCheckpointConflict({outlineFactFailureKind:'fact_conflict'})).toBe(true);
+    expect(hasProvenOutlineCheckpointConflict(new Error('aggregate repair failed'),true)).toBe(true);
+  });
+});
 
 describe('creation outline checkpoints (noncanonical)', () => {
   let db: InstanceType<typeof DatabaseSync>;
