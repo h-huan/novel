@@ -64,9 +64,10 @@ export function chapterResponsibilityAuditOutputContract(
  };
  return '只输出JSON对象：无真实冲突时返回 '
   +JSON.stringify({consistent:true,contradictions:[],...condition('supported')})
-  +'；确有冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
+  +'；仅有实际条件取得缺口、但无被违反的CR规则时返回 '+JSON.stringify({consistent:false,contradictions:[],...condition('gap')})
+  +'；确有世界规则冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
   +'。以上仅为字段结构示例，不是对任一章节的事实判定；不得复制示例引用地址或假定全部章节supported。'
-  +' criterion必须是已有判据编号，冲突需有真实冻结来源的逐字双边证据。'
+  +' gap始终是未通过的规划问题，必须回到现有章责修订；不得因找不到CR冲突证据而改成supported。contradictions仅记录有CR及冻结原文双边证据的真实规则冲突；纯规划缺口时保持空数组，不伪造规则。criterion必须是已有判据编号，真实冲突需有冻结来源的逐字双边证据。'
   +(entryExitContract?
    ' conditionChecks必须每章一项（每章恰好一项），包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
    +' 普通自主行动且不依赖外部资格时用not_required并说明，不能为凑supported虚构已取得条件。'
@@ -176,7 +177,7 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
     `【待审查章节分工】${JSON.stringify(input.plan)}`,
-    input.entryExitContract ? '本次为尚未展开正文的进入/退出规划合同审查：核对每章责任中明确安排执行的动作能否满足实际取得条件，以及承接前章规划结果时条件是否仍有效。不能要求未写出的正文已经发生，但不能把希望、前置条件名称或出口目标当作已计划的执行动作。逐章判断完整exitState能否由这些可执行的动作与真实资源产生。普通自主行动无外部许可依赖时用not_required并说明；涉及他人决定、权限、移交和归责须有独立实际桥接，缺少则报告gap及有依据的具体冲突。consistent=true也必须逐章输出conditionChecks；JSON字段遵循末尾唯一格式示例。' : '',
+    input.entryExitContract ? '本次为尚未展开正文的进入/退出规划合同审查：核对每章责任中明确安排执行的动作能否满足实际取得条件，以及承接前章规划结果时条件是否仍有效。不能要求未写出的正文已经发生，但不能把希望、前置条件名称或出口目标当作已计划的执行动作。逐章判断完整exitState能否由这些可执行的动作与真实资源产生。普通自主行动无外部许可依赖时用not_required并说明；涉及他人决定、权限、移交和归责须有独立实际桥接，缺少则报告gap；仅当另有冻结来源证据证明违反CR规则时才报告contradictions。不能把普通取得缺口伪造为规则冲突。consistent=true也必须逐章输出conditionChecks；JSON字段遵循末尾唯一格式示例。' : '',
     "逐章按下列判据检查：",
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
@@ -206,10 +207,10 @@ export interface ChapterResponsibilityRepairPromptInput {
 /** 语义修复提示词：修订边界与判据同源，不再内联第二份走样表述。 */
 export function buildChapterResponsibilityRepairPrompt(input: ChapterResponsibilityRepairPromptInput): string {
   return [
-    "修订当前全书章节分工，只处理审查明确指出的世界规则、时间因果和跨章边界冲突；保留没有被指出的问题章节、已确认人物、真相、核心反转与结局，不得把冲突任务换一种说法保留。",
+    "修订当前全书章节分工，只处理审查明确指出的世界规则、时间因果、跨章边界冲突或缺失的条件取得动作；保留没有被指出的问题章节、已确认人物、真相、核心反转与结局，不得把冲突任务换一种说法保留。",
     `【本轮修复策略】${input.strategyDirective}`,
     `【可执行修复合同】${JSON.stringify(input.issueContracts)}`,
-    "合同中的 forbiddenTask 必须从问题章删除，requiredReplacement 是已经过审查器约束的执行方式，必须落实而非当作参考；retain 只能保留目标，不能保留违规机制。requiredReplacement是待实现的约束，不是其机制已经成立的证明。修订后沿受影响行动到最终exitState核对整条必要条件链，不能只补被点名的一步就重复结论；普通自主行动不额外追加程序。必要条件落实为人物行动、可用资源与具体结果，不把自检过程写成正文解释段。",
+    "合同中实际存在 forbiddenTask 的规则冲突必须从问题章删除违规机制，requiredReplacement 是受审查器约束的替代方向；仅有 raw 条件取得缺口时不得虚构 forbiddenTask，也不能任意删除原已成立行动，应在既定资源与人物动机内补齐实际取得/传递/生效动作或修正尚未生效的阶段结果。retain 只能保留已确定的目标，不能保留违规机制。requiredReplacement不是其机制已经成立的证明。修订后沿受影响行动到最终exitState核对整条必要条件链，不能只补被点名的一步就重复结论；普通自主行动不额外追加程序。必要条件落实为人物行动、可用资源与具体结果，不把自检过程写成正文解释段。",
     `【当前章节分工】${JSON.stringify(input.currentPlan)}`,
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
