@@ -9467,7 +9467,26 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             }
           }
           const previousChapterRunIds=new Set(shortOutlineSourceRunIds);
-          const chapterResult = await this.llmCallWithRetry<any>(
+          // A valid structured draft must survive a later unavailable causal/fact
+          // reviewer. It is never canonical and still repeats ALL original gates.
+          const pendingDraft=outlineWork.load<{chapter:Record<string,any>;runId:string}>(
+            projectId,'chapter_draft_'+order,detailSourceHash);
+          let reusableDraft:typeof pendingDraft=null;
+          if(pendingDraft?.runId && pendingDraft.chapter && assessChapter(pendingDraft.chapter).length===0){
+            try{
+              this.generatedCanonGuard.assertStructuredCanCommit({
+                projectId,runId:pendingDraft.runId,
+                expectedStages:['outline'],expectedScenarios:['outline'],
+              });
+              reusableDraft=pendingDraft;
+            }catch(error){
+              this.logger.warn('已留存章纲草稿的原始生成凭证不再有效，将重新生成第'+(order+1)+'章：'+String(error));
+            }
+          }
+          if(reusableDraft)this.logger.log('创建大纲：复用未确稿的第'+(order+1)+'章结构有效草稿；全部事实、行动及最终审核仍需重新通过');
+          const chapterResult = reusableDraft
+            ? {data:reusableDraft.chapter,warnings:[] as string[],runId:reusableDraft.runId,validationIssues:[] as string[]}
+            : await this.llmCallWithRetry<any>(
             `第${order + 1}章详细大纲`,
             chapterPrompt + chapterJsonExample,
             {
@@ -9517,6 +9536,14 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
           if (chapterIssues.length > 0 || !chData) {
             throw new Error(`第${order + 1}章详细大纲多次修复仍未能通过完整性校验（${chapterIssues.join('；') || '解析为非法JSON'}），未写入任何大纲。请稍后单独重生成该章或检查 LLM 返回。`);
           }
+          // Persist transport-only reuse BEFORE expensive independent reviews.
+          // An unavailable reviewer can then resume the same immutable draft
+          // without repeating the chapter-generation model call.
+          if(!reusableDraft && chapterResult.runId){
+            try{outlineWork.save(projectId,'chapter_draft_'+order,detailSourceHash,
+              {chapter:chData,runId:String(chapterResult.runId)});}
+            catch(error){this.logger.warn('未确认章纲草稿检查点写入失败：'+String(error));}
+          }
 
           // 在每章接力点审查时间与累计事实，阻止错误进入后续章节。
               // 在每章接力点按同一事实台账核查，修的是当前章，不改已确认题材或前章。
@@ -9546,6 +9573,10 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
           let dependencyCheck = await reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions);
           let factCheck = dependencyCheck.facts;
           if (!factCheck.consistent || factCheck.contradictions.length || dependencyCheck.actionFailure) {
+            // Proven defects cannot be replayed as an unmodified pending draft.
+            // A transport/unknown verdict throws before this branch and keeps it.
+            try{outlineWork.discard(projectId,'chapter_draft_'+order);}
+            catch(error){this.logger.warn('有证据缺陷的未确认章纲草稿清理失败：'+String(error));}
             const defects = dependencyCheck.defects;
             const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure);
             const citedRepairPaths=outlineFactRepairTargetPaths(chData,actionRepairEvidence);
@@ -9722,6 +9753,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
               acceptedSource:acceptedChapterSource,ledger:priorOutlineFactLedger,
               runIds:[...shortOutlineSourceRunIds].filter(id=>!previousChapterRunIds.has(id)),
             });
+            outlineWork.discard(projectId,'chapter_draft_'+order);
           }catch(error){this.logger.warn('第'+(order+1)+'章恢复检查点写入失败，不影响原有正式审核：'+String(error));}
         }
 

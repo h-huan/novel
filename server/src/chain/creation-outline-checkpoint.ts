@@ -56,6 +56,12 @@ export class CreationOutlineCheckpoint {
       .run(projectId, stageKey, sourceHash, JSON.stringify(payload), new Date().toISOString());
   }
 
+  /** Remove a single no-longer-usable stage without losing earlier approved work. */
+  discard(projectId: string, stageKey: string): void {
+    this.db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=? AND stage_key=?')
+      .run(projectId, stageKey);
+  }
+
   /** Aggregate repair changed already vetted chapter projections. Retain the
    * immutable approved responsibility plan, but never reuse stale chapter facts. */
   invalidateChapters(projectId: string): void {

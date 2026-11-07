@@ -69,6 +69,24 @@ describe('creation outline checkpoints (noncanonical)', () => {
     expect(work.load('p2','chapter_0',key)).toEqual({outcome:'other project'});
   });
 
+  it('replays a same-source pending chapter only until reviewed or proven defective', () => {
+    const source=CreationOutlineCheckpoint.fingerprint({story:'locked',chapter:1,prior:'A'});
+    const changed=CreationOutlineCheckpoint.fingerprint({story:'locked',chapter:1,prior:'B'});
+    work.save('p1','chapter_draft_0',source,{chapter:{content:'draft',scenes:[1],characterActions:[1]},runId:'run-1'});
+    expect(work.load('p1','chapter_draft_0',source)).toEqual({
+      chapter:{content:'draft',scenes:[1],characterActions:[1]},runId:'run-1',
+    });
+    expect(work.load('p1','chapter_draft_0',changed)).toBeNull();
+    work.save('p1','chapter_0',source,{chapter:'independently reviewed'});
+    work.discard('p1','chapter_draft_0');
+    expect(work.load('p1','chapter_draft_0',source)).toBeNull();
+    expect(work.load('p1','chapter_0',source)).toEqual({chapter:'independently reviewed'});
+    work.save('p1','chapter_draft_1',source,{chapter:'stale'});
+    work.invalidateChapters('p1');
+    expect(work.load('p1','chapter_draft_1',source)).toBeNull();
+    expect(work.load('p1','chapter_0',source)).toBeNull();
+  });
+
   it('does not keep orphaned checkpoints after project removal', () => {
     const key = CreationOutlineCheckpoint.fingerprint('stage');
     work.save('p1', 'chapter_0', key, { valid: true });
