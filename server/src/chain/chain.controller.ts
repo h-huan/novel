@@ -6859,6 +6859,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           error: structuredCards.length+supplementaryStructured.length === 0
             ? `本批已选的 ${selectedPremises.length} 个题材全部结构化失败：${rejectionSummary}。保留失败证据，不用旧批次或弱卡补数。`
             : `本批并发完整卡终审后仍无合格题材：${rejectionSummary}；不使用卡后候补或弱卡补数。`,
+          qualityWarning: appealGate.qualityWarning,
           appealGate,
         };
       }
@@ -6881,7 +6882,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // three approved stories as a successful five-story request.
         appealGate.returned = 0;
         return { success: false, status: 'incomplete', ideas: [],
-          qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate };
+          qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning,
+          qualityWarning: warning, error: appealGate.repairError||null, appealGate };
       }
       this.logger.log(`idea-discover: 并发结构化和独立终审通过 ${qualifiedCount} 个，仅返回优选 ${acceptedWithAudit.length}/${requestedCount} 个`);
       return {
