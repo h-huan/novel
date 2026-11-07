@@ -6566,10 +6566,23 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             const refillTarget=Math.min(rankedRefillPool.length,desiredSupplement,
               affordableFullCardRefillCount(unusedSeeds.length,
                  presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode));
+            // The original pool and its bounded refill already contain source-
+            // owned scores and causal indices. Use the SAME strictly validated
+            // fast path as initial selection; a further paid global selector
+            // must not repeat completed work. It is never a semantic verdict.
+            const sourceReadyRefill=sourceReadyScoredPremiseSelection(rankedRefillPool,
+              premiseMaturityScores,refillTarget,unusedSeeds.length,discoveryCategories,
+              selectedPremises.map(premise=>String(premise.storyCategory)));
             if(refillTarget>=missingAfterFirstGate
               &&presentationBudget.remaining>=refillTarget+minimumCardReviewCalls(refillTarget,refillTarget)
-              &&reselectionCompletionBudget.remaining>=1){
+              &&(sourceReadyRefill!==null||reselectionCompletionBudget.remaining>=1)){
               try{
+                let withPlans=sourceReadyRefill;
+                if(withPlans){
+                  fulfillmentActions.push({phase:'refill_from_existing_scored_pool',
+                    selected:withPlans.selected.length,selectorModelCallsSaved:1});
+                  this.logger.log('idea-discover: 原有未选候选的因果引用与评分齐备，跳过重复补位模型选优；独立审核仍全部执行');
+                }else{
                 const selectionAnswer=await this.realLLM.generate({
                   prompt:buildPremiseSelectionPrompt('selection',{pool:rankedRefillPool,
                     targetCount:refillTarget,minimumCount:missingAfterFirstGate,
@@ -6595,10 +6608,11 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                   }),
                 },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate,
                   selectedPremises.map(premise=>String(premise.storyCategory)));
-                const withPlans={...prelim,selected:rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)
+                withPlans={...prelim,selected:rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)
                   .map(item=>bindPremiseCausalPlan({
                   ...item,causalPlan:source.find((row:any)=>row?.premiseId===item.premiseId)?.causalPlan,
                 }))};
+                }
                 // Refill may contain an OPTIONAL hedge beyond the real missing delivery
                 // slots. One bad citation in that surplus must not invalidate
                 // other independently reviewable premises. The unchanged
