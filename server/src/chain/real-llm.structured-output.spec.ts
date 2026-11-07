@@ -441,6 +441,31 @@ describe('full field coverage from unique literal chapter outcome reviews',()=>{
  });
 });
 
+describe('truncated initial causal proof stays compact within its existing second call',()=>{
+ it('restarts a complete compact review instead of asking to repair nonexistent rows',async()=>{
+  const chapter={chapterNumber:4,chapterFunction:'climax',
+   content:'职员拿着核对材料递交给窗口工作人员，工作人员当面收下材料。',
+   scenes:[{outcome:'工作人员正式登记收件并出具回执。'}]};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const action=anchors.find(row=>row.path==='0.content')!;
+  const resultId=causalChapterResultAnchors(anchors,0)[0].id;
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockRejectedValueOnce(new Error('结构化生成因输出长度被截断'))
+   .mockResolvedValueOnce({content:JSON.stringify({causalAudit:{
+    status:'evaluated',reason:'逐项核对收件手续是否有充分证据',
+    proofRows:[[1,action.id,'','gap','仅有当面交接，尚无正式登记与回执成立的原文证据']],
+   }})});
+  (service as any).generateInternal=generate;
+  const reviewed=await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+   JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate.mock.calls[1][0].prompt).toContain('proofRows逐行返回服务器结果唯一序号');
+  expect(generate.mock.calls[1][0].prompt).toContain('【完整章节结构，先按字段与事件顺序理解，后选择引文地址】');
+  expect(reviewed.audit?.transitions?.[0]).toMatchObject({resultAnchorId:resultId,status:'gap'});
+  expect(reviewed).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
+ });
+});
+
 describe('decisive planning action proof', () => {
   it('rejects a supplied cross-chapter action ID even when both chapters have identical prose',async()=>{
     const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',

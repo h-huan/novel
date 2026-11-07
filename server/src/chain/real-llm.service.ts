@@ -801,7 +801,12 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     for (let attempt = 0; attempt < (singlePass ? 1 : 2); attempt++) {
       try {
         const countercheck = attempt > 0 && !!resultField;
-        const compactPlanningProof = !resultField && attempt===0;
+        // A transport failure left no reviewed rows to repair. Reuse the already
+        // allowed correction call for a fresh compact proof with complete
+        // source context; switching to verbose transitions only repeats the
+        // output truncation without supplying the absent first verdict.
+        const restartAfterUnusableVerdict=attempt>0&&!resultField&&!audit;
+        const compactPlanningProof = !resultField && (attempt===0||restartAfterUnusableVerdict);
         const prompt = countercheck ? {
           systemPrompt: '你是独立因果反证核查员，前一份审查没有权威。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。只报告有原文证据的矛盾或缺少必要条件，不评分，不改写，不要求解释未到期谜底。',
           prompt: STORY_CAUSAL_STATE_POLICY + '\n对完整章纲及原审查逐项反证。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？目的、未来安排、心理和线索埋设不是已兑现的外部结果。先明确每个结果成立的必要条件，再寻找实际满足它的证据；不能重复新声称的能力改变作为机制。心理选择和日常直接结果可以引用本身实际叙述作为bridgeAnchorId，不要求外部手续，但supported不能漏掉引用地址。JSON:{"causalAudit":{"status":"evaluated","reason":"实际核算依据","transitions":[{"chapterNumber":1,"beforeStateAnchorId":"body完整行动顺序地址","requiredCondition":"成立必要条件","actionAnchorId":"body行动地址","resultAnchorId":"指定出口结果地址","bridgeAnchorId":"实际满足条件地址；gap或planned为空","status":"supported|gap|planned","reason":"实际依据"}]}}。\n原审查仅供核对，允许据原文推翻：' + JSON.stringify(audit)
@@ -814,7 +819,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField, compactPlanningProof, requiredResultIds);
         const response = await this.generateInternal({ ...prompt, deadlineAt:request.deadlineAt,timeout:request.timeout, scenario: 'review', injectStandard: false,
           systemPrompt: prompt.systemPrompt + '\n独立核对关键场景的必要因果，不评分、不改写场景。',
-          prompt: (attempt===0||countercheck
+          prompt: (attempt===0||countercheck||restartAfterUnusableVerdict
               ?'\n【完整章节结构，先按字段与事件顺序理解，后选择引文地址】'+body+'\n'
               :'\n【引用合同纠错】原章纲全部原文及路径已在下方证据目录；本次只修点名行，不重复传输整份章纲。\n')
             + prompt.prompt + (compactPlanningProof ? '\nproofRows逐行返回服务器结果唯一序号、行动编号、桥接编号、状态和理由；序号按下方结果目录从1连续编号，每项只能出现一次，' : '\n每项transitions另带chapterNumber，') + '须覆盖这些关键章：' + JSON.stringify(chapterEvidenceCatalog.filter(entry=>entry.resultAnchorIds.length).map(entry=>entry.chapterNumber))
@@ -827,7 +832,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           metrics: { ...request.metrics, runId: run.id, stepKey: countercheck ? 'framework_action_state_countercheck' : 'framework_action_proof' } });
         const value = JSON.parse(response.content);
         const rawVerdict=countercheck ? preserveCausalCountercheckAnchors(audit,value.causalAudit,body,sources)
-          : attempt ? applyCausalAuditRepair(audit,checked.errors,value) : decodePlanningProofRows(value.causalAudit,chapterEvidenceCatalog.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId}))));
+          : attempt&&!restartAfterUnusableVerdict ? applyCausalAuditRepair(audit,checked.errors,value) : decodePlanningProofRows(value.causalAudit,chapterEvidenceCatalog.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId}))));
         // Literal model quotes can be assigned a server-owned result ID only
         // when unique in the same chapter. Unknown, paraphrased or conflicting
         // IDs remain invalid; no causal proof or outcome is supplied by code.
