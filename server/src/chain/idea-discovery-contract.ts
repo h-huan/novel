@@ -347,6 +347,7 @@ export function sourceReadyScoredPremiseSelection(
   target: number,
   poolTarget: number,
   categoryOptions?: readonly string[],
+  previouslyVettedCategories: readonly string[] = [],
 ): PremiseSelectionResult | null {
   if (!Number.isSafeInteger(target) || target < 1 || pool.length < target
     || !Number.isSafeInteger(poolTarget) || poolTarget < target) return null;
@@ -379,7 +380,7 @@ export function sourceReadyScoredPremiseSelection(
   try {
     return normalizePremiseSelectionPayload({
       pool,selectedPremises:projectPremiseSourceChoices(chosen.map(item=>item.row),pool),
-    },target,poolTarget,categoryOptions,target);
+    },target,poolTarget,categoryOptions,target,previouslyVettedCategories);
   } catch { return null; }
 }
 
