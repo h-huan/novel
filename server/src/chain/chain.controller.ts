@@ -6869,6 +6869,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         const warning = '故事题材数量不足：请求 ' + requestedCount + '，最终通过 ' + selectedAccepted.length
           + '，缺额 ' + (requestedCount-selectedAccepted.length) + '。未通过原因：' + reason;
         this.logger.warn('idea-discover: ' + warning);
+        // Keep the real shortfall and its actual blocker in the persisted
+        // run-level audit; a null top-level error hid the exact refill failure.
+        Object.assign(appealGate,{qualityWarning:warning,
+          ...(appealGate.repairError?{error:appealGate.repairError}:{})});
         // Only a fully satisfied requested batch is a successful delivery.
         // Keep independently approved cards in a diagnostic/recovery field so
         // the UI can offer missing-slot continuation without misrepresenting
