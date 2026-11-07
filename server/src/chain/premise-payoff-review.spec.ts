@@ -21,6 +21,11 @@ it('keeps a substantive gap negative when the model omits its repair route, and 
  expect(premisePayoffReviewDirective(selection)).toContain('gapRepair');
  expect(premisePayoffReviewDirective(selection)).toContain('"gapRepair":"replace_from_pool"');
 });
+it('keeps the exact transfer and conditional-decision prerequisites in the shared source/causal review standard',()=>{
+  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('电子照片、消息的发送不等于实物或原件已经转交');
+  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('一方明确提出先交付、先核验或先取得同意的交换条件');
+  expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('否则只可保留等待、协商或部分进展');
+});
 it('keeps every payoff and plan-external result check while trimming verbose supported explanations',()=>{
  const directive=premisePayoffReviewDirective(selection);
  expect(directive).toContain('【保持逐项实审，压缩重复输出】');
