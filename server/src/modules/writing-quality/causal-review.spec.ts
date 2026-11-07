@@ -791,7 +791,7 @@ it('large outline audit keeps every exact result but avoids resending all action
 
 it('decodes only lossless negative-proof transport and retains full causal and chapter Gates',()=>{
  const chapters=[{chapterNumber:1,content:'她先提交申请，机关尚未作出决定。',
-   scenes:[{outcome:'申请最终被批准，但本章没有记录谁作出批准。'}]}];
+   scenes:[{outcome:'申请最终被批准却无人提供审批依据。'}]}];
  const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
  const inventory=causalChapterEvidenceCatalog(chapters,anchors).entries;
  const expected=inventory.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({
