@@ -6448,8 +6448,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
               sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,
               discoveryBudget.reviewGroupingMode,missingAfterFirstGate));
           fulfillmentStopReason='bounded_refill_unavailable';
-          if(desiredSupplement>=missingAfterFirstGate
-            &&reselectionCompletionBudget.remaining>=1){
+          // Source-bound scored originals need zero paid selector calls. The existing
+          // independent reviews still run; only the fallback selector consumes
+          // reselection credit when the original causal index is insufficient.
+          if(desiredSupplement>=missingAfterFirstGate){
             // The original pool is first choice. A surplus hedge is NOT a
             // shortage: do not generate new candidates while unused originals
             // can cover the actual mandatory shortfall. Every selected original
@@ -6730,7 +6732,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const prepareRefill=(gap:number,preparing=false)=>runBoundedRefill(gap,preparing).catch(error=>{refillPreparationError=error;});
       const canPrepareKnownShortfall=(gap:number)=>{
         const pendingCapacity=requestedCount-accepted.length;
-        return gap>0&&reselectionCompletionBudget.remaining>=1
+        return gap>0
           &&affordableFullCardRefillCount(pendingCapacity,presentationBudget.remaining,discoveryBudget.presentationBatchSize,discoveryBudget.reviewGroupingMode)>=pendingCapacity
           &&affordableReviewedPremiseCount(pendingCapacity,sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,discoveryBudget.reviewGroupingMode,pendingCapacity)>=pendingCapacity;
       };
