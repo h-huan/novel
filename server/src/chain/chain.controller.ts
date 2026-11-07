@@ -6850,7 +6850,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (selectedAccepted.length === 0) {
         const rejectionSummary = finalRejectedReasons.slice(0, 10).join('；') || uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
         this.logger.warn(`idea-discover: 并发完整卡独立终审后 0/${requestedCount} 通过：${rejectionSummary}`);
-        Object.assign(appealGate,{qualityWarning:'故事题材数量不足：请求 '+requestedCount+'，实际合格 0；'+rejectionSummary,
+        const zeroQualifiedWarning='故事题材数量不足：请求 '+requestedCount+'，实际合格 0；'+rejectionSummary;
+        Object.assign(appealGate,{qualityWarning:zeroQualifiedWarning,
           error:appealGate.repairError||rejectionSummary,partial:true});
         return {
           success: false,
@@ -6859,7 +6860,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           error: structuredCards.length+supplementaryStructured.length === 0
             ? `本批已选的 ${selectedPremises.length} 个题材全部结构化失败：${rejectionSummary}。保留失败证据，不用旧批次或弱卡补数。`
             : `本批并发完整卡终审后仍无合格题材：${rejectionSummary}；不使用卡后候补或弱卡补数。`,
-          qualityWarning: appealGate.qualityWarning,
+          qualityWarning: zeroQualifiedWarning,
           appealGate,
         };
       }
