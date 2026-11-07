@@ -9115,7 +9115,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         const planSourceHash=CreationOutlineCheckpoint.fingerprint({
           canonicalCreativeBrief,worldRowForOutline,outlineCharacterSources,
           targetWords:dto.targetWords,constitution,styleInstruction,
-          executionStandardForReview,chapterResponsibilityPlanningDirective(false),
+          executionStandardForReview,chapterPlanningPolicy:chapterResponsibilityPlanningDirective(false),
           chapterWordMin:CHAPTER_WORD_MIN,chapterWordMax:CHAPTER_WORD_MAX,
           minChapters,maxChapters,recommendedChapters,isShort,
         });
