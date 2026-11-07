@@ -107,7 +107,7 @@ export function chapterDetailStructureIssues(candidate: Record<string, any> | nu
     // size, not ordinary concise dialogue references or a rich event chain.
     const outlineText=String(content);
     const quotedDialogues=(outlineText.match(/[“「『][^”」』\n]{2,}[”」』]/g)||[]).length;
-    const expandedProse=outlineText.length>Math.max(2200,Math.floor(context.allowedMax*0.5))
+    const expandedProse=outlineText.length>Math.max(1800,Math.floor(context.allowedMax*0.38))
       && quotedDialogues>=10;
     if(expandedProse)issues.push('content疑似已展开成章节对白正文：详细章纲必须概括当前行动、成立条件、各自结果及推进代价；targetWords是以后正文目标，不是本次content篇幅。请收敛为事件链，不删减真实因果与章节职责');
   }
