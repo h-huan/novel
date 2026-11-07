@@ -5662,7 +5662,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           // projection/causal-index protocol. All independent semantic Gates
           // still run below, with identical funded review capacity.
           const sourceReady=sourceReadyScoredPremiseSelection(rankedOriginalPool,
-            premiseMaturityScores,preselectionTarget,discoveryCategories);
+            premiseMaturityScores,preselectionTarget,premisePoolSize,discoveryCategories);
           if(sourceReady){
             Object.assign(poolGenerationAudit,{strategy:'scored_pool_source_ready_selection',
               sourceReadyCount:sourceReady.selected.length,
