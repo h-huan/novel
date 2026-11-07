@@ -9418,6 +9418,7 @@ ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, 
 ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩子；兑现本段压力与行动，不提前泄露全篇终局】${String(dto.selectedIdea.hook)}`:''}
 【已通过前置审查的完整本章合同；条件须在实际事件中取得，不是结果自证】${JSON.stringify(creationResponsibilityPlan([expectedChapter]).map(row=>({...row,chapter:order+1}))[0])}
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
+【章纲与正文的唯一层级】本次生成的是事件链章纲，targetWords只用于规划以后正文的字数，不用于扩写当前content。按事件先后清楚记录行动主体、客观成立条件、对手反制和实际结果，必要时包含短引语但不写长段场景对白、第一人称整场叙述或完整章节正文；scenes、characterActions等从同一事件链投影。长度随必要事件复杂度变化，不靠压缩省略因果。
 【本章职责的实际完成条件】先按已确认前章事实核对该任务是否已经完成。若前章已通过联名、决定、交付或对手改口实现目标，本章不能再把保管同一文件、重述既有决定写成第二次实现该目标；本章只展开仍未兑现的具体行动、代价、关系变化与独立结果。因上游章职能措辞重复而无法以新行动完成时，保留已确认结果并写出本章实际的后续推进，不伪造前章成果重新发生。content、scenes.outcome、characterActions.result、characterStates及伏笔回收须据同一当前章行动投影。
 【后续章节职责与节拍（本章禁止提前执行）】${JSON.stringify(futureChapterTasks)}
 当前章叙事节拍：${JSON.stringify(currentBeat?.beatLabel || '')}。节拍来自章节职责，不按固定章数强制爽点；本章只需完成与职责相符的推进价值。

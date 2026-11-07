@@ -56,6 +56,18 @@ describe('chapter detail schema under GEN-005', () => {
   it('does not force padding on a concise event chain with complete scenes and actions', () => {
     expect(chapterDetailStructureIssues({ ...chapter(), content: '查清租约后完成食堂交接。' }, context)).toEqual([]);
   });
+  it('rejects expanded multi-scene dialogue prose before spending the expensive action audit', () => {
+    const dialogue=Array.from({length:24},(_,index)=>[
+      '主角进入店里，先核对上一章尚未兑现的协议，留出实际选择与对手阻力。',
+      '“第'+index+'次我已经核对过了”，主角说。主管回她：“那你拿什么证明？”',
+      '她从抽屉里拿出记录，逐一解释前因和后果，随后又与主管争论了一整段。',
+    ].join('')).join('\n');
+    expect(dialogue.length).toBeGreaterThan(2200);
+    expect(chapterDetailStructureIssues({...chapter(),content:dialogue},context).some(
+      issue=>issue.includes('已展开成章节对白正文'))).toBe(true);
+    const synopsis='先核对协议与主管的异议，再联系客户确认可执行条件，最后由有权人决定是否签署。';
+    expect(chapterDetailStructureIssues({...chapter(),content:synopsis},context)).toEqual([]);
+  });
   it('still rejects missing events, scene outcomes and action results', () => {
     const value = { ...chapter(), content: '', scenes: [{ location: '食堂', goal: '盘铺', conflict: '成本未知' }], characterActions: [{ character: '主角', action: '接收钥匙' }] };
     expect(chapterDetailStructureIssues(value, context)).toEqual([

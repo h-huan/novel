@@ -99,6 +99,18 @@ export function chapterDetailStructureIssues(candidate: Record<string, any> | nu
   if (!text(candidate.wordCountReason)) issues.push('缺少wordCountReason');
   const content = candidate.content || candidate.coreContent || candidate.summary || candidate.plot || candidate['核心内容'];
   if (!text(content)) issues.push('缺少content事件链');
+  if (text(content)) {
+    // A chapter outline must remain an EVENT PLAN. Real production returned
+    // expanded multi-scene dialogue prose here; it passed the old nonempty
+    // schema check and spent a long independent causal audit on the wrong unit.
+    // Detect only a strong conjunction of excessive dialogue and near-body
+    // size, not ordinary concise dialogue references or a rich event chain.
+    const outlineText=String(content);
+    const quotedDialogues=(outlineText.match(/[“「『][^”」』\n]{2,}[”」』]/g)||[]).length;
+    const expandedProse=outlineText.length>Math.max(2200,Math.floor(context.allowedMax*0.5))
+      && quotedDialogues>=10;
+    if(expandedProse)issues.push('content疑似已展开成章节对白正文：详细章纲必须概括当前行动、成立条件、各自结果及推进代价；targetWords是以后正文目标，不是本次content篇幅。请收敛为事件链，不删减真实因果与章节职责');
+  }
   const scenes = Array.isArray(candidate.scenes) ? candidate.scenes
     : Array.isArray(candidate.mainScenes) ? candidate.mainScenes : [];
   if (!scenes.length) issues.push('scenes必须是非空数组');
