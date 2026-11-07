@@ -101,7 +101,14 @@ it('uses the same real acquisition-action contract in planning and every-chapter
  });
  expect(prompt).toContain('【本次逐章审核身份目录】');
  const indexes=JSON.parse(prompt.split('【本次逐章审核身份目录】')[1].split('。conditionChecks必须')[0]);
- expect(indexes.map((row:any)=>row.chapter)).toEqual([1,2,3]);
- expect(indexes.map((row:any)=>row.taskAnchorId)).toEqual(['chapter:c1:task','chapter:c2:task','chapter:c3:task']);
+ expect(indexes).toEqual([{chapter:1},{chapter:2},{chapter:3}]);
+ expect(prompt).toContain('conditionChecks只返回chapter、status、bridgeEvidence、reason');
+ const anchorPrompt=buildChapterResponsibilityAuditPrompt({
+  executionStandard:'既有规则',creativeBrief:'已确认故事',shortStoryCard:{},worldContinuityDirective:'已确认世界机制',
+  plan:chapters,includeSharedPolicies:false,entryExitContract:true,evidenceMode:'anchors',
+ });
+ const anchorIndexes=JSON.parse(anchorPrompt.split('【本次逐章审核身份目录】')[1].split('。conditionChecks必须')[0]);
+ expect(anchorIndexes.map((row:any)=>row.taskAnchorId)).toEqual(['chapter:c1:task','chapter:c2:task','chapter:c3:task']);
+ expect(anchorPrompt).toContain('conditionChecks只返回taskAnchorId、bridgeAnchorIds及状态理由');
  expect(prompt).toContain('普通自主行动按not_required解释');
 });
