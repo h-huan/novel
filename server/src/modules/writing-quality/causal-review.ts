@@ -88,7 +88,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   // Otherwise the reviewer sees explicit outcome text but only opaque action
   // addresses, which encourages result-only bridge citations. This transport
   // change never supplies a verdict, invents a condition or relaxes validation.
-  const isPlanningActionText=(anchor:typeof focusedAnchors[number])=>
+  const isPlanningActionText=(anchor:{id:string;source:string;path?:string})=>
     anchor.source==='body'&&/^body:v\d+$/.test(anchor.id)
     &&/^\d+\.(?:characterActions\.\d+\.action|scenes\.\d+\.(?:action|event)|content)$/.test(anchor.path||'');
   const promptAnchors=compactPlanningProof
