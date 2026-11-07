@@ -83,8 +83,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
     expect(source).toContain("success: false, status: 'incomplete', ideas: []");
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate');
-    expect(source).toContain('causalPlan每个关键结果的必要条件与整体反转兑现核对');
-    expect(source).toContain('分类机制和手动流派落实');
+    expect(source).toContain('每个独立结果的实际必要条件、决定者与执行状态');
+    expect(source).toContain('来源兼容不能代替因果、分类或流派通过');
     expect(source).toContain('reviewChangedPremiseSources(');
     expect(source).toContain("generationTasks.run('discovery', discoveryRequestId");
     expect(source).toContain("generationTasks.cancel('discovery', requestId)");
@@ -109,7 +109,10 @@ describe('chain HTTP architecture', () => {
     expect(STORY_PREREQUISITE_POLICY).toContain('资源时序');
     expect(STORY_PREREQUISITE_POLICY).toContain('单个人同意不替代其它实际权利人或有权办理者的决定');
     expect(source).toContain('承担结果的人物选择与必要条件须已实际发生');
-    expect(source).toContain('核对物证的物理来源与样本取得链');
+    expect(source).toContain('premisePayoffReviewDirective(selection)');
+    expect(source).toContain('premiseCategoryReviewDirective(selection');
+    expect(source).toContain('premiseSourceReviewWork(selection).pending');
+    expect(source).not.toContain('本次来源继承这一部分逐项核对');
     expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
     expect(contract).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');
     expect(contract).toContain('模型此轮只能忠实结构化当前已锁定身份');
