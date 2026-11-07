@@ -7294,6 +7294,24 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
         const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
+        // This is only the PRESELECTION Gate, never a claim that five final
+        // cards have passed. Once its mandatory delivery floor is covered,
+        // do not pay a second selection/source audit merely to reach an
+        // OPTIONAL screening hedge. The existing full-card Gate is next; its
+        // proven deficit alone may activate the already-authorized original
+        // pool refill. The unused original pool stays available for that case.
+        if (missingSlots === 0) {
+          this.logger?.log('固定原池来源/因果前审已保留 '+partialSelection.selected.length
+            +'/'+deliveryCount+' 个交付候选（未通过完整卡终审）；不为可选预选冗余再次选优或重复审核，'
+            +'直接进入现有完整卡终审；真实缺卡才从未使用原池一次补位。');
+          return {...partialSelection,selectionAudit:{
+            initialReview,reselectionAttempted:false,finalReview:partialReview,
+            partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length),
+            deliveryShortfall:0,selectionStopReason:'delivery_capacity_met',
+            excludedPremiseIds:[...partialExcludedIds],reasons:[...initialReview.issues],
+            completeCardGatePending:true,
+          }};
+        }
         // A surviving 5/5 preselection is NOT five approved final cards. If
         // this very review proved that other preselected premises are bad,
         // use the existing fixed-pool correction slots for a small vetted
