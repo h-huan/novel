@@ -3,6 +3,7 @@ import { premiseCategoryCatalog, premiseCategoryFitIssues, materializePremiseCat
 import { ChainController } from './chain.controller';
 import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 import { premiseSourceComparisonCatalog } from './premise-selection-review';
+import { independentOutcomeStubReceipts } from './premise-payoff-review.fixture';
 
 const selection = () => normalizePremiseSelectionPayload({
   pool: ['A', 'B'].map(premiseId => ({ premiseId, workingTitle: '原题材' + premiseId, storyCore: '主角在恋爱选择中付出真实代价并改变关系' + premiseId })),
@@ -29,7 +30,7 @@ describe('same-request premise source catalogue transport', () => {
   it('passes category and manual-genre rules with one shared evidence catalogue, without skipping either review', async () => {
     const c=Object.create(ChainController.prototype) as any, s=withCategories();
     const sourceChecks=premiseSourceComparisonCatalog(s).map(row=>({ref:row.ref,status:'preserved',reason:'逐项核实当前事实未改变原池约束'}));
-    const payoffChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'既定主动行动和升级条件支持本题材的反转结果'},reason:'既定行动支撑已写结果且没有缺失条件'}));
+    const payoffChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.payoff',status:'supported',unmappedChecks:independentOutcomeStubReceipts(s,i),actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'既定主动行动和升级条件支持本题材的反转结果'},reason:'既定行动支撑已写结果且没有缺失条件'}));
     const genreChecks=s.selected.map((_,i)=>({ref:'S'+(i+1)+'.genre1',status:'fulfilled',evidenceRef:'S'+(i+1)+'.activeChoice',reason:'角色行动体现隐藏实力的反制过程'}));
     c.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
       expect((prompt.match(/【流派证据目录：只含已选展开】/gu)||[])).toHaveLength(1); // only one actual shared catalogue
@@ -68,7 +69,7 @@ describe('category checked before complete cards', () => {
   });
   it('integrates into the same source call and rejects omitted category evidence', async () => {
     const c = Object.create(ChainController.prototype) as any, s = withCategories();
-    const payoffChecks=s.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'已写实际选择和必要条件支撑反转阶段结果'},reason:'逐项核对既定行动与必要条件后确认结果成立'}));
+    const payoffChecks=s.selected.map((_,index)=>({ref:'S'+(index+1)+'.payoff',status:'supported',unmappedChecks:independentOutcomeStubReceipts(s,index),actionEvidenceRef:'S'+(index+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'已写实际选择和必要条件支撑反转阶段结果'},reason:'逐项核对既定行动与必要条件后确认结果成立'}));
     const sourceChecks = premiseSourceComparisonCatalog(s).map(row => ({ ref: row.ref, status: 'preserved', reason: '当前展开与原池明确的行动及后果兼容' }));
     c.llmCallWithRetry = vi.fn(async (_label: string, prompt: string, options: any) => {
       expect(prompt).toContain('前置分类审核');
@@ -167,7 +168,7 @@ describe('causal-only review prompt uses previously validated category/genre rec
  it('preserves strict independent payoff checking while skipping the redundant genre/category glossary',async()=>{
   const c=Object.create(ChainController.prototype) as any,s=withCategories();
   const payoffChecks=s.selected.map((_,i)=>({
-   ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',
+   ref:'S'+(i+1)+'.payoff',status:'supported',unmappedChecks:independentOutcomeStubReceipts(s,i),actionEvidenceRef:'S'+(i+1)+'.activeChoice',
    reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',
      reason:'已经发生的前置选择和当前障碍共同支持反转的结果'},
    reason:'独立核实行动与必要条件足以引发最终结果',
