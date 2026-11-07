@@ -146,8 +146,8 @@ it('preserves normal full reasoning for evidence-bearing selection and downstrea
     expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
   }
   for(const [scene,step] of [['idea_generate','idea_card_structure'],['idea_generate','idea_presentation_review'],['writing','idea_presentation_review'],['review','alignment_review']])expect((service as any).resolveReasoningEffort(scene,step)).toBeUndefined();
-  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('low');
-  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('low');
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBeUndefined();
+  expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBeUndefined();
   process.env.LLM_IDEA_REVIEW_REASONING_EFFORT='high';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('high');
   process.env.LLM_REASONING_EFFORT='medium';expect((service as any).resolveReasoningEffort('idea_generate','idea_presentation_review')).toBe('medium');
  } finally { if(old===undefined)delete process.env.LLM_REASONING_EFFORT;else process.env.LLM_REASONING_EFFORT=old; if(oldReview===undefined)delete process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;else process.env.LLM_IDEA_REVIEW_REASONING_EFFORT=oldReview; }
