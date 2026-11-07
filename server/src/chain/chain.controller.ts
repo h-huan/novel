@@ -1,6 +1,6 @@
 import {bindModelRequestClock,remainingModelRequestTime} from './model-request-clock';
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
-import {chapterConditionReviewIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
+import {chapterConditionReviewIssues, chapterConditionPlanningGapIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
 import { freezePremiseCreationChoices, PREMISE_CREATION_CHOICE_FIELDS, rankPremisePoolByMaturityScore, readPremiseMaturityScore } from './idea-discovery-contract';
 import { indexedPremiseSourcePool } from './premise-source-bindings';
@@ -9174,9 +9174,14 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
                 const audit = value as any;
                 if (!audit || typeof audit !== "object" || Array.isArray(audit) || !Array.isArray(audit.contradictions)) return false;
                 if (verifiedConditions(audit).length) return false;
-                if (audit.consistent === true) return audit.contradictions.length === 0;
+                const planningGaps=chapterConditionPlanningGapIssues(audit,plan);
+                if (audit.consistent === true) return audit.contradictions.length === 0 && planningGaps.length === 0;
                 if (audit.consistent !== false) return false;
-                return audit.contradictions.length > 0 && audit.contradictions.every((item: any) => isEvidencedChapterResponsibilityConflict(item));
+                // A genuine missing action is a blocking QLT-003 plan gap even
+                // without a frozen-world CR violation. Never force the reviewer
+                // to fabricate ruleEvidence just to unlock existing plan repair.
+                return (audit.contradictions.length > 0 || planningGaps.length > 0)
+                  && audit.contradictions.every((item: any) => isEvidencedChapterResponsibilityConflict(item));
               },
               describeValidation: value => {
                 const audit = value as any;
@@ -9185,10 +9190,17 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
                 if (audit?.consistent === true && Array.isArray(audit.contradictions) && audit.contradictions.length > 0) {
                   return ['consistent 为 true 时 contradictions 必须为空数组，不得只报冲突不改 consistent'];
                 }
+                if (audit?.consistent === true && chapterConditionPlanningGapIssues(audit,plan).length) {
+                  return ['逐章条件检查有gap，consistent必须为false；真实缺口交给已有规划修复，不能改成supported'];
+                }
+                if (audit?.consistent === false && !audit.contradictions?.length
+                  && !chapterConditionPlanningGapIssues(audit,plan).length) {
+                  return ['consistent=false须有真实条件取得gap或有证据的世界规则冲突，不能空报失败'];
+                }
                 if (audit?.consistent !== true && audit?.consistent !== false) {
                   return ['consistent 必须是布尔值 true 或 false'];
                 }
-                return ['每条 contradictions 必须带判据编号（CR-1…CR-7）、逐字 ruleEvidence、chapter、task、conflict、retain 与 fix；给不出判据证据的疑虑不得写成冲突'];
+                return ['每条真实CR冲突必须带判据编号（CR-1…CR-7）、逐字 ruleEvidence、chapter、task、conflict、retain 与 fix；单纯规划条件缺口请写入conditionChecks.gap，不要编造CR冲突'];
               },
             },
           );
@@ -9202,9 +9214,13 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
                  || '未产出可解析的完整JSON')+'。缺失逐章conditionChecks或冲突证据不得默认通过。');
           }
           if (audit.consistent === true) return [];
-          return (Array.isArray(audit.contradictions) ? audit.contradictions : [])
-            .map((item: any) => serializeGeneratedSqlText(item))
-            .filter(Boolean);
+          // Both categories are blocking; only evidenced CR violations carry
+          // ruleEvidence. Planning gaps remain actionable repair inputs.
+          return [
+            ...(Array.isArray(audit.contradictions) ? audit.contradictions : [])
+              .map((item: any) => serializeGeneratedSqlText(item)).filter(Boolean),
+            ...chapterConditionPlanningGapIssues(audit,plan),
+          ];
         };
 
         const initialResponsibilityPlan = creationResponsibilityPlan(chapterTitles);
