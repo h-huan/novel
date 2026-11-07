@@ -55,8 +55,8 @@ it('rebinds whitespace-only citation differences without inventing missing causa
 });
 it('keeps numbered evidence examples purely structural, never a copyable fake source address',()=>{
  const shape=premiseCausalReferenceExample();
- expect(shape).toHaveLength(1);
- for(const anchor of [shape[0].action,...shape[0].conditions,shape[0].result]){
+ expect(shape).toHaveLength(premiseCausalPlanExample().length);
+ for(const link of shape)for(const anchor of [link.action,...link.conditions,link.result]){
    expect(anchor.sourceRef).toContain('从本题材真实原池编号表复制');
    expect(anchor.sourceRef).not.toMatch(/^P\\d+:[1-5]:\\d+/);
  }
