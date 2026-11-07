@@ -135,6 +135,12 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('【本章事件与状态唯一来源】');
     expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
     expect(source).toContain('【首章已确认的原始吸睛钩子');
+    expect(source).toContain('savedWorldForOutline=savedWorld');
+    expect(source).toContain('world:savedWorldForOutline,emit}');
+    expect(source).toContain('const worldRowForOutline=savedWorldForOutline');
+    expect(source).toContain('const currentWorldForOutlineReview=savedWorldForOutline');
+    expect(source).not.toContain('const currentWorldForOutlineReview = db.prepare(');
+    expect(source).not.toContain('const worldRowForOutline = db.prepare(');
   });
 
   it('uses existing plan-only reselection support instead of requesting unchanged whole stories', () => {
