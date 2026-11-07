@@ -9115,6 +9115,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         const planSourceHash=CreationOutlineCheckpoint.fingerprint({
           canonicalCreativeBrief,worldRowForOutline,outlineCharacterSources,
           targetWords:dto.targetWords,constitution,styleInstruction,
+          executionStandardForReview,chapterResponsibilityPlanningDirective(false),
           chapterWordMin:CHAPTER_WORD_MIN,chapterWordMax:CHAPTER_WORD_MAX,
           minChapters,maxChapters,recommendedChapters,isShort,
         });
@@ -9126,7 +9127,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
               chapterResponsibilities:creationResponsibilityPlan(savedPlan.chapters),
             },(value,index)=>normalizeOutlineChapterFunction(value,index,isShort));
             if(reconstructed.length>=minChapters && reconstructed.length<=maxChapters){
-              chapterTitles=reconstructed;reusedChapterPlan=true;
+              chapterTitles=reconstructed;chapterCount=reconstructed.length;reusedChapterPlan=true;
               this.logger.log('创建大纲：复用同源且已审核的章节职责规划 project='+projectId);
             }
           }catch(error){this.logger.warn('旧章节职责检查点无效，按原程序重新规划：'+String(error));}
@@ -9282,7 +9283,10 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
 
         // Only an audited complete plan becomes reusable stage work. The
         // original whole-book review and Canon commit remain mandatory.
-        if(!reusedChapterPlan)outlineWork.save(projectId,'chapter_plan',planSourceHash,{chapters:chapterTitles});
+        if(!reusedChapterPlan){
+          try{outlineWork.save(projectId,'chapter_plan',planSourceHash,{chapters:chapterTitles});}
+          catch(error){this.logger.warn('章节职责检查点写入失败，继续原有正式生产：'+String(error));}
+        }
         volId = uuid();
         const acceptedOutlineSources: Record<string, unknown>[] = [];
         let priorOutlineFactLedger: OutlineFactLedgerEntry[] = [];
@@ -9660,11 +9664,13 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
           // Save only after the chapter's structure, facts, actions, original
           // obligations and continuity checks have all passed. Final book
           // reconciliation and the Canon transaction are still mandatory.
-          outlineWork.save(projectId,'chapter_'+order,detailSourceHash,{
-            chapter:chData,prepared:preparedChapters[preparedChapters.length-1],
-            acceptedSource:acceptedChapterSource,ledger:priorOutlineFactLedger,
-            runIds:[...shortOutlineSourceRunIds].filter(id=>!previousChapterRunIds.has(id)),
-          });
+          try{
+            outlineWork.save(projectId,'chapter_'+order,detailSourceHash,{
+              chapter:chData,prepared:preparedChapters[preparedChapters.length-1],
+              acceptedSource:acceptedChapterSource,ledger:priorOutlineFactLedger,
+              runIds:[...shortOutlineSourceRunIds].filter(id=>!previousChapterRunIds.has(id)),
+            });
+          }catch(error){this.logger.warn('第'+(order+1)+'章恢复检查点写入失败，不影响原有正式审核：'+String(error));}
         }
 
         // 字数合计校正：LLM 各章 targetWords 之和不一定恰好等于项目目标，逐个"硬碰硬"失败。
@@ -9710,6 +9716,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
         // Bulk audit uses the exact merged content/scenes that persistence will consume.
         // Per-chapter verdicts do not substitute for reconciliation across the whole framework.
         const pendingOutlineFacts = preparedChapters.map(chapter => ({ order: chapter.order, title: chapter.title, content: chapter.content, scenes: chapter.scenes }));
+        try{
         await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
           currentWorldForOutlineReview, pendingOutlineFacts, async (batch, review) => {
             const repair = await this.repairPendingOutlineFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
@@ -9722,6 +9729,16 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             }
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
           });
+        }catch(error){
+          // A proven aggregate fact contradiction means some supposedly
+          // accepted chapter work is not final, so a later recovery must
+          // regenerate it; transport failures retain earlier good work.
+          if(isGateRejection(error)){
+            try{outlineWork.clear(projectId);}
+            catch(cleanError){this.logger.warn('失效章纲检查点清理失败：'+String(cleanError));}
+          }
+          throw error;
+        }
 
         for (const runId of shortOutlineSourceRunIds) {
           this.generatedCanonGuard.assertStructuredCanCommit({
@@ -10166,8 +10183,10 @@ ${STORY_ENTITY_MODELING_POLICY}
       const shortActivation=db.prepare(`UPDATE projects SET status = 'active', updated_at = ? WHERE id = ? AND status IN ('creating','generation_failed','active')`).run(now(), projectId);
       if(Number(shortActivation.changes)!==1)throw new Error('短篇激活状态未成功持久化，不能报告项目创建完成');
       // Only a fully active project can retire temporary stage work.
-      if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get())
-        db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
+      try{
+        if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get())
+          db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
+      }catch(error){this.logger.warn('正式激活已完成，临时检查点清理失败（不影响完成状态）：'+String(error));}
       emit('done', 100, '全部内容生成完成', 'done');
       this.logger.log(`create-project-async: 完成 project=${projectId}`);
       this.emitProjectProgress(projectId, {
