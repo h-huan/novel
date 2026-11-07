@@ -1436,10 +1436,15 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // causal, category, genre, overlap and full-card Gates keep their defaults.
     // DeepSeek maps medium to high; low retains thinking at its lower tier.
     // Provider, output/call/retry/timeout ceilings and explicit overrides stay.
+    // Ranking alone is preliminary. Fixed-pool selection and reselection also
+    // AUTHOR the causalPlan used as evidence by every later independent payoff
+    // Gate. Sending these provenance-critical decisions through the low
+    // reasoning route produced wrong action/result links and expensive
+    // re-selection after 8 candidates had already been paid for.
+    // Preserve the configured model's FULL normal reasoning for causalPlan
+    // producers; only raw pool generation stays at the low-cost tier.
     const preliminarySteps=[
       'idea_premise_pool_generation','idea_premise_pool_refill',
-      'idea_premise_selection','idea_premise_refill_selection',
-      'idea_premise_pool_reselection','idea_premise_causal_plan_contract',
     ];
     if(scenario==='idea_generate'&&stepKey&&preliminarySteps.includes(stepKey))return 'low';
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
