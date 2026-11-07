@@ -4,6 +4,7 @@ import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import { readConstitution } from '../modules/project/creative-constitution';
 import { generationTasks } from '../common/generation-cancellation';
+import { confirmedWorldProtagonistName } from './source-rule-consistency';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -267,10 +268,30 @@ export class GenerationRecoveryService {
     ).all(projectId) as Array<{ character_id:string }>;
     const profileIds = new Set(profiles.map(row => String(row.character_id)));
     const names = roles.map(row => String(row.name || '').trim());
+    const projectRow = db.prepare('SELECT settings FROM projects WHERE id=?').get(projectId) as {settings?:string}|undefined;
+    let confirmedNames:string[]=[];
+    try{
+      const story=JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory;
+      confirmedNames=[
+        confirmedWorldProtagonistName(story?.protagonist),
+        ...(Array.isArray(story?.characters)?story.characters:[]).map((row:any)=>
+          confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
+      ].filter(Boolean);
+    }catch{
+      // A malformed source cannot authorize keeping old roles. The saved world
+      // is protected separately, and the creation preflight will report the
+      // exact malformed settings before generating new data.
+      confirmedNames=['__invalid_confirmed_story__'];
+    }
     const preserveCharacters = preserveWorld && roles.length > 0
       && names.every(Boolean) && new Set(names).size === roles.length
+      && confirmedNames.every(name=>names.includes(name))
       && roles.every(row => !!String(row.identity || '').trim() && profileIds.has(String(row.id)))
-      && roles.filter(row => Number(row.is_pov_character) === 1).length === 1;
+      && roles.filter(row => Number(row.is_pov_character) === 1).length === 1
+      && (!confirmedNames[0]||!confirmedWorldProtagonistName(
+        JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory?.protagonist)
+        || String(roles.find(row=>Number(row.is_pov_character)===1)?.name||'')===
+          confirmedWorldProtagonistName(JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory?.protagonist));
     // Normal recovery retains verified upstream Canon; it regenerates only
     // missing/incomplete downstream data. Explicit source rebuild is separate.
     await this.clearGeneratedAssets(projectId, { preserveWorld, preserveCharacters });
