@@ -44,6 +44,8 @@ describe('single confirmed world authority regardless of realism labels',()=>{
   expect(worldPrompt).not.toContain('禁止把现实题材改成末世/修仙/科幻/超能力/架空制度');
   expect(worldPrompt).toContain('【唯一故事基准】${canonicalCreativeBrief}');
   expect(worldPrompt).toContain('不得新增与已确认事实互斥的限制');
+  expect(worldPrompt).toContain('只有确无超常能力的现实作品');
+  expect(worldPrompt).toContain('不得另造能力或删除已确认能力');
  });
 });
 
