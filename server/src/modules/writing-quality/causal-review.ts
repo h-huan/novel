@@ -91,7 +91,7 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
         :anchor)
     :focusedAnchors;
   return {
-    systemPrompt: (lockedMissingResults.length ? '对服务器已锁定编号但尚未审查的结果，首次独立核对其真实行动、前置状态及必要条件；严格保留缺口，不得仅修正编号或假设该结果已通过。' : targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
+    systemPrompt: (lockedMissingResults.length ? '对服务器已锁定编号但尚未审查的结果，首次独立核对其真实行动、前置状态及必要条件；严格保留缺口，不得仅修正编号或假设该结果已通过。' : targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。散会收起资料、实际离场、当面提醒等直接发生的普通动作，只要content已写出相同执行者与动作，supported即可用其真正发生的行动地址作bridgeAnchorId；不得要求另一个人批准这些普通动作，更不能把指令、安排、计划升级成工资已发、人员已更换等独立生效结果。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
     prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(targets.length&&Array.isArray((audit as any)?.transitions)
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
@@ -674,36 +674,6 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     });
   });
   return { verified: errors.length === 0, errors, issues };
-}
-
-/** A last reviewer response can supply genuine action and outcome quotes but
- * leave a supported bridge unproven. After the existing citation correction
- * was exhausted, record this as a BLOCKING causal gap rather than treating
- * the whole chapter as an opaque protocol error. No condition or outcome is
- * synthesized, and the calling quality gate must still reject the draft.
- * Never convert missing action/result, conflicting addresses or incomplete
- * audit coverage. */
-export function quarantineUnprovedCausalBridges(
- audit:any,errors:readonly string[],content:string,sources:Record<string,string>,
-){
- if(audit?.status!=='evaluated'||!Array.isArray(audit?.transitions)||!errors.length
-   ||errors.some(error=>!/^第[1-9]\d*项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）$/.test(error)))return audit;
- const indices=[...new Set(errors.map(error=>Number(error.match(/^第(\d+)项/)?.[1])-1))];
- if(indices.some(index=>!Number.isInteger(index)||index<0||index>=audit.transitions.length))return audit;
- const selected=new Set(indices);
- const transitions=audit.transitions.map((row:any,index:number)=>{
-  if(!selected.has(index))return row;
-  if(row?.status!=='supported'||typeof row.reason!=='string'||row.reason.trim().length<8
-    ||!resolveQualityEvidence(content,row.actionEvidence).verified
-    ||!resolveQualityEvidence(content,row.resultEvidence).verified)return null;
-  const source=row.basisSource==='body'?content:sources[row.basisSource];
-  if(resolveQualityEvidence(source||'',row.bridgeEvidence).verified)return null;
-  return {...row,status:'gap',bridgeAnchorId:'',bridgeEvidence:'',basisSource:'body',
-    reason:'原因果审查未提供可验证的结果成立条件，须修复章节事实或收回过度断言：'+row.reason};
- });
- if(transitions.some((row:any)=>row===null))return audit;
- const reduced={...audit,transitions};
- return validateCausalAudit(reduced,content,sources).verified?reduced:audit;
 }
 
 export function causalAuditRepairTargets(audit:any,errors:string[]) {
