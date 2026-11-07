@@ -1,4 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
+import { readyOriginalPoolReselectionPayload, normalizeTargetedPremiseReselection } from './premise-selection-review';
 import { premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
@@ -63,6 +64,26 @@ describe('source-owned scored pool skips redundant model selection only with val
     expect(result?.selected.map(row=>row.premiseId)).toEqual(['P4','P5']);
     expect(result?.selected.every(row=>row.storyCategory==='都市')).toBe(true);
     expect(result?.poolTargetMet).toBe(false);
+  });
+  it('replaces defective positions using unused scored original facts, still subject to strict normalizer',()=>{
+    const seeds=[create('P1','原选择题材','都市'),create('P2','待选高分题材','都市'),
+      create('P3','另一可选题材','都市')];
+    const scores=new Map([['P1',99],['P2',93],['P3',83]]);
+    const original=sourceReadyScoredPremiseSelection(seeds,scores,1,3,['都市'])!;
+    expect(original.selected[0].premiseId).toBe('P1');
+    const payload=readyOriginalPoolReselectionPayload(original,
+      [{replacesPremiseId:'P1'}],['P2','P3'],seeds,scores,3,['都市']);
+    expect(payload?.replacements.map(row=>row.premise.premiseId)).toEqual(['P2']);
+    const review={passed:false,issues:[{kind:'selection_fit' as const,
+      premiseId:'P1',referencePremiseId:'P1',repairMode:'replace_from_pool' as const,
+      reason:'原有候选被独立审核举证拒绝',quote:'现有引用',referenceQuote:'原始来源'}]};
+    const normalized=normalizeTargetedPremiseReselection(payload,original,review,1,3,['都市'],1);
+    expect(normalized.selected.map(row=>row.premiseId)).toEqual(['P2']);
+    expect(normalized.selected[0].causalPlan).toEqual(seeds[1].causalPlan);
+    expect(readyOriginalPoolReselectionPayload(original,[{replacesPremiseId:'P1'}],
+      ['P2'],[{...seeds[1],causalPlan:[]}],scores,3,['都市'])).toBeNull();
+    expect(readyOriginalPoolReselectionPayload(original,[{replacesPremiseId:'P1'}],
+      ['P1'],seeds,scores,3,['都市'])).toBeNull();
   });
   it('falls back to original paid selection when provenance, causal plan, score or quantity is missing',()=>{
     const good=create('P1','归还旧合同之前','都市');

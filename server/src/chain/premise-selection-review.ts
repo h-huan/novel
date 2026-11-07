@@ -1,6 +1,6 @@
 import { compactRepeatedPremiseText } from './premise-source-bindings';
 import { exactPremiseSourceFields, SOURCE_BINDING_EXAMPLE } from './premise-source-bindings';
-import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload, type PremiseSelectionResult } from './idea-discovery-contract';
+import { SELECTED_PREMISE_FIELDS, normalizePremiseSelectionPayload, sourceReadyScoredPremiseSelection, type PremiseSelectionResult } from './idea-discovery-contract';
 import type { PremisePayoffCheck } from './premise-payoff-review';
 import { assertPremiseCausalPlans } from './premise-causal-plan';
 
@@ -237,6 +237,41 @@ export function premiseReselectionPlan(original: PremiseSelectionResult, review:
       && !protectedItems.some(protectedItem => protectedItem.premiseId === item.premiseId)
       && !replacementIds.has(String(item.premiseId))),
   };
+}
+
+/** Select from already-scored ORIGINAL seeds without another authoring call.
+ * Only fully source-ready candidates may use this transport; missing/corrupt
+ * plans fall back to the existing bounded model reselection. The returned
+ * identities still enter the SAME source/payoff/category/genre/overlap and
+ * final-card reviews. No rejected initial identity may be recycled.
+ */
+export function readyOriginalPoolReselectionPayload(
+ original:PremiseSelectionResult,
+ slots:readonly {replacesPremiseId:unknown}[],
+ availableIds:readonly string[],
+ authoredPool:readonly Record<string,unknown>[],
+ scores:ReadonlyMap<string,number>,
+ poolTarget:number,categories:readonly string[],
+ previouslyVettedCategories:readonly string[]=[],
+):{replacements:Array<{replacesPremiseId:string;premise:Record<string,unknown>}>}|null{
+ if(!slots.length)return null;
+ const alreadySelected=new Set(original.selected.map(item=>String(item.premiseId)));
+ const permitted=new Set(availableIds);
+ const unused=authoredPool.filter(item=>permitted.has(String(item.premiseId))
+   && !alreadySelected.has(String(item.premiseId)));
+ const ready=sourceReadyScoredPremiseSelection(unused,scores,slots.length,
+   poolTarget,categories,[
+     ...previouslyVettedCategories,
+     ...original.selected.map(item=>String(item.storyCategory||'')).filter(Boolean),
+   ]);
+ if(!ready||ready.selected.length!==slots.length)return null;
+ return {replacements:slots.map((slot,index)=>{
+   const item=ready.selected[index];
+   return {replacesPremiseId:String(slot.replacesPremiseId),
+     premise:{premiseId:String(item.premiseId),storyCategoryId:item.storyCategoryId,
+       sourceBindings:structuredClone(SOURCE_BINDING_EXAMPLE),readerQuestion:item.readerQuestion,
+       causalPlan:structuredClone(item.causalPlan)}};
+ })};
 }
 
 /** Targeted protocol: repair only named slots, merge in original order, then run all existing gates. */

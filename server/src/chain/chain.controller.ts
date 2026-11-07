@@ -57,7 +57,7 @@ import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosi
 import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
-import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, premiseRefillFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
+import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, premiseRefillFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, readyOriginalPoolReselectionPayload, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
 import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, crossStageReviewDirective, crossStagePromiseDirective, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, stagePromiseReviewPrompt, describeStagePromiseReviewValidation, bindCrossStagePromiseEvidence, describeCrossStageReviewValidation, crossStageBlockingIssues, crossStageAdvisories } from './cross-stage-review';
 import { presentationReviewIssues, presentationGateIssues, targetIdeaReviews, shouldBatchIdeaPresentation, type IdeaPresentationVerdict ,compactIdeaPresentationReferences,bindIdeaPresentationVerdicts } from './idea-presentation-review';
 import { buildCanonPolicyDirective } from '../modules/canon/canon-policy';
@@ -5780,6 +5780,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             preselectionAuditStandard,
             dto.webNovelGenre,
             { reviews: initialReviewAllowance, reselection: reselectionCompletionBudget }, requestedCount,onApproved,pipelineLimiter,initialCausalPreparation,
+            [],rankedOriginalPool,premiseMaturityScores,
           );
         } catch (error) {
           const preselectionReviewWallMs = Date.now() - preselectionReviewStartedAt;
@@ -7132,7 +7133,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
 
   private async reconcilePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>, requestedCount: number,
     poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}, deliveryCount=requestedCount,onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>,initialPreparation?:PremiseSourcePreparation,
-    previouslyVettedCategories:readonly string[]=[]) {
+    previouslyVettedCategories:readonly string[]=[],
+    authoredScoredPool?:readonly Record<string,unknown>[],
+    originalMaturityScores?:ReadonlyMap<string,number>) {
     const sourceReceipts:PremiseSourceReceipts=new Map();
     let protectedPremiseIds:readonly string[]=[];
     const sourceScope=JSON.stringify({standard,requiredGenres});
@@ -7482,6 +7485,30 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // identities in the full pool cannot be selected, and protected story facts
       // are already in 【当前选择】. Do not spend tokens on unreachable candidates.
       const selectablePool=initial.pool.filter(item=>availableIds.includes(String(item.premiseId)));
+      // A scored original with an already-authored, strict source-bound causal
+      // plan needs no second model call merely to be selected for replacement.
+      // Normalize the replacement through the existing identity/contract gate;
+      // ALL independent source, overlap and final-card review still runs below.
+      if(authoredScoredPool && originalMaturityScores){
+        const readyPayload=readyOriginalPoolReselectionPayload(
+          selected,scopedSlots,availableIds,authoredScoredPool,
+          originalMaturityScores,poolTarget,categories,previouslyVettedCategories);
+        if(readyPayload){
+          try{
+            const readySelection=normalizeTargetedPremiseReselection(readyPayload,
+              selected,scopedReview,requestedCount,poolTarget,categories,
+              Math.min(requestedCount,selected.selected.length),previouslyVettedCategories);
+            assertPremiseCausalPlans(readySelection);
+            readySelection.selected.forEach(item=>attemptedBeforeReserve.add(String(item.premiseId)));
+            selected=readySelection;
+            scopedSlots.forEach(slot=>completedSlots.add(String(slot.replacesPremiseId)));
+            this.logger?.log('锁定前原池补位：沿已生成成熟度顺序复用有完整因果引用的原始身份；省去一次模型汇总重选，所有独立质量审核保持不变');
+            return true;
+          }catch(error){
+            this.logger?.warn('已有候选的严格重选合同未满足，仍沿原有有界模型重选：'+String(error));
+          }
+        }
+      }
       // The unchanged originals and the actually available replacements are
       // the complete set of possible categories in this one bounded call.
       // Keep BOTH sets when scoping standards so a new category never loses
