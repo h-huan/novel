@@ -6883,8 +6883,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         // three approved stories as a successful five-story request.
         appealGate.returned = 0;
         return { success: false, status: 'incomplete', ideas: [],
-          qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning,
-          qualityWarning: warning, error: appealGate.repairError||null, appealGate };
+          qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate,
+          qualityWarning: warning, error: appealGate.repairError||null };
       }
       this.logger.log(`idea-discover: 并发结构化和独立终审通过 ${qualifiedCount} 个，仅返回优选 ${acceptedWithAudit.length}/${requestedCount} 个`);
       return {
