@@ -6850,6 +6850,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       if (selectedAccepted.length === 0) {
         const rejectionSummary = finalRejectedReasons.slice(0, 10).join('；') || uniqueRejectedReasons.slice(0, 10).join('；') || '证据不足';
         this.logger.warn(`idea-discover: 并发完整卡独立终审后 0/${requestedCount} 通过：${rejectionSummary}`);
+        Object.assign(appealGate,{qualityWarning:'故事题材数量不足：请求 '+requestedCount+'，实际合格 0；'+rejectionSummary,
+          error:appealGate.repairError||rejectionSummary,partial:true});
         return {
           success: false,
           ideas: [],
