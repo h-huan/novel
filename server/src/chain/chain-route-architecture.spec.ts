@@ -276,6 +276,10 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length)');
     expect(source).toContain('这些胚子尚未通过完整卡终审');
     expect(source).toContain('本次原池已授权的一次换选');
+    expect(source).toContain("if (missingSlots === 0) {");
+    expect(source).toContain("selectionStopReason:'delivery_capacity_met'");
+    expect(source).toContain('真实缺卡才从未使用原池一次补位');
+    expect(source).toContain('partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length)');
   });
 
   it('retains full model reasoning for evidence-bearing causal selection, not only the downstream review',()=>{
