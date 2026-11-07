@@ -6,17 +6,17 @@ import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION, STORY_PRERE
 afterEach(() => standardDirectiveCache.clear());
 
 
-it('bounds preliminary selection and citation repair without changing independent quality Gates', () => {
+it('limits low-effort work to raw seed brainstorming while preserving causal plan and independent quality reviews', () => {
   const service = new RealLLMService({} as any);
   const oldEffort = process.env.LLM_REASONING_EFFORT;
   try {
     delete process.env.LLM_REASONING_EFFORT;
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBe('low');
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBe('low');
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_causal_plan_contract')).toBeUndefined();
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_selection')).toBeUndefined();
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_refill_selection')).toBeUndefined();
     expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_generation')).toBe('low');
     expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_refill')).toBe('low');
-    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_reselection')).toBe('low');
+    expect((service as any).resolveReasoningEffort('idea_generate','idea_premise_pool_reselection')).toBeUndefined();
     for (const step of ['idea_premise_source_drift_review',
       'idea_premise_overlap_review','idea_card_structure','idea_presentation_review']) {
       expect((service as any).resolveReasoningEffort('idea_generate',step)).toBeUndefined();
@@ -124,7 +124,7 @@ it('uses citation lookup rules for reader evidence repair while preserving compl
  expect(standardDirectiveCache.get('review','alignment_review')).toContain('【系统规则 QLT-011');
 });
 
-it('preserves final review thinking defaults while bounding preliminary identity ranking', async () => {
+it('preserves normal full reasoning for evidence-bearing selection and downstream reviews', async () => {
  const old = process.env.LLM_REASONING_EFFORT;
  const oldReview = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
  delete process.env.LLM_REASONING_EFFORT; delete process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
@@ -135,14 +135,14 @@ it('preserves final review thinking defaults while bounding preliminary identity
   expect((call.mock.calls[0] as any)[7]).toBeUndefined();
   expect((call.mock.calls[0] as any)[8]).not.toBe(true);
   await service.generate({prompt:'原池身份选优',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_premise_selection'}});
-  expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
+  expect((call.mock.calls.at(-1) as any)[7]).toBeUndefined();
   expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
   await service.generate({prompt:'轻量候选生成',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:'idea_premise_pool_generation'}});
   expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
   expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
   for(const step of ['idea_premise_pool_reselection','idea_premise_pool_refill']){
     await service.generate({prompt:'原池有界补位',scenario:'idea_generate',responseFormat:'json_object',metrics:{stepKey:step}});
-    expect((call.mock.calls.at(-1) as any)[7]).toBe('low');
+    expect((call.mock.calls.at(-1) as any)[7]).toBe(step==='idea_premise_pool_refill'?'low':undefined);
     expect((call.mock.calls.at(-1) as any)[8]).not.toBe(true);
   }
   for(const [scene,step] of [['idea_generate','idea_card_structure'],['idea_generate','idea_presentation_review'],['writing','idea_presentation_review'],['review','alignment_review']])expect((service as any).resolveReasoningEffort(scene,step)).toBeUndefined();
