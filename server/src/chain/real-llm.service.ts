@@ -1214,16 +1214,19 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // 正文，关闭思考是让它能输出的唯一手段；正常路径仍保留完整推理。
           if (hasRecoveryAllowance() && !preserveThinking && !thinkingDisabledAttempted && (result.finishReason === 'length' || emptyRetriesUsed >= maxEmptyRetries)) {
             this.logger.warn(
-              `空内容且扩容后仍被思考耗尽，关闭思考补发（仅故障恢复，正常路径保留完整推理）: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+              `模型无有效正文（finishReason=${result.finishReason ?? 'unknown'}，扩容次数=${truncationExpansions}，空响应重试=${emptyRetriesUsed}），使用原有恢复额度关闭思考补发一次；正常路径仍保留推理: model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
             const noThinkResult = await callWithoutThinking();
-            if (noThinkResult.content.trim()) {
+            // A nonempty fragment with finish_reason=length is still a
+            // failed structured response. Never promote it to success solely
+            // because the one-time no-thinking recovery emitted characters.
+            if (noThinkResult.content.trim() && noThinkResult.finishReason !== 'length') {
               const __respNoThink = this.toResponse(noThinkResult, modelName, request, startTime);
               emit('success', { resp: __respNoThink });
               return __respNoThink;
             }
             lastEmptyError = new Error(
-              `模型返回空内容(关闭思考补发后仍为空): model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+              `模型恢复补发未取得完整正文(finishReason=${noThinkResult.finishReason ?? 'unknown'}, hasContent=${Boolean(noThinkResult.content.trim())}): model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
             this.logger.warn(lastEmptyError.message);
             emit('empty', { reason: lastEmptyError.message });
