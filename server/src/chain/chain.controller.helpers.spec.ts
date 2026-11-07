@@ -14,6 +14,7 @@ import {
   canFitChapterWordRange,
   canFitStoryTargetWords,
   parsePositiveTargetWords,
+  worldPromptValue,
   resolveDiscoveryTargetWords,
   resolveCreationChapterPlan,
   collectOutlineForeshadowings,
@@ -85,6 +86,17 @@ function applyStandardsStub(controller: any) {
   controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   return controller;
 }
+
+it('decodes stored world-rule JSON for the original outline generator without rewriting saved facts',()=>{
+ const rules=['订单须由本人签收','旁人不可代签'];
+ const raw=JSON.stringify(rules);
+ expect(worldPromptValue(raw)).toEqual(rules);
+ expect(worldPromptValue(' {"permission":{"role":"本人"}} ')).toEqual({permission:{role:'本人'}});
+ expect(worldPromptValue(' 只有本人签收 ')).toBe(' 只有本人签收 ');
+ expect(worldPromptValue('[bad json')).toBe('[bad json');
+ expect(worldPromptValue(null)).toBeNull();
+ expect(raw).toBe(JSON.stringify(rules));
+});
 
 it('keeps multi-result decision ownership and person-only extraction in canonical standards, not a second world patch rule',()=>{
  expect(DECISIVE_CHOICE_CONDITION_POLICY).toContain('抓人不等于撤销停职');
