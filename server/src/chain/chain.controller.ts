@@ -6565,7 +6565,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     const {causalPlan:_pendingIndex,...story}=item;
                     return story;
                   }),
-                },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
+                },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate,
+                  selectedPremises.map(premise=>String(premise.storyCategory)));
                 const withPlans={...prelim,selected:rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)
                   .map(item=>bindPremiseCausalPlan({
                   ...item,causalPlan:source.find((row:any)=>row?.premiseId===item.premiseId)?.causalPlan,
@@ -6586,7 +6587,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                   sourceForPlan,reselectionCompletionBudget,missingAfterFirstGate);
                 const aligned=normalizePremiseSelectionPayload({
                   pool:rankedRefillPool,selectedPremises:planned.selected,
-                },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate);
+                },refillTarget,unusedSeeds.length,discoveryCategories,missingAfterFirstGate,
+                  selectedPremises.map(premise=>String(premise.storyCategory)));
                 let refillWork:DiscoveryCardWork<Record<string,unknown>,Record<string,unknown>>|undefined;
                 let refillTask:Promise<void>|undefined,abortRefill=false;
                 let refillPeers:readonly Record<string,unknown>[]=[],refillBatchSize=1;
