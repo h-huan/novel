@@ -1729,7 +1729,7 @@ describe('idea discovery orchestrator with simulated model responses', () => {
         expect(request.prompt).toContain('自动选择的storyTone含浪漫');
         expect(request.prompt).toContain('同批各项应具有不同的人物欲望、主动策略、对手响应、局势转向与实际代价');
         expect(request.prompt).not.toContain('低职位忍让、保留账本或日志');
-        expect(request.prompt).toContain('不能只是道具加动作的意象暂名');
+        expect(request.prompt).toContain('只说职业、隐藏能力、多年经历或道具的标题没有明确点击理由');
         expect(request.prompt).toContain('不能用补造事件、剧透最终结果替代点击动机');
         expect(request.prompt).toContain('五节合计优先300—450汉字');
         expect(request.prompt).toContain('不得附加向创作者或审稿者征求意见的元评论');
