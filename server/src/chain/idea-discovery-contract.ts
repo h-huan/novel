@@ -372,7 +372,7 @@ export function sourceReadyScoredPremiseSelection(
   // A mixed-category batch retains its original diversity contract. Swap
   // only the lowest-ranked already selected seed; do not rewrite any label.
   if(target>1 && categoryOptions && new Set(categoryOptions).size>1
-    && new Set(chosen.map(item=>item.category)).size<2){
+    && new Set([...previouslyVettedCategories,...chosen.map(item=>item.category)]).size<2){
     const alternative=ready.slice(target).find(item=>item.category!==chosen[0].category);
     if(!alternative)return null;
     chosen[chosen.length-1]=alternative;
