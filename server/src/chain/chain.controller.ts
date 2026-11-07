@@ -7491,7 +7491,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // ALL independent source, overlap and final-card review still runs below.
       if(authoredScoredPool && originalMaturityScores){
         const readyPayload=readyOriginalPoolReselectionPayload(
-          selected,scopedSlots,availableIds,authoredScoredPool,
+          selected,scopedSlots,availableIds.map(String),authoredScoredPool,
           originalMaturityScores,poolTarget,categories,previouslyVettedCategories);
         if(readyPayload){
           try{
