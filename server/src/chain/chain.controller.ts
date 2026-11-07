@@ -6837,7 +6837,15 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         mode: 'parallel_vetted_full_card_filter',
         structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
         repairProtocol: 'one_budgeted_lightweight_refill_wave_after_full_card_gate',
-        fulfillment:{stopReason:fulfillmentStopReason,actions:fulfillmentActions,sourceCallsRemaining:sourceCompletionBudget.remaining,reselectionCallsRemaining:reselectionCompletionBudget.remaining},
+        fulfillment:{stopReason:fulfillmentStopReason,actions:fulfillmentActions,
+          // Snapshot the limits used by THIS request; a later local diagnostic
+          // can read a different persisted setting and cannot infer usage.
+          sourceCallsLimit:discoveryBudget.sourceMaxPhysicalCalls,
+          sourceCallsUsed:discoveryBudget.sourceMaxPhysicalCalls-sourceCompletionBudget.remaining,
+          sourceCallsRemaining:sourceCompletionBudget.remaining,
+          reselectionCallsLimit:discoveryBudget.premiseReselectionMaxCalls,
+          reselectionCallsUsed:discoveryBudget.premiseReselectionMaxCalls-reselectionCompletionBudget.remaining,
+          reselectionCallsRemaining:reselectionCompletionBudget.remaining},
         premisePoolSize: premiseDiscovery.pool.length,
         categorySelectionMode: variedCategories ? 'per_premise_from_platform_candidates' : 'fixed_category',
         selectedCategories: [...new Set(allReviewedPremises.map(premise => selectedCategoryById.get(String(premise.premiseId))))],
