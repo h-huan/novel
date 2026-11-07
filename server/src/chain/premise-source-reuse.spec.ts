@@ -26,6 +26,27 @@ it('reviews only two changed items, restores all fifty checks and rebinds eviden
  expect(result.genreChecks?.find(row=>row.ref==='S2.genre1')?.evidenceRef).toBe('S2.activeChoice');
  expect(result.categoryChecks?.find(row=>row.ref==='S5.category')?.evidenceRef).toBe('S5.coreConflict');
 });
+it('rebinds action-evidence references nested inside unmapped result reviews when caching and reordering',async()=>{
+ const original=selection(),cache:PremiseSourceReceipts=new Map();
+ const review=vi.fn(async input=>{
+  const result=report(input);
+  for(const [index,row] of result.payoffChecks!.entries())row.unmappedChecks=[{
+   ordinal:1,status:'supported',actionEvidenceRef:`S${index+1}.activeChoice`,
+   actionEvidenceQuote:'既定的具体人物行动',
+   reason:'本项独立行动早于后续结果，接收与执行条件已核对',
+  }];
+  return result;
+ });
+ await reviewChangedPremiseSources(original,'unchanged source scope',cache,review);
+ expect(cache.size).toBe(5);
+ const cached=Array.from(cache.values()).find(receipt=>receipt.selection.selected[0].premiseId==='E')!;
+ expect(cached.review.payoffChecks![0].unmappedChecks![0].actionEvidenceRef).toBe('S1.activeChoice');
+ const reversed=structuredClone(original);reversed.selected.reverse();
+ const result=await reviewChangedPremiseSources(reversed,'unchanged source scope',cache,review);
+ expect(review).toHaveBeenCalledTimes(1);
+ expect(result.payoffChecks!.find(row=>row.ref==='S1.payoff')!.unmappedChecks![0].actionEvidenceRef).toBe('S1.activeChoice');
+ expect(result.payoffChecks!.find(row=>row.ref==='S5.payoff')!.unmappedChecks![0].actionEvidenceRef).toBe('S5.activeChoice');
+});
 it('reuses independently reviewed facts after transport-only changes but audits changed causal evidence',async()=>{
  const input=selection(),receipts:PremiseSourceReceipts=new Map();
  const review=vi.fn(async current=>report(current));
