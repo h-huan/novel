@@ -284,7 +284,7 @@ describe('chain HTTP architecture', () => {
 
   it('retains full model reasoning for evidence-bearing causal selection, not only the downstream review',()=>{
     const real=read('real-llm.service.ts');
-    const steps=real.match(/const preliminarySteps=\\[([\\s\\S]*?)\\];/)?.[1]||'';
+    const steps=real.split('const preliminarySteps=[')[1]?.split('];')[0]||'';
     expect(steps).toContain('idea_premise_pool_generation');
     expect(steps).not.toContain('idea_premise_selection');
     expect(steps).not.toContain('idea_premise_pool_reselection');
