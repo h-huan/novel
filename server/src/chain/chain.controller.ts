@@ -6998,7 +6998,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     standard: string,
     physicalCallBudget: {remaining:number},
   ): Promise<PremiseSelectionReview> {
-    const validate=(value:unknown)=>premisePayoffReviewIssues(normalizePremisePayoffGapRoutes(value,selection),selection);
+    const validate=(value:unknown)=>premisePayoffReviewIssues(normalizePremisePayoffGapRoutes(value,selection),selection,true);
     const response=await this.llmCallWithRetry<any>('已核对题材的因果引用定向复核',
       corePremiseReviewStandard(standard)
       +'\n本批仅有causalPlan原文引用与因果索引发生变化；原池storyCore和全部展开叙事字段均未改变。'
@@ -7019,7 +7019,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     );
     if(!response.data)throw new Error('变更因果引用的独立兑现复核未完成：'+(response.validationIssues||response.warnings||[]).join('；'));
     const normalized=normalizePremisePayoffGapRoutes(response.data,selection);
-    const failures=materializePremisePayoffReview(normalized,selection);
+    const failures=materializePremisePayoffReview(normalized,selection,true);
     // The fast path is entered only after every source field, category and
     // genre already has a completed, reusable independent review. All prior
     // selection_fit issues in this path originated from the OLD causal plan.
@@ -7059,7 +7059,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       return mergePremiseSourceBatches(preparation?await preparation.resolve():selection, readyBatches, reviews);
     }
     const overlapFocusIds = overlapFocusId === undefined ? [] : typeof overlapFocusId === 'string' ? [overlapFocusId] : [...overlapFocusId];
-    const validateReview = (value: unknown) => mode === 'source_drift' ? (() => { const reviewed=quarantineIncompletePremiseReviews(completePremiseSourceProof(expandPremiseSourceCheckRows(value),selection),selection,requiredGenres); return [...premiseSourceReviewIssues(reviewed, selection),...premiseGenreFitIssues(reviewed,selection,requiredGenres),...premiseCategoryFitIssues(reviewed,selection),...premisePayoffReviewIssues(reviewed,selection)]; })() : [...premiseSelectionReviewIssues(value, selection),
+    const validateReview = (value: unknown) => mode === 'source_drift' ? (() => { const reviewed=quarantineIncompletePremiseReviews(completePremiseSourceProof(expandPremiseSourceCheckRows(value),selection),selection,requiredGenres,true); return [...premiseSourceReviewIssues(reviewed, selection),...premiseGenreFitIssues(reviewed,selection,requiredGenres),...premiseCategoryFitIssues(reviewed,selection),...premisePayoffReviewIssues(reviewed,selection,true)]; })() : [...premiseSelectionReviewIssues(value, selection),
       ...(Array.isArray((value as PremiseSelectionReview)?.issues) ? (value as PremiseSelectionReview).issues : [])
         .filter(item => item?.kind !== mode).map(() => '当前独立审查只能返回' + mode),
       ...premiseOverlapScopeIssues(value,selection,overlapFocusIds)];
@@ -7107,12 +7107,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const issues = validateReview(result.data);
     if (issues.length) throw new Error('锁定前题材复核协议错误，未完成请求交付：' + issues.join('；'));
     if(mode!=='source_drift')return result.data as PremiseSelectionReview;
-    const reviewedData=quarantineIncompletePremiseReviews(completePremiseSourceProof(expandPremiseSourceCheckRows(result.data),selection),selection,requiredGenres);
+    const reviewedData=quarantineIncompletePremiseReviews(completePremiseSourceProof(expandPremiseSourceCheckRows(result.data),selection),selection,requiredGenres,true);
     const review=materializePremiseSourceReview(reviewedData,selection);
     review.issues.push(...materializePremiseGenreFit(reviewedData,selection,requiredGenres));
     review.issues.push(...materializePremiseCategoryFit(reviewedData,selection));
     const payoffEvidence=reviewedData;
-    review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection));
+    review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection,true));
     review.payoffChecks=payoffEvidence.payoffChecks;
     review.categoryChecks=(reviewedData as any).categoryChecks;
     review.genreChecks=resolvePremiseGenreEvidence(reviewedData,selection)?.genreChecks;
