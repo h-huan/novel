@@ -1,4 +1,5 @@
 import {bindModelRequestClock,remainingModelRequestTime} from './model-request-clock';
+import { CreationOutlineCheckpoint } from './creation-outline-checkpoint';
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
 import {chapterConditionReviewIssues, chapterConditionPlanningGapIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
@@ -8998,6 +8999,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         // Same persisted world snapshot is consumed by characters, chapter planning,
         // fact/action review and the eventual repair. Never select a second row.
         const worldRowForOutline=savedWorldForOutline;
+        const outlineWork=new CreationOutlineCheckpoint(db);
         // Saved world fields may be JSON-encoded arrays/objects in SQLite.
         // Decode the prompt VIEW only, never mutate the canonical saved world
         // or the independent review input. Otherwise `rules` is double-escaped
@@ -9107,6 +9109,29 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
           constitution.chapterWordRange,
           dto.selectedIdea?.plannedChapters,
         );
+        // A previously fully audited plan is reusable only with the exact
+        // original story, world, character rows and chapter/author contract.
+        // The cache is stage work, never Canon; an invalid plan regenerates.
+        const planSourceHash=CreationOutlineCheckpoint.fingerprint({
+          canonicalCreativeBrief,worldRowForOutline,outlineCharacterSources,
+          targetWords:dto.targetWords,constitution,styleInstruction,
+          chapterWordMin:CHAPTER_WORD_MIN,chapterWordMax:CHAPTER_WORD_MAX,
+          minChapters,maxChapters,recommendedChapters,isShort,
+        });
+        const savedPlan=outlineWork.load<{chapters:CreationChapterContract[]}>(projectId,'chapter_plan',planSourceHash);
+        let reusedChapterPlan=false;
+        if(savedPlan && Array.isArray(savedPlan.chapters)){
+          try{
+            const reconstructed=creationChapterContracts({
+              chapterResponsibilities:creationResponsibilityPlan(savedPlan.chapters),
+            },(value,index)=>normalizeOutlineChapterFunction(value,index,isShort));
+            if(reconstructed.length>=minChapters && reconstructed.length<=maxChapters){
+              chapterTitles=reconstructed;reusedChapterPlan=true;
+              this.logger.log('创建大纲：复用同源且已审核的章节职责规划 project='+projectId);
+            }
+          }catch(error){this.logger.warn('旧章节职责检查点无效，按原程序重新规划：'+String(error));}
+        }
+        if(!reusedChapterPlan){
         const titleResponse = await this.realLLM.generate({
                prompt: `为${isShort ? '短篇' : '长篇'}规划章节，不能另写同名故事。
 唯一故事基准:${canonicalCreativeBrief}
@@ -9155,6 +9180,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
             throw new Error(`模型规划${chapterCount}章无法在每章${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}字的前提下承载项目目标${dto.targetWords}字；需在 ${minChapters}-${maxChapters} 章之间（建议 ${recommendedChapters} 章）。请重新规划章节结构。`);
         }
 
+        }
         const auditChapterResponsibilities = async (plan: any[]): Promise<string[]> => {
           // Both short and long creation now validate the same immutable task
           // evidence. Text quotes remain supported; an explicit server-owned
@@ -9234,7 +9260,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         };
 
         const initialResponsibilityPlan = creationResponsibilityPlan(chapterTitles);
-        let responsibilityIssues = await auditChapterResponsibilities(initialResponsibilityPlan);
+        let responsibilityIssues = reusedChapterPlan ? [] : await auditChapterResponsibilities(initialResponsibilityPlan);
         if (responsibilityIssues.length > 0) {
           const repaired = await this.repairChapterResponsibilityPlan({
             chapterTitles,
@@ -9254,6 +9280,9 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           }
         }
 
+        // Only an audited complete plan becomes reusable stage work. The
+        // original whole-book review and Canon commit remain mandatory.
+        if(!reusedChapterPlan)outlineWork.save(projectId,'chapter_plan',planSourceHash,{chapters:chapterTitles});
         volId = uuid();
         const acceptedOutlineSources: Record<string, unknown>[] = [];
         let priorOutlineFactLedger: OutlineFactLedgerEntry[] = [];
