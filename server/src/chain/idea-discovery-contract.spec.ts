@@ -55,6 +55,15 @@ describe('source-owned scored pool skips redundant model selection only with val
     expect(result?.selected.map(row=>row.premiseId)).toEqual(['P1','P3']);
     expect(result?.selected.map(row=>row.storyCategory)).toEqual(['都市','悬疑']);
   });
+  it('reuses already-audited category diversity during ranked refill without inventing a new category',()=>{
+    const seeds=[create('P4','月底交出钥匙前','都市'),
+      create('P5','老房的签字人消失','都市')];
+    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P4',91],['P5',85]]),
+      2,7,['都市','悬疑'],['悬疑']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P4','P5']);
+    expect(result?.selected.every(row=>row.storyCategory==='都市')).toBe(true);
+    expect(result?.poolTargetMet).toBe(false);
+  });
   it('falls back to original paid selection when provenance, causal plan, score or quantity is missing',()=>{
     const good=create('P1','归还旧合同之前','都市');
     const missing=create('P2','卖房前的旧协议','都市');
