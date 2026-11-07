@@ -20,10 +20,53 @@ import {
   normalizePremiseSelectionPayload,
   capRankedPremiseSelections,
   rankPremisePoolByMaturityScore,
+  sourceReadyScoredPremiseSelection,
   readPremiseMaturityScore,
   selectedPremiseEvidenceForIdeaCard,
   presentationLockedPremiseView,
 } from './idea-discovery-contract';
+
+describe('source-owned scored pool skips redundant model selection only with valid provenance',()=>{
+  const create=(id:string,title:string,category:string)=>{
+    const situation='接到通知，主人公一家将在明天失去住处，必须在今晚决定是否公开共同签署的旧协议。';
+    const action='主人公主动向邻居说明协议经过，并把仍在自己手里的原件交给能够核对的签署人。';
+    const conditions='协议原件始终由主人公保管，签署人已经答应当面核对，而对手试图阻挠交付。';
+    const payoff='签署人核对记录后当面撤回对主人公的指控，主人公却失去了本来可以独自保留的补偿机会。';
+    const genre='旧协议、共同住房权益和邻里关系共同驱动对抗及责任选择。';
+    return {premiseId:id,workingTitle:title,storyCategoryId:category==='悬疑'?'K2':'K1',storyCategory:category,
+      storyCore:`【处境触发】${situation}\n【主动选择】${action}\n【必要条件】${conditions}\n【反转兑现】${payoff}\n【分类流派机制】${genre}`,
+      readerQuestion:'签署人核对原件后会维护谁的权益，主角要付出什么代价？',
+      causalPlan:[{action:{field:'activeChoice',quote:action},
+        conditions:[{field:'protagonistSituation',quote:situation}],
+        result:{field:'payoff',quote:payoff}}]};
+  };
+  it('uses scores to select exact source facts, without a second authoring call or changing identity',()=>{
+    const first=create('P1','公开旧协议之后','都市');
+    const second=create('P2','赶在搬家前核对','都市');
+    const result=sourceReadyScoredPremiseSelection([first,second],new Map([['P1',70],['P2',93]]),2,['都市']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P2','P1']);
+    expect(result?.selected.every(row=>Array.isArray(row.causalPlan) && row.payoff.includes('签署人核对记录后'))).toBe(true);
+    expect(result?.pool.map(row=>row.premiseId)).toEqual(['P1','P2']);
+  });
+  it('preserves mixed-category exploration without changing any source category or score',()=>{
+    const seeds=[create('P1','赶在查封前救家','都市'),
+      create('P2','邻居为何退出协议','都市'),create('P3','旧协议的签字疑云','悬疑')];
+    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P1',95],['P2',92],['P3',86]]),2,['都市','悬疑']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P1','P3']);
+    expect(result?.selected.map(row=>row.storyCategory)).toEqual(['都市','悬疑']);
+  });
+  it('falls back to original paid selection when provenance, causal plan, score or quantity is missing',()=>{
+    const good=create('P1','归还旧合同之前','都市');
+    const missing=create('P2','卖房前的旧协议','都市');
+    const scores=new Map([['P1',88],['P2',81]]);
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,causalPlan:[]}],scores,2,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,readerQuestion:''}],scores,2,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,missing],new Map([['P1',88]]),2,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,
+      causalPlan:[{action:{field:'activeChoice',quote:'不存在于原池的行动'},conditions:[],
+        result:{field:'payoff',quote:'不存在于原池的结果'}}]}],scores,2,['都市'])).toBeNull();
+  });
+});
 
 describe('original-pool same-generation maturity ranking',()=>{
   it('prioritizes an already-selected shortlist without changing source identities or dropping unscored items',()=>{
