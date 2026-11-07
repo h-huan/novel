@@ -33,6 +33,18 @@ it('compacts external source citations without omitting any literal clause or ad
  expect(after).toEqual(full);
 });
 
+it('compact chapter proofs keep existing action text visible without deciding the causal verdict',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',
+  content:'她先核对了文件上的签名，再到窗口办理交接。',
+  characterActions:[{action:'她把原件当面交给窗口。',result:'窗口已收到原件。'}],
+  scenes:[{event:'工作人员查验了实际递交的原件。',outcome:'原件完成交接。'}]}];
+ const prompt=causalAuditRepairPrompt(null,[],JSON.stringify(chapters),{},false,false,true).prompt;
+ expect(prompt).toContain('"text":"她把原件当面交给窗口。"');
+ expect(prompt).toContain('"text":"工作人员查验了实际递交的原件。"');
+ expect(prompt).toContain('"text":"窗口已收到原件。"');
+ expect(prompt).toContain('真实gap须完整解释缺失条件');
+});
+
 it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
  const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
  const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
