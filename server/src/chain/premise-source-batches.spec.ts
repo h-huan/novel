@@ -105,6 +105,7 @@ describe('bounded premise source review batches',()=>{
   const raw=batches.map(report),badBatch=batches.findIndex(batch=>batch.selected.some(item=>item.premiseId==='D'));
   const local=batches[badBatch].selected.findIndex(item=>item.premiseId==='D')+1;
   raw[badBatch].sourceChecks.find(row=>row.ref==='S'+local+'.payoff')!.status='drift';
+  (raw[badBatch].payoffChecks[local-1] as any).unmappedChecks=[{ordinal:1,status:'supported',actionEvidenceRef:'S'+local+'.activeChoice',actionEvidenceQuote:'此前已有独立行动',reason:'局部已发生的独立行动仍需引用原身份坐标'}];
   const merged=mergePremiseSourceBatches(original,batches,raw.map((value,index)=>({
     ...materializePremiseSourceReview(value,batches[index]),
     payoffChecks:value.payoffChecks,
@@ -112,6 +113,7 @@ describe('bounded premise source review batches',()=>{
   expect(merged.passed).toBe(false);expect(merged.sourceChecks).toHaveLength(50);
   expect(merged.sourceChecks!.find(row=>row.ref==='S4.payoff')?.status).toBe('drift');
  expect(merged.payoffChecks?.find(row=>row.ref==='S4.payoff')?.reversalCheck?.actionEvidenceRef).toBe('S4.activeChoice');
+ expect(merged.payoffChecks?.find(row=>row.ref==='S4.payoff')?.unmappedChecks?.[0].actionEvidenceRef).toBe('S4.activeChoice');
   expect(merged.issues[0].premiseId).toBe('D');expect(JSON.stringify(original)).toBe(before);
  });
  it('ignores server-only transport duplication when balancing source partitions',()=>{
