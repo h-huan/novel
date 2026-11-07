@@ -44,6 +44,19 @@ describe('creation outline checkpoints (noncanonical)', () => {
     expect(work.load('p2', 'chapter_2', key)).toEqual({ valid: true });
   });
 
+  it('invalidates chapters changed by final fact reconciliation but retains the canonical plan fingerprint', () => {
+    const key=CreationOutlineCheckpoint.fingerprint({world:'frozen'});
+    work.save('p1','chapter_plan',key,{chapters:[{order:0}]});
+    work.save('p1','chapter_0',key,{outcome:'original'});
+    work.save('p1','chapter_1',key,{outcome:'original'});
+    work.save('p2','chapter_0',key,{outcome:'other project'});
+    work.invalidateChapters('p1');
+    expect(work.load('p1','chapter_plan',key)).toEqual({chapters:[{order:0}]});
+    expect(work.load('p1','chapter_0',key)).toBeNull();
+    expect(work.load('p1','chapter_1',key)).toBeNull();
+    expect(work.load('p2','chapter_0',key)).toEqual({outcome:'other project'});
+  });
+
   it('does not keep orphaned checkpoints after project removal', () => {
     const key = CreationOutlineCheckpoint.fingerprint('stage');
     work.save('p1', 'chapter_0', key, { valid: true });
