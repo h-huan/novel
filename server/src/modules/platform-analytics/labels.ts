@@ -310,6 +310,7 @@ export const HARDLINE_RULE_LABELS: Record<string, string> = {
   '51-modal-particle-density': '句末语气词堆过密（嗯/啊/吧）',
   '52-env-imagery-repeat': '同一环境意象反复铺陈',
   '53-same-structure-parallel': '同构排比（V了A、V了B…）',
+  'literal-character-count': '正文引文字符计数不一致',
   '54-measure-word-mismatch': '量词与名词搭配错',
   '55': 'AI 高频模糊词过密（仿佛/似乎/缓缓）',
   '56-punct-stacking': '标点叠用（！！！/？？）',

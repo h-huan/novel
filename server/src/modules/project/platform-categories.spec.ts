@@ -497,3 +497,16 @@ describe('跨频道同名分类：靠「频道·分类名」选项身份归位�
     for (const o of options) expect(o.id).toBe(platformCategoryOptionId(o.channel, o.name));
   });
 });
+
+it('uses verified short-story writing descriptions without inventing a submission tree or cross-platform defaults',async()=>{
+ const {platformCategoryPublicWritingReference,platformCategoryPublicWritingBrief,resolveSubmissionCategory,platformCategoryTreeVerification}=await import('../../../shared/src');
+ const reference=platformCategoryPublicWritingReference('fanqie','现言甜宠','short_story');
+ expect(reference?.definition).toContain('恋爱故事');
+ expect(reference?.sourceUrl).toBe('https://fanqienovel.com/writer/zone/article/7176894591558221861');
+ expect(reference?.publishedAt).toBe('2023-05-30');
+ expect(platformCategoryPublicWritingBrief('fanqie','现言甜宠','short_story')).toContain('不是投稿后台完整分类表');
+ for(const args of [['other','现言甜宠','short_story'],['fanqie','现言甜宠','long_novel'],['fanqie','现言甜宠新分组','short_story'],['fanqie','男频脑洞','short_story']])
+   expect(platformCategoryPublicWritingReference(...args as [string,string,string])).toBeUndefined();
+ expect(resolveSubmissionCategory('fanqie','现言甜宠','short_story')).toEqual({status:'no_tree'});
+ expect(platformCategoryTreeVerification('fanqie','short_story')?.verified).toBe('unit_unverified');
+});

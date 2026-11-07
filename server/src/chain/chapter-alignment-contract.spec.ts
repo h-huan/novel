@@ -88,6 +88,39 @@ it('repairs a paraphrased dialogue quote using actual paragraph IDs and preserve
  expect(()=>materializeChapterObligationEvidence([{ref:'M6',evidenceAnchorIds:['body:p99']}],old,errors,body)).toThrow();
 });
 
+it('offers only canonical paragraph IDs and does not send unrelated fixed-action receipts again',()=>{
+ const body='老李拿起台账，叫来负责人核验。随后锁上房门。\n\n负责人核对了签名，当场签收原件。';
+ const old=[{ref:'M1',status:'covered',reason:'已经发生了核验动作',evidence:['非原文引文']},
+            {ref:'M2',status:'missing',reason:'另一项任务尚未完成',evidence:[]}];
+ const prompt=chapterObligationEvidencePrompt(old,['M1'],['M1行动证据不能定位实际正文'],body);
+ expect(prompt).toContain('body:p1');
+ expect(prompt).toContain('body:p2');
+ expect(prompt).not.toContain('body:p1:c1');
+ expect(prompt).not.toContain('"ref":"M2"');
+ const repaired=materializeChapterObligationEvidence(
+   [{ref:'M1',status:'missing',reason:'不能改判',evidenceAnchorIds:['body:p1','body:p2']}],
+   old,['M1行动证据不能定位实际正文'],body);
+ expect(repaired[0].status).toBe('covered');
+ expect(repaired[0].reason).toBe(old[0].reason);
+ expect(repaired[0].evidence).toHaveLength(2);
+ expect(()=>materializeChapterObligationEvidence(
+   [{ref:'M1',status:'covered',evidenceAnchorIds:['body:p1:c1']}],old,
+   ['M1行动证据不能定位实际正文'],body)).toThrow(/不存在的正文证据编号/);
+ expect(()=>materializeChapterObligationEvidence(
+   [{ref:'M1',status:'covered',evidenceAnchorIds:['body:p99']}],old,
+   ['M1行动证据不能定位实际正文'],body)).toThrow(/body:p99/);
+});
+it('uses one evidence-address protocol and keeps only the targeted original chapter actions',()=>{
+ const body='李先生拿起台账核验。\n\n负责人当场签收了原件。';
+ const old=[{ref:'M1',status:'covered',reason:'核验和签收均已发生',evidence:['不连续的转述']}];
+ const catalog=[{ref:'M1',source:'拿起台账并完成核验签收'},{ref:'M2',source:'另一项尚未开始的行动'}];
+ const prompt=chapterObligationEvidencePrompt(old,['M1'],['M1行动证据不能定位实际正文'],body,catalog);
+ expect(prompt).toContain('拿起台账并完成核验签收');
+ expect(prompt).not.toContain('另一项尚未开始的行动');
+ expect(prompt).toContain('evidenceAnchorIds');
+ expect(prompt).toContain('body:p2');
+});
+
 it('accepts exact short result evidence with action context while retaining location and context gates',()=>{
  const catalog=[{ref:'M1',source:'接听电话后挂断'}],body='她接起电话，让对方别再打来。\n\n挂断。';
  const row={ref:'M1',status:'covered',reason:'接听与拒绝之后挂断，行动和结果已有原文依据。',evidence:['她接起电话，让对方别再打来。','挂断。']};

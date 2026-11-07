@@ -33,3 +33,39 @@ export function applyOutlineCandidateFactPatches<T extends { order: number; cont
   }
   return result;
 }
+
+/** Before paying for the final independent ledger review, verify that the
+ * existing patch actually touches a quoted contradictory claim. This is a
+ * transport/target check, NOT a semantic pass and does not infer a correction.
+ * If the reviewer did not quote a uniquely identifiable existing phrase,
+ * the original independent fact Gate remains the authority. */
+export function outlineCandidateFactRepairTargetIssues<T extends {order:number;content:string;scenes:string}>(
+ before:readonly T[], after:readonly T[], contradictions:readonly unknown[],
+):string[] {
+ const afterByOrder=new Map(after.map(chapter=>[chapter.order,chapter]));
+ const issues:string[]=[];
+ for(const item of contradictions){
+   let evidence:Record<string,unknown>|null=null;
+   if(typeof item==='string'){
+     try { const parsed=JSON.parse(item);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))evidence=parsed; }
+     catch { /* Natural-language evidence is still checked by the original semantic Gate. */ }
+   }else if(item&&typeof item==='object'&&!Array.isArray(item))evidence=item as Record<string,unknown>;
+   const conflict=String(evidence?.conflict||'');
+   // The reviewer is explicitly contrasting source phrases here. Do not
+   // deduce edits from broad quote1/quote2 full-chapter payloads.
+   const quoted=[...conflict.matchAll(/[“「]([^”」]{6,160})[”」]/gu)].map(m=>m[1]);
+   const targets=quoted.flatMap(quote=>before.flatMap(chapter=>
+     (['content','scenes'] as const).filter(field=>chapter[field].includes(quote))
+       .map(field=>({quote,chapter,field}))));
+   if(!targets.length)continue;
+   // Replacing the exact assertion (in at least one cited location) is a
+   // minimum prerequisite. Any remaining contradictory projections are still
+   // examined by the existing full fact-review Gate.
+   if(!targets.some(({quote,chapter,field})=>
+     !String(afterByOrder.get(chapter.order)?.[field]??'').includes(quote))){
+     issues.push('事实补丁未直接改动独立审查引述的冲突原句：'+
+       targets.map(row=>'第'+(row.chapter.order+1)+'章.'+row.field+'：“'+row.quote+'”').join('；'));
+   }
+ }
+ return issues;
+}

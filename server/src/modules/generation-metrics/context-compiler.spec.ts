@@ -28,6 +28,21 @@ function fixture() {
 }
 
 describe('Context Compiler', () => {
+  it('keeps the saved unnamed first-person protagonist in BOTH chapter and refinement quality contexts without inventing cast', () => {
+    const db=fixture();
+    try {
+      db.prepare("UPDATE characters SET name=? WHERE id='c'").run('未具名（第一人称“我”）');
+      db.prepare("UPDATE outlines SET character_ids='[]',content='我到城门按自己的责任行动。' WHERE id='o'").run();
+      db.prepare("UPDATE chapters SET content='我按既定任务进入禁区。' WHERE id='ch5'").run();
+      for (const stage of ['chapter','refinement'] as const) {
+        const compiled=compileContext(db,{projectId:'p',stage,chapterIndex:5,maxChars:24000});
+        const data=JSON.parse(compiled.snapshot);
+        expect(data.characterContracts.map((c:any)=>c.characterId)).toEqual(['c']);
+        expect(data.characterContracts[0].name).toBe('未具名（第一人称“我”）');
+        expect(compiled.snapshot).toContain('左臂受伤');
+      }
+    } finally {db.close();}
+  });
   it('retains middle facts of the complete immediate chapter separately from summaries', () => {
     const db=fixture();
     try {

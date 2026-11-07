@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { chapterReviewRetryContent } from './chapter-review-retry';
+import { ChainController } from './chain.controller';
 describe('chapter review retry provenance', () => {
   it('keeps one complete predecessor and authoritative review inputs after repeated context assembly',async()=>{
-    const {ChainController}=await import('./chain.controller');const c=Object.create(ChainController.prototype) as any;
+    const c=Object.create(ChainController.prototype) as any;
     const previous={id:'prior',chapter_index:1,title:'前章',content:'前章真实正文。'.repeat(2500)};
     c.db={getDb:()=>({prepare:()=>({get:()=>previous,all:()=>[]})})};
     const once=c.previousChapterReviewContext('p',2,'背景材料'.repeat(5000));
@@ -75,14 +76,14 @@ it('stores and recovers a time plan only for the same draft and unchanged chapte
 });
 
 it('uses one persisted row for retry parameters and rejects invalid API provenance as a client error',async()=>{
- const {ChainController}=await import('./chain.controller');const {vi}=await import('vitest');const c=Object.create(ChainController.prototype) as any;const run={project_id:'p',chapter_index:1,stage:'chapter',scenario:'writing',output_text:'留存正文'};const get=vi.fn(()=>run);c.db={getDb:()=>({prepare:()=>({get})})};
+ const {vi}=await import('vitest');const c=Object.create(ChainController.prototype) as any;const run={project_id:'p',chapter_index:1,stage:'chapter',scenario:'writing',output_text:'留存正文'};const get=vi.fn(()=>run);c.db={getDb:()=>({prepare:()=>({get})})};
  expect(c.chapterRetryParameters(undefined,'p',1,'章纲')).toEqual({});expect(get).not.toHaveBeenCalled();expect(c.chapterRetryParameters('r','p',1,'章纲').initialContent).toBe('留存正文');expect(get).toHaveBeenCalledTimes(1);
  try{c.chapterRetryParameters('r','other',1,'章纲');throw Error('should fail');}catch(error:any){expect(error.getStatus()).toBe(400);}
 });
 
 
 it('preserves separate complete historical evidence across repeated assembly without replacing the latest state',async()=>{
- const {ChainController}=await import('./chain.controller');const {vi}=await import('vitest');
+ const {vi}=await import('vitest');
  const c=Object.create(ChainController.prototype) as any;
  const latest={id:'two',chapter_index:2,title:'第二章',content:'现在他在医院。'};
  const earlier={id:'one',chapter_index:1,title:'第一章',content:'昨天他在门厅接电话。'};
@@ -100,7 +101,7 @@ it('preserves separate complete historical evidence across repeated assembly wit
 
 
 it('lists only same-chapter retained prose, marks length limits and protects saved bodies',async()=>{
- const {ChainController}=await import('./chain.controller');
+
  const c=Object.create(ChainController.prototype) as any;
  let chapter:any={chapter_index:3,content:''};
  const base={project_id:'p',chapter_index:3,stage:'chapter',scenario:'writing',status:'failed',gate_status:'blocked'};

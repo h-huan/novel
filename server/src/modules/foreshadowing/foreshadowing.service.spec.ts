@@ -89,6 +89,14 @@ describe('ForeshadowingService', () => {
       expect(service.remind('fs-1').status).toBe('reminder');
     });
 
+    it('permits multiple independently evidenced chapter reminders without closing or duplicating a live thread', () => {
+      (repo.findById as any).mockReturnValue({ ...mockRow, status: 'reminder' });
+      expect(service.remind('fs-1').status).toBe('reminder');
+      expect(service.remind('fs-1').status).toBe('reminder');
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.recoverForeshadowing).not.toHaveBeenCalled();
+    });
+
     it('should throw when activating non-buried foreshadowing', () => {
       (repo.findById as any).mockReturnValue({ ...mockRow, status: 'pending' });
       expect(() => service.activate('fs-1')).toThrow();

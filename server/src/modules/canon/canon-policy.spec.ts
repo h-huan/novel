@@ -104,3 +104,16 @@ describe('discovery facts boundary', () => {
     expect(audited.characters).toEqual(['林川']);
   });
 });
+
+it.each(['short_story','long_novel'])('preserves the final card ending and approved stage milestones for %s',storyType=>{
+ const story={title:'确认的故事',storyType,description:'双方通过实际合作推进关系并逐步解决问题。',
+  ending:'三个月后首次完成整夜照料，双方作出共同经营的最终选择。',
+  scopeBreakdown:[{arc:'初步合作',chapters:2,outcome:'一时缓和，尚未完成整夜照料。'},
+   {arc:'最终兑现',chapters:2,outcome:'三个月后首次整夜完成。'}]};
+ const snapshot=structuredClone(story),foundation=buildStoryFoundation(story);
+ expect(foundation.endingDirection).toBe(story.ending);
+ expect(foundation.scopeBreakdown).toEqual(story.scopeBreakdown);
+ expect(foundation.scopeBreakdown).not.toBe(story.scopeBreakdown);
+ (foundation.scopeBreakdown![0] as any).outcome='派生资料的修改';
+ expect(story).toEqual(snapshot);
+});

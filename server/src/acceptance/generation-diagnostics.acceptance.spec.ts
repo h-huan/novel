@@ -1,4 +1,8 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import * as concurrency from '../chain/discovery-concurrency';
+import * as generationBudgets from '../config/generation-budgets';
+import {currentGenerationSignal,GenerationCancelledError} from '../common/generation-cancellation';
+import {dimensionGuide} from '../../shared/src';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { Migrator } from '../database/migrator';
 import { GenerationMetricsService, chapterResponsibilityIssueSignature } from '../modules/generation-metrics/generation-metrics.service';
@@ -11,19 +15,32 @@ import { ChainController } from '../chain/chain.controller';
 import { IdeaAppealGateService } from '../chain/idea-appeal-gate.service';
 import { updateConstitution } from '../modules/project/creative-constitution';
 import { HttpException } from '@nestjs/common';
+/** Return the existing reviewer call's full protocol from its actual selected
+ * premise catalog. This is a deterministic fake model for acceptance tests,
+ * not a bypass or fixture used by production generation. */
+function makeOverlapFixture(_prompt:string){
+  // Pairwise review alone owns structural overlap; source/payoff causality is
+  // independently simulated by makePremiseReviewFixture in the same tests.
+  return {passed:true,issues:[]};
+}
+
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
-afterEach(() => standardDirectiveCache.clear());
+// Fixed host headroom keeps exact physical-call assertions reproducible;
+// low/high-headroom scheduling is covered separately in review-grouping.spec.
+beforeEach(() => { vi.spyOn(concurrency, 'adaptiveDiscoveryConcurrency').mockImplementation(count => Math.max(1, Math.min(count, 2))); });
+afterEach(() => { standardDirectiveCache.clear(); vi.restoreAllMocks(); });
 
 // 这里曾有只填平台/分类的旧版灵感请求，结果绕过四维创作设定；验收样例必须和正式入口同一硬门。
 const discoveryStandards = {
   storyTone: ['悬疑'], writingStyle: ['白描/朴素'], webNovelGenre: ['悬疑'], plotTags: ['探案'], pov: '第三人称限知',
 };
 
+const samplePremiseCores = ["【处境触发】失语气象员发现台风前的浮标全部报出逆风。【主动选择】他决定乘船核对维修合同和海浪方向。【必要条件】港务主管取得真实风速日志才能调整撤离航道。【反转兑现】走私船藏在错误风向背后，他揭露后失去同僚支持。【分类流派机制】海岛灾难悬疑以撤离选择和职业代价推进。","【处境触发】营养师发现社区餐盒里的配料与过敏病例不一致。【主动选择】她决定保留留样追查代餐券背后的供货方。【必要条件】食安人员检测留样并核对签字后才能定责。【反转兑现】真正被操纵的是监护文件，她举报却失去食堂资格。【分类流派机制】社区现实悬疑以老人权益和家属关系推进。","【处境触发】提词员发现剧团的老戏突然缺少最后七句唱词。【主动选择】她决定查验旧演出录像与演员的口型。【必要条件】收养档案与原始台本经核对才能确认身份。【反转兑现】唱词藏着一次身份顶替，她揭露后失去师父信任。【分类流派机制】剧团身份悬疑以师徒抉择和舞台证据推进。","【处境触发】训导员发现退役检疫犬总对空货箱示警。【主动选择】他决定查阅犬只芯片编号和货车冷链记录。【必要条件】口岸安检核实车辆监控与检疫记录才能扣查。【反转兑现】药材是合法诱饵，活体繁育犬才是目标，他丢了旧友。【分类流派机制】边境物流悬疑以动物身份与同事情谊推进。","【处境触发】测绘员发现旧城区一条有人居住的窄巷从新版地图消失。【主动选择】她决定用井盖距离和居民门牌核对现场。【必要条件】住房部门取得测绘底图才能重审拆迁补偿。【反转兑现】消失的巷子关联旧身份交换，她查明真相却伤害邻里。【分类流派机制】城市测绘悬疑以安置权益和身份争夺推进。"];
 const makePremiseSelectionFixture = (count = 5) => ({
   pool: Array.from({ length: count }, (_, index) => ({
     premiseId: `P${index + 1}`,
     workingTitle: `候选题材${index + 1}`,
-    storyCore: `普通人在限时压力中发现异常证据并主动追查，最终必须承担选择造成的关系后果${index + 1}`,
+    storyCore: samplePremiseCores[index],
   })),
   selectedPremises: Array.from({ length: count }, (_, index) => ({
     premiseId: `P${index + 1}`,
@@ -38,8 +55,84 @@ const makePremiseSelectionFixture = (count = 5) => ({
     secondOrderConsequence: '证据公开后会重新分配责任与利益，并迫使关键关系重新站队',
     readerQuestion: '主角能否在截止时间前证明异常，同时承担公开证据造成的后果',
     differentiation: `第${index + 1}个候选使用独立职业载体、证据链与关系代价，不复用其他题材机制`,
+    causalPlan: [{
+      action: { field: 'activeChoice', quote: '主角必须亲自决定是否公开会改变关系与利益分配的证据' },
+      conditions: [{ field: 'escalation', quote: '每次核验都会让时间压力、职业风险与关系代价继续升级' }],
+      result: { field: 'payoff', quote: '终局兑现证据真相、人物选择与关系变化三项阅读承诺' },
+    }],
   })),
 });
+
+/** Mock generation follows server-owned slots; only the initial transport
+ * identity/category envelope changes, not any independent story review. */
+function fixturePoolWithLockedSlots(input:any,pool:readonly Record<string,any>[]){
+ const marker='【生成前锁定的候选槽位】';
+ const slots=JSON.parse(String(input.prompt).split(marker)[1]?.split('\n')[0]||'[]') as
+  {premiseId:string;storyCategoryId:string}[];
+ return pool.map((item,index)=>({...item,
+  premiseId:slots[index]?.premiseId??item.premiseId,
+  storyCategoryId:slots[index]?.storyCategoryId??item.storyCategoryId}));
+}
+
+function promptArray(prompt: string, marker: string, terminator: string, optional = false): any[] {
+  const markerAt = prompt.indexOf(marker);
+  if (markerAt < 0) {
+    if (optional) return [];
+    throw new Error('review fixture missing prompt marker: ' + marker);
+  }
+  const start = prompt.indexOf('[', markerAt + marker.length);
+  const end = prompt.indexOf(terminator, start);
+  if (start < 0 || end < 0) throw new Error('review fixture cannot locate prompt array: ' + marker);
+  return JSON.parse(prompt.slice(start, end).trim());
+}
+
+function makePremiseReviewFixture(prompt: string) {
+  const sourceCatalog = promptArray(prompt, '【逐字段来源核查目录】', '\n目录中每个ref');
+  const categoryCatalog = promptArray(prompt, '【与完整卡同口径的前置分类审核】', '；categoryChecks', true);
+  const payoffCatalog = promptArray(prompt, '【必返payoffChecks目录】', '\n【逐环节因果计划目录');
+  const causalCatalog = promptArray(prompt, '【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】', '\n先核对每个causalPlan环节');
+  const unmappedCatalog = promptArray(prompt, '【因果计划未逐字覆盖的已有结果句（仅定位，非新增质量门）】', '。这只是对原有反转/兑现字段', true);
+  const genreCatalog = promptArray(prompt, '【额外必返genreChecks】', '；每个ref返回status=fulfilled|missing|unknown', true);
+  const genreEvidence = promptArray(prompt, '【流派证据目录：只含已选展开】', '\n【genreChecks单项形状】', true);
+  return {
+    sourceChecks: sourceCatalog.map(row => ({
+      ref: row.ref, status: 'preserved',
+      reason: '原池与已选字段事实兼容，必要条件和结果方向保持一致。',
+    })),
+    categoryChecks: categoryCatalog.map(row => ({
+      ref: row.ref, status: 'fulfilled',
+      evidenceRef: row.ref.slice(0, row.ref.indexOf('.') + 1) + 'coreConflict',
+      reason: '核心冲突与人物主动选择落实了该分类机制，并非只依赖标签。',
+    })),
+    payoffChecks: payoffCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      return {
+        ref: row.ref, status: 'supported',
+        unmappedChecks: unmappedCatalog.filter(item => String(item.ref).startsWith(prefix)).map((_,index) => ({
+          ordinal:index+1,status:'context_only',reason:'此用例模拟独立审查，以检查生产流程调度及身份绑定；不作为真实因果判定',
+        })),
+        actionEvidenceRef: prefix + 'activeChoice',
+        conditionEvidenceRef: prefix + 'escalation',
+        reversalCheck: {status:'supported',actionEvidenceRef:prefix+'activeChoice',reason:'本题材已先采取具体行动，并由升级条件触发反转变化'},
+        reason: '行动、必要条件与兑现结果在本题材因果计划中逐项对应。',
+        links: causalCatalog.filter(link => String(link.ref).startsWith(prefix)).map(link => ({
+          ref: link.ref, status: 'supported',
+          decisionCheck: {status: 'not_required', reason: '本验收样本只描述已建立的直接行动和叙事承诺，没有新的机构决定'},
+          reason: '本环节的行动与必要条件均已在同一题材字段中建立并支撑结果。',
+        })),
+      };
+    }),
+    genreChecks: genreCatalog.map(row => {
+      const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
+      const evidence = genreEvidence.find(item => item.id === prefix + 'coreConflict')
+        || genreEvidence.find(item => String(item.id).startsWith(prefix));
+      return {
+        ref: row.ref, status: 'fulfilled', evidenceRef: evidence?.id,
+        reason: '本题材的核心冲突与主动选择体现了所选流派的实际行动机制。',
+      };
+    }),
+  };
+}
 
 it('learns partial chapter-responsibility progress for future strategy ordering', async () => {
   const db = new DatabaseSync(':memory:');
@@ -91,7 +184,13 @@ it('reports one model configuration failure and shows it on the workbench before
   } finally { db.close(); }
 });
 
-it('generates a complete idea batch through preselection plus structuring and reuses an identical in-flight request', async () => {
+it.each(['baseline','refill','streaming','prepare','prepare_rejected','prepare_error','prepare_cancel','prepare_source_tail'] as const)('generates a complete idea batch through preselection plus structuring and reuses an identical in-flight request; mode=%s', async mode => {
+  const refillOverlap=mode==='refill',streaming=mode==='streaming',prepare=mode.startsWith('prepare');
+  if(streaming){
+    const configured=generationBudgets.readGenerationBudgets();
+    vi.spyOn(generationBudgets,'readGenerationBudgets').mockReturnValue({...configured,presentationBatchSize:1});
+    vi.mocked(concurrency.adaptiveDiscoveryConcurrency).mockImplementation(count=>Math.max(1,Math.min(count,8)));
+  }
   const premises = [
     {
       title: '逆风浮标的维修合同', setting: '海岛气象站', hero: '失语气象员',
@@ -134,9 +233,9 @@ it('generates a complete idea batch through preselection plus structuring and re
       reversal: '地图误差并非为多占土地，而是为掩盖二十年前互换身份的安置名单，迫使主角重新选择保护哪一批住户',
     },
   ];
-  const makeIdea = (index: number) => ({
+  const makeIdea = (index: number, titleSuffix = '') => ({
     sourcePremiseId: `P${index}`,
-    title: premises[index - 1].title,
+    title: `${premises[index - 1].title}${titleSuffix}`,
     alternateTitles: [`${premises[index - 1].title}·备选甲`, `${premises[index - 1].title}·备选乙`],
     storyType: 'short_story',
     angle: `${premises[index - 1].setting}里的${premises[index - 1].hero}危机`,
@@ -160,38 +259,141 @@ it('generates a complete idea batch through preselection plus structuring and re
       readerQuestion: `主角能否在截止日前证明${premises[index - 1].setting}里的异常，同时承担公开证据带来的关系代价`,
     },
   });
-  let structuredCount = 0;
+  let releaseRefill!:()=>void,signalRefillStarted!:()=>void,refillSourceReturned=false;
+  const refillHeld=new Promise<void>(done=>{releaseRefill=done;}),refillStarted=new Promise<void>(done=>{signalRefillStarted=done;});
+  let releaseLaterCards!:()=>void,signalFirstReview!:()=>void,laterCardsReleased=false;
+  const laterCardsHeld=new Promise<void>(done=>{releaseLaterCards=done;}),firstReviewStarted=new Promise<void>(done=>{signalFirstReview=done;});
+  let releaseInitialReview!:()=>void,signalPreparationStarted!:()=>void,signalPreparationReady!:()=>void;
+  let releaseSourceTail!:()=>void,signalSourceTail!:()=>void,signalPreparedGeneration!:()=>void;
+  let sourceTailHeldOnce=false,sourceTailReturned=false;
+  const sourceTailHeld=new Promise<void>(done=>{releaseSourceTail=done;}),
+    sourceTailEntered=new Promise<void>(done=>{signalSourceTail=done;}),
+    preparedGeneration=new Promise<void>(done=>{signalPreparedGeneration=done;});
+  let initialReviewReleased=false,initialReviewEntered=false,refillGeneratedBeforeRelease=false,preparationAborted=false;
+  const initialReviewHeld=new Promise<void>(done=>{releaseInitialReview=done;}),
+    preparationStarted=new Promise<void>(done=>{signalPreparationStarted=done;}),
+    preparationReady=new Promise<void>(done=>{signalPreparationReady=done;});
+  const fixtureWait=async(pending:Promise<void>)=>{
+    const signal=currentGenerationSignal();let onAbort!:()=>void;
+    const cancelled=new Promise<never>((_resolve,reject)=>{
+      onAbort=()=>reject(new GenerationCancelledError());
+      if(signal?.aborted)onAbort();else signal?.addEventListener('abort',onAbort,{once:true});
+    });
+    try{await Promise.race([pending,cancelled]);}finally{signal?.removeEventListener('abort',onAbort);}
+  };
+  const structureAttempts = new Map<string, number>();
   const realLLM = {
     assertScenarioModelConfigured: vi.fn(() => ({ modelName: 'deepseek-flash', modelVersion: 'deepseek-flash' })),
     generate: vi.fn(async (input: any) => {
       await new Promise(resolve => setTimeout(resolve, 10));
       const step = input.metrics?.stepKey;
-      if (step === 'idea_premise_selection') return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
-      if (step === 'idea_premise_source_drift_review' || step === 'idea_premise_overlap_review')
-        return { content: JSON.stringify({ passed: true, issues: [] }) };
-      if (step === 'idea_card_structure') {
-        structuredCount++;
-        if (structuredCount > 5) throw Error('同一请求不应重复结构化');
-        return { content: JSON.stringify({ ideas: [makeIdea(structuredCount)] }) };
+      const partialFixture = String(input.prompt).includes('__partial_delivery_test__');
+      if(['idea_premise_pool_generation','idea_premise_selection','idea_premise_source_drift_review'].includes(step)){
+        for(const [dimension,label] of [['tone','悬疑'],['style','白描/朴素']]){
+          const guide=dimensionGuide(dimension,label);expect(guide.length).toBeGreaterThan(8);
+          expect(input.prompt).toContain(guide);
+        }
       }
-      if (step === 'idea_presentation_review') return { content: JSON.stringify({
-        reviews: Array.from({ length: 5 }, (_, index) => {
-          const position = index + 1, card = makeIdea(position);
-          const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
-            reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
-          return {
-            position, title: card.title, titleCompelling: true, openingCompelling: true,
-            distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
-            storyEvidenceRef: `C${position}.hook`, payoffEvidenceRef: `C${position}.ending`,
-            platformEvidenceRef: `C${position}.description`,
-            qualityReason: '以本题材实际开篇压力、行动条件及具体责任兑现核对平台与阅读目标。',
-            readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
-            readerGoals: { click: goal('hook'), completion: goal('description'),
-              sharing: goal('ending'), immersion: goal('hook') },
-            issues: [],
-          };
-        }),
-      }) };
+      if(prepare&&step==='idea_premise_pool_reselection')return {content:JSON.stringify({replacements:[]})}; // bounded protocol rejection isolates the already evidenced bad identities
+      if(prepare&&step==='idea_premise_refill_selection'){
+        signalPreparationStarted();
+        if(mode==='prepare_error'||mode==='prepare_cancel'){
+          try{await fixtureWait(new Promise<void>(()=>{}));}catch(error){preparationAborted=true;throw error;}
+        }
+      }
+      if (step === 'idea_premise_pool_generation') {
+        expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
+        expect(input.prompt).toContain('分类不能靠结尾点题或改标签补救');
+        // Split the fixed fixture across the actual generator slots (4+3
+        // for two cards, 8+7 for five). Never return five candidates into a
+        // four-slot first batch and silently rely on post-hoc renumbering.
+        const slots=JSON.parse(String(input.prompt).split('【生成前锁定的候选槽位】')[1]?.split('\n')[0]||'[]') as unknown[];
+        const batch=Number(input.metrics?.attempt||0);
+        const offset=batch===0?0:slots.length+1;
+        const original=makePremiseSelectionFixture(partialFixture?4:5).pool;
+        return { content: JSON.stringify({pool:fixturePoolWithLockedSlots(input,
+          original.slice(offset,offset+slots.length))}) };
+      }
+      if (step === 'idea_premise_selection' || step === 'idea_premise_refill_selection') {
+        expect(input.prompt).toContain('【每项分类核心机制：生成与选优使用与审核相同的标准】');
+        return { content: JSON.stringify({ selectedPremises: refillOverlap||prepare
+          ?makePremiseSelectionFixture(5).selectedPremises.filter((_,index)=>step==='idea_premise_refill_selection'?index>=3:index<3)
+          :makePremiseSelectionFixture(partialFixture ? 4 : 5).selectedPremises }) };
+      }
+      if (step === 'idea_premise_source_drift_review'){
+        const review=makePremiseReviewFixture(String(input.prompt));
+        if(prepare){
+          const owners=promptArray(String(input.prompt),'【与完整卡同口径的前置分类审核】','；categoryChecks',true);
+          for(const row of review.categoryChecks||[]){
+            const owner=owners.find(item=>item.ref===row.ref)?.premiseId;
+            if(['P2','P3'].includes(owner)||(mode==='prepare_rejected'&&['P4','P5'].includes(owner)))
+              Object.assign(row,{status:'missing',reason:'该候选核心关系及关键选择未落实作者已锁定分类，不能补写或按标签放行'});
+          }
+        }
+        return {content:JSON.stringify(review)};
+      }
+      if (step === 'idea_premise_overlap_review') return { content: JSON.stringify(makeOverlapFixture(String(input.prompt))) };
+      if (step === 'idea_card_structure') {
+        const prompt = String(input.prompt);
+        const partial = prompt.includes('__partial_delivery_test__');
+        const requestGroup = partial ? 'partial-delivery' : prompt.includes('排除题材乙') ? 'different-exclusions' : 'default';
+        const attempts = (structureAttempts.get(requestGroup) || 0) + 1;
+        structureAttempts.set(requestGroup, attempts);
+        if (attempts > 5) throw Error('同一请求不应重复结构化');
+        const selectedMarker = '【已选题材胚子（内部标识已由服务器移除）】';
+        const selectedAt = prompt.indexOf(selectedMarker);
+        const selectedStart = selectedAt < 0 ? -1 : prompt.indexOf('{', selectedAt + selectedMarker.length);
+        const selectedEnd = selectedStart < 0 ? -1 : prompt.indexOf('\n【同批差异参照', selectedStart);
+        if (selectedStart < 0 || selectedEnd < 0) throw Error('测试夹具无法解析服务器提供的当前已选胚子');
+        const selected = JSON.parse(prompt.slice(selectedStart, selectedEnd).trim());
+        const selectedIndex = Number(String(selected.workingTitle || '').match(/候选题材(\d+)/)?.[1]);
+        if (!Number.isInteger(selectedIndex) || selectedIndex < 1 || selectedIndex > 5) throw Error('测试夹具无法识别当前已选胚子');
+        if(refillOverlap&&[2,3].includes(selectedIndex))throw Error('首轮成卡失败，仅用于检验补位调度');
+        if(refillOverlap&&selectedIndex>=4)signalRefillStarted();
+        if(streaming&&selectedIndex!==1)await laterCardsHeld;
+        if(prepare&&selectedIndex>=4&&!initialReviewReleased)refillGeneratedBeforeRelease=true;
+        if(mode==='prepare_source_tail'&&selectedIndex>=4)signalPreparedGeneration();
+        if (partial && selectedIndex === 2) throw Error('测试夹具模拟第2张完整卡结构化失败');
+        return { content: JSON.stringify({ ideas: [makeIdea(selectedIndex, partial ? '·局部' : '')] }) };
+      }
+      if (step === 'idea_presentation_review') {
+        if(streaming)signalFirstReview();
+        const prompt = String(input.prompt);
+        const marker = '【实际待审题材卡与完整卡差异参考（参考可含同批待审卡，不代表其已通过）】';
+        const markerAt = prompt.indexOf(marker);
+        const jsonStart = markerAt < 0 ? -1 : markerAt + marker.length;
+        const jsonEnd = jsonStart < 0 ? -1 : prompt.indexOf('\n若存在standardLines', jsonStart);
+        if (jsonStart < 0 || jsonEnd < 0) throw Error('测试夹具无法解析完整卡独立审核输入');
+        const packed = JSON.parse(prompt.slice(jsonStart, jsonEnd).trim());
+        const cards = Array.isArray(packed.cards) ? packed.cards : [];
+        if(prepare&&cards.some((card:any)=>String(card.title)===premises[0].title)){
+          initialReviewEntered=true;
+          await fixtureWait(initialReviewHeld);
+          if(mode==='prepare_error')throw Error('夹具首轮终审协议中止，必须取消并等待正在执行的补位准备');
+        }
+        return { content: JSON.stringify({
+          reviews: cards.map((card: any, index: number) => {
+            const position = Number(card.position) || index + 1;
+            const title = String(card.title || '');
+            const goal = (field: string) => ({ status: 'supported', evidenceRef: `C${position}.${field}`,
+              reason: '由具体风险、主动选择与可验证结果形成完整阅读期待和实际关系变化。' });
+            return {
+              position, title, titleCompelling: true, openingCompelling: true,
+              distinctFromBatch: true, storyCoherent: true, payoffCredible: true, platformFit: true,
+              storyEvidenceRef: `C${position}.hook`, payoffEvidenceRef: `C${position}.ending`,
+              platformEvidenceRef: `C${position}.description`,
+              payoffBridge: { status: 'supported', actionEvidenceRef: `C${position}.description`,
+                resultEvidenceRef: `C${position}.ending`, conditionEvidenceRef: `C${position}.setting`,
+                reason: '实际行动通过既有现场条件取得可核验证据，随后依法确认责任并兑现关系代价。' },
+              qualityReason: '以本题材实际开篇压力、行动条件及具体责任兑现核对平台与阅读目标。',
+              readerQuestion: '主角能否证实当前异常并承担公开材料后的真实关系后果？',
+              readerGoals: { click: goal('hook'), completion: goal('description'),
+                sharing: goal('ending'), immersion: goal('hook') },
+              issues: [],
+            };
+          }),
+        }) };
+      }
       throw new Error('unexpected idea generation step: '+String(step));
     }),
   };
@@ -200,8 +402,113 @@ it('generates a complete idea batch through preselection plus structuring and re
   Object.assign(controller, { realLLM, db: { getDb: () => db }, ideaAppealGate: new IdeaAppealGateService(), logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } });
   const request = { storyType: 'short_story' as const, platform: 'fanqie', storyCategory: '悬疑灵异', count: 5, ...discoveryStandards };
 
-  const [first, duplicate] = await Promise.all([controller.ideaDiscover(request), controller.ideaDiscover(request)]) as any[];
-  expect(first).toMatchObject({ success: true, totalIdeas: 5 });
+  if(prepare){
+    if(mode==='prepare_source_tail'){
+      const originalReview=(controller as any).reviewPremiseSelection.bind(controller);
+      (controller as any).reviewPremiseSelection=async(...args:any[])=>{
+        const result=await originalReview(...args);
+        if(args[2]==='source_drift'&&!sourceTailHeldOnce&&args[0].selected.some((item:any)=>['P4','P5'].includes(item.premiseId))){
+          sourceTailHeldOnce=true;signalSourceTail();await sourceTailHeld;sourceTailReturned=true;
+        }
+        return result;
+      };
+    }
+    const original=(controller as any).reconcilePremiseSelection.bind(controller);
+    (controller as any).reconcilePremiseSelection=async(...args:any[])=>{
+      const result=await original(...args);
+      if(args[0].selected.some((item:any)=>['P4','P5'].includes(item.premiseId)))signalPreparationReady();
+      return result;
+    };
+    const requestId='fixture-'+mode;
+    const pending=controller.ideaDiscover({...request,count:2,discoveryRequestId:requestId});
+    const observe=async(event:Promise<void>)=>{
+      let timer:ReturnType<typeof setTimeout>|undefined;
+      try{return await Promise.race([event.then(()=>true),new Promise<boolean>(done=>{timer=setTimeout(()=>done(false),2000);})]);}
+      finally{if(timer)clearTimeout(timer);}
+    };
+    let started=false,prepared=false,releasedBeforeSourceTail=false,result:any;
+    try{
+      started=await observe(preparationStarted);
+      if(started&&(mode==='prepare'||mode==='prepare_rejected')){
+        prepared=await observe(preparationReady);await new Promise<void>(done=>setImmediate(done));
+        expect(initialReviewEntered,'夹具必须确实阻塞首轮完整卡终审，不能用未传入审核视图的内部ID识别').toBe(true);
+      }
+      if(mode==='prepare_source_tail')expect(await observe(sourceTailEntered)).toBe(true);
+      expect(refillGeneratedBeforeRelease,'首轮身份核对前不能派发补位完整卡').toBe(false);
+      if(mode==='prepare_cancel')controller.cancelIdeaDiscovery(requestId);
+      initialReviewReleased=true;releaseInitialReview();
+      if(mode==='prepare_source_tail'){
+        releasedBeforeSourceTail=await observe(preparedGeneration);
+        expect(sourceTailReturned).toBe(false);releaseSourceTail();
+      }
+      result=await pending;
+    }finally{initialReviewReleased=true;releaseInitialReview();releaseSourceTail();}
+    expect(started,'已知前置缺额必须在初始终审阻塞期间开始同一补位准备 '+JSON.stringify({error:result?.error,reason:result?.appealGate?.stopReason,steps:realLLM.generate.mock.calls.map(([call]:any[])=>call.metrics?.stepKey)})).toBe(true);
+    if(mode==='prepare'||mode==='prepare_rejected')expect(prepared).toBe(true);
+    if(mode==='prepare'||mode==='prepare_source_tail'){
+      if(mode==='prepare_source_tail')expect(releasedBeforeSourceTail,'已过审补位身份在首轮核对后必须先成卡，不等其它来源汇总').toBe(true);
+      expect(result).toMatchObject({success:true,totalIdeas:2});
+      expect(result.ideas).toHaveLength(2);
+      expect(result.ideas.every((card:any)=>!['P2','P3'].includes(card.sourcePremiseId))).toBe(true);
+      expect(result.appealGate.presentationPhysicalCallsUsed).toBeLessThanOrEqual(result.appealGate.presentationPhysicalCallLimit);
+      expect(result.appealGate.fulfillment.sourceCallsRemaining).toBeGreaterThanOrEqual(0);
+    }else if(mode==='prepare_rejected'){
+      expect(result.success).toBe(false);expect(result.ideas).toHaveLength(0);
+      expect(result.qualifiedIdeas).toHaveLength(1);
+      expect(result.qualifiedIdeas[0].sourcePremiseId).toBe('P1');
+      expect(realLLM.generate.mock.calls.some(([call]:any[])=>call.metrics?.stepKey==='idea_card_structure'&&String(call.prompt).includes('候选题材4'))).toBe(false);
+    }else{
+      expect(result.success).toBe(false);expect(preparationAborted,'初始失败或取消必须取消并等待补位准备').toBe(true);
+      expect(realLLM.generate.mock.calls.filter(([call]:any[])=>call.metrics?.stepKey==='idea_card_structure')).toHaveLength(1);
+    }
+    expect(realLLM.generate.mock.calls.filter(([call]:any[])=>call.metrics?.stepKey==='idea_premise_refill_selection')).toHaveLength(1);
+    return;
+  }
+  if(streaming){
+    const pending=controller.ideaDiscover(request);
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const observed=await Promise.race([firstReviewStarted.then(()=>true),new Promise<boolean>(done=>{timer=setTimeout(()=>done(false),2000);})]);
+    const reviewedBeforeLaterCards=!laterCardsReleased;
+    if(timer)clearTimeout(timer);laterCardsReleased=true;releaseLaterCards();
+    const result:any=await pending;
+    expect(observed,'已预留逐卡额度时，第一张完整卡必须在其余四张准备完之前进入终审').toBe(true);
+    expect(reviewedBeforeLaterCards).toBe(true);
+    expect(result).toMatchObject({success:true,totalIdeas:5});
+    expect(result.ideas).toHaveLength(5);
+    expect(realLLM.generate.mock.calls.filter(([call]:any[])=>call.metrics?.stepKey==='idea_card_structure')).toHaveLength(5);
+    expect(realLLM.generate.mock.calls.filter(([call]:any[])=>call.metrics?.stepKey==='idea_presentation_review')).toHaveLength(5);
+    expect(realLLM.generate.mock.calls.length).toBeLessThanOrEqual(24);
+    return;
+  }
+  if(refillOverlap){
+    const original=(controller as any).reviewPremiseSelection.bind(controller);
+    (controller as any).reviewPremiseSelection=async(...args:any[])=>{
+      const result=await original(...args);
+      if(args[2]==='source_drift'&&args[0].selected.some((item:any)=>['P4','P5'].includes(item.premiseId))){await refillHeld;refillSourceReturned=true;}
+      return result;
+    };
+    const pending=controller.ideaDiscover({...request,count:2});
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const observed=await Promise.race([refillStarted.then(()=>true),new Promise<boolean>(done=>{timer=setTimeout(()=>done(false),2000);})]);
+    const beforeSourceReturned=!refillSourceReturned;
+    if(timer)clearTimeout(timer);releaseRefill();const result:any=await pending;
+    expect(observed,'补位成卡必须在其余来源汇总返回前启动').toBe(true);expect(beforeSourceReturned).toBe(true);
+    expect(result).toMatchObject({success:true,totalIdeas:2});
+    expect(new Set(result.ideas.map((idea:any)=>idea.sourcePremiseId)).size).toBe(2);
+    expect(realLLM.generate.mock.calls.filter(([call]:any[])=>call.metrics?.stepKey==='idea_card_structure')).toHaveLength(5);
+    expect(realLLM.generate.mock.calls.some(([call]:any[])=>call.metrics?.stepKey==='idea_premise_pool_refill')).toBe(false);
+    expect(result.appealGate.fulfillment.actions.some((action:any)=>action.phase==='refill_from_lightweight')).toBe(true);
+    return;
+  }
+  const differentRequest = { ...request, excludeDetails: [{ title: '排除题材乙', hook: '本请求独有的排除依据' }] };
+  const partialRequest = { ...request, genreFitNote: '__partial_delivery_test__' };
+  const [first, duplicate, distinctResult, partialResult] = await Promise.all([
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(request),
+    controller.ideaDiscover(differentRequest),
+    controller.ideaDiscover(partialRequest),
+  ]) as any[];
+  expect(first, 'idea discovery failed: ' + JSON.stringify({ error: first.error, appealGate: first.appealGate })).toMatchObject({ success: true, totalIdeas: 5 });
   expect(first.appealGate).toMatchObject({
     premisePoolSize: 5,
     premisePoolTarget: 15,
@@ -209,12 +516,47 @@ it('generates a complete idea batch through preselection plus structuring and re
     premiseSelected: 5,
   });
   expect(duplicate).toEqual(first);
-  // 一条共享链：一次预选、两项锁定前独立复核、五张逐卡结构化、一次标题与阅读目标独立审查。
-  expect(realLLM.generate).toHaveBeenCalledTimes(9);
+  expect(distinctResult.appealGate).toMatchObject({ premisePoolSize: 5, premisePoolTarget: 15, premiseSelected: 5, generated: 5, returned: 5 });
+  // 同配置并发请求仅共享一条生成链；五张卡的独立语义复核按原有批大小并发，仍以其它卡为对照。
+  expect(distinctResult, 'a request with different excludeDetails must not reuse the first result')
+    .toMatchObject({ success: true, totalIdeas: 5 });
+  // A short original pool and one deliberately broken card must not erase the
+  // other three independently verified full cards. Their quality gates are
+  // unchanged and the UI can use the explicit partial-success response.
+  expect(partialResult, 'three approved cards must be retained for recovery, not counted as a successful five-card request')
+    .toMatchObject({ success: false, status: 'incomplete', totalIdeas: 0 });
+  expect(partialResult.ideas).toHaveLength(0);
+  expect(partialResult.qualifiedIdeas).toHaveLength(3);
+  expect(partialResult.qualifiedIdeas.map((idea:any)=>idea.sourcePremiseId).sort()).toEqual(['P1','P3','P4']);
+  expect(partialResult.warning).toContain('缺额 2');
+  expect(partialResult.appealGate).toMatchObject({
+    premisePoolTarget: 15, premisePoolSize: 4, premisePoolTargetMet: false,
+    premiseSelected: 4, generated: 3, qualified: 3, returned: 0, requested: 5,
+    minimumDeliverableCount: 5, partial: true,
+  });
+  expect(partialResult.appealGate.selectionAudit.poolGeneration).toMatchObject({
+    supplementAttempted: false, supplementAdded: 0, batchCount: 2,
+  });
+  expect(partialResult.appealGate.structuringErrors).toHaveLength(1);
+  expect(partialResult.appealGate.structuringErrors[0].sourcePremiseId).toBe('P2');
+  // Each distinct request preserves two initial pools plus one selector; no fourth initial call.
+  // The simulated provider rejects unknown refill operations; the server must
+  // keep the three passed cards and never regenerate those passed premises.
+  // Keep all verdicts while preserving aggregate review of a remainder under four cards.
+  // Two complete requests need 2 reviews each; the three-card partial request needs 1.
+  expect(realLLM.generate).toHaveBeenCalledTimes(39);
   expect(realLLM.generate.mock.calls.map(([call]: any[]) => call.metrics?.stepKey).sort()).toEqual([
-    'idea_premise_selection','idea_premise_source_drift_review','idea_premise_overlap_review',
-    ...Array(5).fill('idea_card_structure'),'idea_presentation_review',
+    ...Array(6).fill('idea_premise_pool_generation'),
+    ...Array(3).fill('idea_premise_selection'),
+    ...Array(6).fill('idea_premise_source_drift_review'),
+    ...Array(3).fill('idea_premise_overlap_review'),
+    ...Array(14).fill('idea_card_structure'),
+    ...Array(5).fill('idea_presentation_review'),
+    ...Array(2).fill('idea_premise_pool_refill'),
   ].sort());
+  expect(partialResult.appealGate.fulfillment.actions.some((action:any)=>
+    action.phase==='lightweight_pool_refill'
+      &&action.failedTransportBatches>0)).toBe(true);
   expect(first.appealGate).toMatchObject({
     structuringProtocol: 'one_selected_premise_per_call_server_owned_identity',
     generated: 5,
@@ -296,11 +638,20 @@ it('injects the user-declared custom platform standard into the idea prompt as t
     generate: vi.fn(async (input: any) => {
       generationCall += 1;
       prompts.push(String(input.prompt));
-      if (input.metrics?.stepKey === 'idea_premise_selection') {
-        return { content: JSON.stringify(makePremiseSelectionFixture(5)) };
+      if (input.metrics?.stepKey === 'idea_premise_pool_generation') {
+        const slots=JSON.parse(String(input.prompt).split('【生成前锁定的候选槽位】')[1]?.split('\n')[0]||'[]') as unknown[];
+        const batch=Number(input.metrics?.attempt||0);
+        const offset=batch===0?0:slots.length+1;
+        return { content: JSON.stringify({pool:fixturePoolWithLockedSlots(input,
+          makePremiseSelectionFixture(5).pool.slice(offset,offset+slots.length))}) };
       }
-      if (['idea_premise_source_drift_review','idea_premise_overlap_review'].includes(input.metrics?.stepKey))
-        return { content: JSON.stringify({ passed: true, issues: [] }) };
+      if (input.metrics?.stepKey === 'idea_premise_selection') {
+        return { content: JSON.stringify({ selectedPremises: makePremiseSelectionFixture(5).selectedPremises }) };
+      }
+      if (input.metrics?.stepKey === 'idea_premise_source_drift_review')
+        return { content: JSON.stringify(makePremiseReviewFixture(String(input.prompt))) };
+      if (input.metrics?.stepKey === 'idea_premise_overlap_review')
+        return { content: JSON.stringify(makeOverlapFixture(String(input.prompt))) };
       return { content: JSON.stringify({ ideas: [] }) };
     }),
   };
@@ -317,8 +668,12 @@ it('injects the user-declared custom platform standard into the idea prompt as t
   expect(result.success).toBe(false);
   expect(String(result.error)).toContain('第 1/5 个已选题材结构化失败');
   expect(String(result.error)).toContain('返回 0 张，期望恰好 1 张');
-  expect(realLLM.generate).toHaveBeenCalledTimes(8);
-  expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: false });
+  expect(realLLM.generate).toHaveBeenCalledTimes(13);
+  // The bounded refill is attempted only because zero complete cards passed;
+  // a malformed supplemental reply cannot turn any failed card into a pass.
+  expect(realLLM.generate.mock.calls.filter(([call]:any[])=>
+    call.metrics?.stepKey==='idea_premise_pool_refill')).toHaveLength(2);
+  expect(result.appealGate).toMatchObject({ requested: 5, returned: 0, shortfall: 5, repairAttempted: true });
   expect(result.appealGate.structuringErrors).toHaveLength(5);
   const prompt = prompts.join('\n');
   expect(prompt).toContain('每章末尾必须留一个可验证的实物线索');

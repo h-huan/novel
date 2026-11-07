@@ -66,7 +66,7 @@ export interface HardlineFinding {
  * 排版、白描风格的标点窗口更长），不是「查不查」：没有任何规则会因为平台或风格而完全不检查。
  */
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
-  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、量词错误和叠用标点。
+  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、量词错误和明显超规范的问叹号连串。
   // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
   '15c', '15d', '33', '35', '35b', '42', '44',
   '54-measure-word-mismatch', '56-punct-stacking',
@@ -641,17 +641,23 @@ export function detectForbiddenTells(
       findings.push(firstNarrationFinding);
     }
 
-    // ===== 56 标点连用滥用（！！！/？？/！？/？！，叠用标点非规范用法） =====
-    // GB/T 15834 规定感叹号/问号不得叠用；网络 AI 输出常用"！！""？？""！？"渲染色调，
-    // 是机器情绪化的物理指纹。任何一处叠用即阻断。
-    const stackedPunct = content.match(/[！？!?]{2,}/g) || [];
+    // ===== 56 明显超规范的问叹号连串 =====
+    // GB/T 15834-2011 4.3.3.3 允许强烈语气时最多三叹号；
+    // 4.2.3.2 对强烈疑问也允许叠问号，4.3.3.4 允许“？！”。
+    // 因而“！！”“？？”“？！”本身既非违规，也非AI证据。
+    // 只有四符及以上连串或三符混合连串可无语境地明确识别为异常，
+    // 不为偶发强调支付一次自动局部精修；其它语气滥用仍由同一语义Gate审查。
+    const stackedPunct = [...content.matchAll(/[！？!?]{2,}/g)]
+      .filter(m => m[0].length > 3 ||
+        (m[0].length === 3 && new Set([...m[0]].map(ch => ch === '！' || ch === '!' ? '!' : '?')).size > 1));
     if (stackedPunct.length > 0) {
       findings.push({
         ruleId: '56-punct-stacking',
-        message: `标点叠用 ${stackedPunct.length} 处（"！！""？？""！？"等，感叹号/问号叠用非规范用法，是 AI 情绪渲染指纹）。全部改单标点，用句子本身传达情绪`,
-        snippet: slice(stackedPunct[0] ?? '', 20),
+        message: `明显超规范的连续问叹号 ${stackedPunct.length} 处；保留有情绪依据的正常问号、感叹号及适度连用，只修无必要的异常标点串，不修改人物语气或故事事实`,
+        snippet: slice(stackedPunct[0][0], 20),
         position: '全文',
-        hitCharOffsets: charOffsetsOf([stackedPunct[0]]),
+        occurrenceCount: stackedPunct.length,
+        hitCharOffsets: stackedPunct.map(m => m.index!).filter(i => i >= 0),
       });
     }
 

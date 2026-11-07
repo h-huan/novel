@@ -1,6 +1,8 @@
+import {STORY_PREREQUISITE_POLICY,OUTLINE_PROJECTION_POLICY} from '../../shared/src/执行标准';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ChainController } from './chain.controller';
 
 const controllerSource = readFileSync(
   fileURLToPath(new URL('./chain.controller.ts', import.meta.url)),
@@ -10,6 +12,11 @@ const patchSource = readFileSync(
   fileURLToPath(new URL('./cross-stage-patch.ts', import.meta.url)),
   'utf8',
 );
+const selectionDirectiveSource = readFileSync(fileURLToPath(new URL('./idea-discovery-contract.ts', import.meta.url)), 'utf8');
+const chapterDetailSource = readFileSync(
+  fileURLToPath(new URL('./chapter-detail-contract.ts', import.meta.url)),
+  'utf8',
+);
 
 function indexOrFail(source: string, marker: string): number {
   const index = source.indexOf(marker);
@@ -17,17 +24,217 @@ function indexOrFail(source: string, marker: string): number {
   return index;
 }
 
+describe('preselection reader promise and independent title verdict', () => {
+  it('does not accept a jargon-only title by reading the hidden synopsis', () => {
+    expect(controllerSource).toContain('先遮住hook、description、setting和参考卡');
+    expect(controllerSource).toContain('必须titleCompelling=false');
+    expect(controllerSource).toContain('不得拿概要中的解释反向证明原标题清晰');
+    expect(STORY_PREREQUISITE_POLICY).toContain('人物知情时点');
+  });
+});
+
+describe('single confirmed world authority regardless of realism labels',()=>{
+ it('does not turn an already-confirmed extraordinary ability into a prohibited new one',()=>{
+  const worldPrompt=controllerSource.slice(
+   controllerSource.indexOf('const worldPrompt ='),
+   controllerSource.indexOf("activeFailureOrigin = 'generation_contract';"));
+  expect(worldPrompt).toContain('不得凭空新增末世、修仙、科幻、超能力或架空制度等未确认设定');
+  expect(worldPrompt).toContain('如果已确认题材明确包含特异能力或架空规则');
+  expect(worldPrompt).toContain('触发者、作用对象、人数条件、范围、代价与后果');
+  expect(worldPrompt).not.toContain('禁止把现实题材改成末世/修仙/科幻/超能力/架空制度');
+  expect(worldPrompt).toContain('【唯一故事基准】${canonicalCreativeBrief}');
+  expect(worldPrompt).toContain('不得新增与已确认事实互斥的限制');
+  expect(worldPrompt).toContain('只有确无超常能力的现实作品');
+  expect(worldPrompt).toContain('不得另造能力或删除已确认能力');
+ });
+});
+
 describe('creation consistency architecture invariants', () => {
-  it('keeps good preselection cards reviewable but never passes an incomplete batch', () => {
-    expect(controllerSource).toContain('const preselectionShortfall = Math.max(0, requestedCount - selectedPremises.length);');
+  it('reuses the existing long fact-ledger review for world profile and all persisted core role facts',async()=>{
+    const controller:any=Object.create(ChainController.prototype);
+    const savedWorld={rules:'[]',story_premise:'原故事'};
+    const savedProfile={rules:'',tech_supernatural:'现实查证机制'};
+    const savedRoles=[{name:'甲',identity:'档案员',abilities:'只读权限',relationships:'[]'}];
+    controller.db={getDb:()=>({prepare:(sql:string)=>({
+      get:()=>sql.includes('world_system_profiles')?savedProfile:savedWorld,
+      all:()=>sql.includes('FROM characters')?savedRoles:[{order:0,title:'第一章',content:'甲核对记录'}],
+    })})};
+    controller.assertOutlineCandidateFacts=vi.fn();
+    await controller.assertOutlineFactLedger('project','原始已确认题材','原执行标准');
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledTimes(1);
+    const args=controller.assertOutlineCandidateFacts.mock.calls[0];
+    expect(args[1]).toBe('原始已确认题材');
+    expect(args[3]).toEqual({world:savedWorld,worldProfile:savedProfile,characters:savedRoles});
+    expect(args[4]).toHaveLength(1);
+  });
+  it('uses transactional short roles and refuses unverified saved-character shortcuts',()=>{
+    expect(controllerSource).toContain("db.exec('SAVEPOINT creation_character_batch')");
+    expect(controllerSource).toContain("db.exec('ROLLBACK TO SAVEPOINT creation_character_batch')");
+    expect(controllerSource).toContain('角色扩展档案缺失');
+    expect(controllerSource).toContain('已确认核心人物尚未全部保存');
+    expect(controllerSource).toContain('ensureConfirmedLongProtagonist(skeleton)');
+  });
+  it('does not persist powerSystem as if it were a confirmed long causal rule',()=>{
+    expect(controllerSource).toContain('const persistedWorldRules=normalizeWorldRuleStrings(worldSetting.rules)');
+    expect(controllerSource).not.toContain('normalizeWorldRuleStrings(worldSetting.powerSystem)');
+  });
+  it('binds long POV and frozen world rules to accepted source rather than model array ordering',()=>{
+    expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(generatedCharacters,foundation.coreSetting?.protagonist)');
+    expect(controllerSource).toContain('orderConfirmedProtagonistCharacters(rawGeneratedCharacters,confirmedProtagonistName)');
+    expect(controllerSource).toContain('const frozenRuleRows=existingFrozenWorld');
+    expect(controllerSource).toContain('JSON.stringify(persistedWorldRules)');
+    expect(controllerSource).toContain("serializeGeneratedSqlText(persistedWorldRules.join('\\n'))");
+  });
+  it('passes the same confirmed long-novel story into existing character and detail-outline prompts',()=>{
+    const sourceMarker='已确认的原始题材与阶段结局（只读';
+    expect(controllerSource.split(sourceMarker).length-1).toBe(2);
+    expect(controllerSource).toContain('不得由角色补造能力和权限）：${input.storySetting}');
+    expect(controllerSource).toContain('不得将以后阶段计划写成已发生或改变上层能力对象）：${input.storySetting}');
+  });
+  it('carries the original scored pool ranking through selection, aggregate recovery and bounded refill',()=>{
+    expect(controllerSource).toContain('const rankedOriginalPool=rankPremisePoolByMaturityScore(candidatePool,premiseMaturityScores)');
+    expect(controllerSource).toContain('pool: rankedOriginalPool,');
+    expect(controllerSource).toContain('rankPremisePoolByMaturityScore(shaped.selected,premiseMaturityScores)');
+    expect(controllerSource).toContain('rankPremisePoolByMaturityScore(prelim.selected,premiseMaturityScores)');
+    expect(controllerSource).toContain('pool:rankedOriginalPool,selectedPremises:repaired.selected');
+    expect(controllerSource).toContain('const rankedRefillPool=rankPremisePoolByMaturityScore(unusedSeeds,premiseMaturityScores)');
+    expect(controllerSource).toContain('pool:rankedRefillPool,selectedPremises:planned.selected');
+  });
+  it('refill model transport matches the initially screened pool instead of reading obsolete raw.storyCore',()=>{
+    const initial=indexOrFail(controllerSource,'screenPremisePoolBatch(batch.candidates)');
+    const start=indexOrFail(controllerSource,'const newSeedBatches=await independentReviewBatches');
+    const end=indexOrFail(controllerSource,"fulfillmentActions.push({phase:'lightweight_pool_refill'");
+    const refill=controllerSource.slice(start,end);
+    expect(initial).toBeLessThan(start);
+    expect(refill).toContain('screenPremisePoolBatch([raw])');
+    expect(refill).toContain('const seed=screened.candidates[0]');
+    expect(refill).not.toContain('const seed=raw as Record<string,unknown>');
+    expect(refill).toContain('freezePremiseCreationChoices(seed,');
+    expect(refill).toContain('refillSeedRejections');
+  });
+
+  it('treats candidate-pool size as a search target and prohibits paid serial reserve replacement', () => {
+    expect(controllerSource).toContain('if (candidatePool.length === 0)');
+    expect(controllerSource).not.toContain('if (candidatePool.length < minimumPremiseSelectionCount)');
+    expect(controllerSource).toContain('minimumSelectedCountForPool');
+    expect(controllerSource).toContain('prerequisiteError(firstBlockedBatch.blocked)');
+    expect(controllerSource).toContain("'candidate_pool_empty'");
+    expect(controllerSource).not.toContain('if (candidatePool.length < requestedCount)');
+    expect(controllerSource).not.toContain('reserveReconciliationRounds<1');
+    expect(controllerSource).not.toContain('while(!finalReview.passed&&!unresolvedIds.length&&reselectionBudget.remaining>0)');
+    expect(controllerSource).toContain('const finalReview=postReselectionReview;');
+    expect(controllerSource).toContain('phaseTimings: { selectionWallMs, preselectionReviewWallMs, totalWallMs');
+  });
+
+  it('keeps the strict preselection Gate and still fully reviews surviving candidates for partial delivery', () => {
+    expect(controllerSource).toContain('const minimumPremiseSelectionCount = requestedCount;');
+    expect(controllerSource).toContain("'preselection_shortfall'");
+    expect(controllerSource).toContain('全部进入并发完整卡生成');
+    expect(controllerSource).toContain("work.runReview(budget=>accept(batch,");
+    expect(controllerSource).not.toContain('this.reservePremiseSelection(');
+    expect(controllerSource).not.toContain('await fulfillDiscoveryGaps(');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资料的发现/取得/复制/转交/出示');
+    // The creation fact patch must use the independent action verifier's
+    // CURRENT chapter field paths, not a hard-coded content-only example.
+    expect(controllerSource).toContain('outlineFactRepairTargetPaths(chData,actionRepairEvidence)');
+    expect(controllerSource).toContain('JSON.stringify(repairExamplePath)');
+    expect(controllerSource).not.toContain('{"patch":{"content":"修正后的完整content原文"}}');
     expect(controllerSource).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(controllerSource).toContain("if (partial) {");
+    expect(controllerSource).toContain("if (normalizedSelection.selected.length === 0)");
+    expect(controllerSource).toContain("status: 'incomplete'");
+    expect(controllerSource).not.toContain("if (normalizedSelection.selected.length < minimumPremiseSelectionCount) {");
     expect(controllerSource).not.toContain("stoppedAt:'premise_preselection'");
   });
   it('avoids reviewing an unchanged selection twice and projects chapter events consistently', () => {
-    expect(controllerSource).toContain('selected === initial ? initialReview : await reviewBoth(selected)');
-    expect(controllerSource).toContain('【本章事件与状态唯一来源】');
-    expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
+    expect(controllerSource).toContain('selectionChangeScope(initial,selected)');
+    expect(controllerSource).toContain('reviewBoth(selected,changeScope,initialReview)');
+    expect(controllerSource).toContain('retainPremiseReviewEvidence(initial,initialReview,selected)');
+    // The single authoritative fixed-pool directive owns the preselection criteria.
+    // A second copy in the controller adds tokens and can drift from the Gate.
+    expect(selectionDirectiveSource).toContain('逐对比较人物欲望、策略、对手反制、局势变化及不可逆代价');
+    expect(selectionDirectiveSource).toContain('每项兑现都必须有对应前置行动');
+    expect(controllerSource).not.toContain('【选优终检：不得留给后续长时复审才发现】');
+    expect(controllerSource).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('人物的实际知情必须由当时可见、可听或实际收到的消息来源支撑');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能在辅助字段虚构交付、完成或授权');
+    expect(controllerSource).toContain('chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter, expectedChapter.title)');
+    expect(chapterDetailSource).toContain('characterStates:[]');
+    expect(controllerSource).not.toContain('"stateAfter":"本章后状态"');
+    expect(controllerSource).not.toContain('【本章事件与状态唯一来源】');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('物件、凭证转交要有真正交接者、接收者与时点');
+  });
+
+  it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
+    expect(controllerSource).toContain('若独立审核已证明原职责结果在前章完成，则必须删除当前章对旧结果的重复兑现声明');
+    expect(controllerSource).toContain('保留真实未完成任务，不新增人物、不虚构行动、不更换故事');
+    expect(controllerSource).toContain('【通信渠道与同源事件约束】');
+    expect(controllerSource).toContain('私聊回复不能被投影成群消息回复');
+    expect(controllerSource).toContain('询问某人不等于已经得到答复');
+    expect(controllerSource).toContain('本章新增几笔');
+    expect(controllerSource).toContain('所有字段使用同一时点和口径');
+    expect(controllerSource).toContain('本人直接听到的问话不得投影成第三人此前向其转述');
+    expect(controllerSource).toContain('推测他人知情不能投影成已有某人报信');
+    expect(controllerSource).toContain('核定金额、签署协议、办手续不等于款项实际发放或收到');
+    expect(controllerSource).toContain('没有明写的后续行动、持续状态和范围不可凭空补全');
+    expect(controllerSource).toContain('仅记下身份不得推定具体证据已记录、被采信或已完成调查');
+    expect(controllerSource).toContain('scenes.outcome和characterActions.result只能保留为待查状态');
+    expect(controllerSource).toContain('【通信渠道矛盾修复规则】');
+    expect(controllerSource).toContain('不得删除或忽略该直接证据去迁就错误审查');
+  });
+
+  it('enriches only chapters with missing derived depth to prevent repeated expensive batches', () => {
+    expect(controllerSource).toContain(
+      `SELECT * FROM outlines WHERE project_id=? AND level='chapter' AND (chapter_type IS NULL OR chapter_type='') ORDER BY "order"`
+    );
+    expect(controllerSource).not.toContain(
+      `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`
+    );
+  });
+  it('uses one mandatory final short-outline fact audit without legacy unreachable recheck', () => {
+    const finalAudit = indexOrFail(controllerSource, 'await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,');
+    const persistedOutline = controllerSource.indexOf("db.exec('BEGIN IMMEDIATE')", finalAudit);
+    expect(persistedOutline).toBeGreaterThan(finalAudit);
+    expect(controllerSource).not.toContain('completeOutlineFactsReviewed');
+    // All accepted earlier chapters are still sent as source facts; the full
+    // responsibilities remain. Do not resend a redundant prefix of that plan.
+    expect(controllerSource).toContain('buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)');
+    expect(controllerSource).toContain('【后续章节职责与节拍（本章禁止提前执行）】');
+    expect(controllerSource).toContain('chapterResponsibilityPlan.slice(chapterIndex + 1)');
+    expect(controllerSource).toContain('chapterResponsibilities: chapterResponsibilityPlan, priorChapters: acceptedOutlineSources');
+    expect(controllerSource).toContain('const futureResponsibilityReviewContext');
+    expect(controllerSource).toContain('executionStandardForReview+futureResponsibilityReviewContext');
+    expect(controllerSource).toContain('后续章节未兑现任务（仅是规划，不是已发生的证据）');
+    expect(indexOrFail(controllerSource, 'const futureResponsibilityReviewContext')).toBeLessThan(
+      indexOrFail(controllerSource, 'let dependencyCheck = await reviewChapterDependencies(chData'));
+
+    expect(controllerSource).not.toContain('completedTaskBoundary');
+    expect(controllerSource).not.toContain('nextTaskBoundary');
+    expect(controllerSource).not.toContain('【全书章节分工与动态节拍】');
+    expect(controllerSource).not.toContain('【已经完成、禁止重演的章节任务】');
+  });
+
+  it('does not leak a past novel\'s mechanics into every new world and cross-stage review', () => {
+    expect(controllerSource).toContain('能力、信息、物件与证据的触发条件、作用对象、范围、时序、存续及可取得性以【唯一故事基准】为准');
+    expect(controllerSource).toContain('深度档案不得增造原骨架没有的规则、代价或结果');
+    expect(controllerSource).not.toContain('每进门');
+    expect(controllerSource).not.toContain('仅楼内回拨');
+    expect(controllerSource).not.toContain('已确认题材的触发条件、回拨范围、抹除对象');
+  });
+
+  it('keeps patch-only synchronization policy out of first draft but in the one local repair contract', () => {
+    const draftAt = indexOrFail(controllerSource, 'const chapterPrompt =');
+    const draftEnd = indexOrFail(controllerSource, 'const chapterJsonExample =');
+    const draft = controllerSource.slice(draftAt, draftEnd);
+    const repairAt = indexOrFail(controllerSource, '【局部修复硬约束】禁止重新生成完整章纲');
+    const repairEnd = controllerSource.indexOf('stepKey:\'creation_chapter_fact_repair\'', repairAt);
+    expect(repairEnd).toBeGreaterThan(repairAt);
+    expect(draft).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(draft).not.toContain('OUTLINE_FACT_REPAIR_SYNC_POLICY');
+    expect(draft).toContain('【数量、信息与证据连续性】');
+    expect(draft).toContain('【通信渠道与同源事件约束】');
+    expect(controllerSource.slice(repairAt, repairEnd)).toContain('${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
+    expect(controllerSource).not.toContain('【本章输出前事件投影核对】');
   });
 
   it('short-world directive cannot override the confirmed story or silently rewrite a conflict', () => {
@@ -88,8 +295,118 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('wsCount = reusingFrozenWorld ? 1 : 0');
   });
 
+  it('moves the same world completeness Gate before costly short outline generation without duplicating it', () => {
+    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT * FROM world_settings');
+    const earlyGate = controllerSource.indexOf('this.assertProjectSourceCompleteness(projectId);', shortWorldReadback);
+    const firstStoryCard = controllerSource.indexOf('const canonicalCardFromIdea', shortWorldReadback);
+    const chapterPrompt = controllerSource.indexOf('const chapterPrompt =', shortWorldReadback);
+    expect(earlyGate).toBeGreaterThan(shortWorldReadback);
+    expect(earlyGate).toBeLessThan(firstStoryCard);
+    expect(firstStoryCard).toBeLessThan(chapterPrompt);
+    // The short creation's late duplicate was removed. Other callers (writing
+    // and long creation) still own their original completeness checks.
+    expect(controllerSource.slice(shortWorldReadback).match(/this\.assertProjectSourceCompleteness\(projectId\);/g)).toHaveLength(1);
+    expect(controllerSource).toContain('await this.generationRecovery.assertActivationReady(projectId)');
+  });
+
+  it('has one creation-world authority and no legacy post-outline world regeneration', () => {
+    const shortWorld = indexOrFail(controllerSource, 'const worldResult = await this.llmCallWithRetry<any>(\'世界观生成\', worldPrompt, {');
+    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT * FROM world_settings');
+    const chapterOutlines = indexOrFail(controllerSource, 'const chapterPrompt =');
+    const guard = indexOrFail(controllerSource, '创建期世界观主记录缺失或无效：前序世界观必须先通过审核并落库');
+    const enrichment = indexOrFail(controllerSource, '// 任务C：组织/地点生成');
+    expect(shortWorld).toBeLessThan(savedWorld);
+    expect(savedWorld).toBeLessThan(chapterOutlines);
+    expect(chapterOutlines).toBeLessThan(guard);
+    expect(guard).toBeLessThan(enrichment);
+    expect(controllerSource.match(/const worldPrompt =/g)).toHaveLength(1);
+    expect(controllerSource).not.toContain('world_system_profiles 已创建 (sequential path');
+    expect(controllerSource).not.toContain('任务B：世界观生成（仅当 DB 中无世界观时执行');
+    expect(controllerSource).not.toContain('顺序生成角色/世界观/组织/伏笔');
+  });
+
+  it('collects short foreshadowing from accepted outlines without a dormant long-model path', () => {
+    const shortCollection = indexOrFail(controllerSource, 'const generatedForeshadowings = collectOutlineForeshadowings(outlineForeshadowRows);');
+    const shortPersistence = controllerSource.indexOf('INSERT INTO foreshadowings', shortCollection);
+    const savedCount = controllerSource.indexOf('const fsCountNow = getCreationCounts().foreshadowings;', shortCollection);
+    expect(shortPersistence).toBeGreaterThan(shortCollection);
+    expect(savedCount).toBeGreaterThan(shortPersistence);
+    expect(controllerSource).not.toContain('伏笔生成(长篇)');
+    expect(controllerSource).not.toContain('globalForeshadowings || []');
+    expect(controllerSource).toContain('foreshadowingGenerationConfirmedEmpty = generatedForeshadowings.length === 0');
+  });
+
+  it('does not force invented fixed-role characters or unsupported growth tags into creation', () => {
+    const start = indexOrFail(controllerSource, 'const charPrompt =');
+    const end = controllerSource.indexOf("const charResult = await this.llmCallWithRetry<any[]>('角色生成'", start);
+    expect(end).toBeGreaterThan(start);
+    const prompt = controllerSource.slice(start, end);
+    expect(prompt).toContain('【角色来源定位目录（原文见上方唯一完整创作上下文）】');
+    expect(prompt).toContain('已确认题材是最高事实基准');
+    expect(prompt).toContain('每一项仍须回读对应的实际原文才能确定');
+    expect(prompt).toContain('没有明确证据，填写"unavailable"或留空');
+    expect(prompt).not.toContain('必须以世界观为唯一事实依据');
+    expect(prompt).not.toContain('characterFactLedger');
+    expect(prompt).toContain('characterEvidenceLocations');
+    expect(prompt).toContain('不为凑固定人数添加女主角、反派、导师或同盟');
+    expect(prompt).toContain('未规划成长变化时 growthTags=[]');
+    expect(prompt).toContain('没有足够依据写[]');
+    expect(prompt).toContain('"growthTags":[],"tags":[]');
+    expect(prompt).toContain('【关系与过去】relationships仅收录已确认关系');
+    expect(prompt).toContain('"relationships":[]');
+    expect(prompt).toContain('缺证据留空，不补造过往事件');
+    expect(prompt).not.toContain('"role":"主角|女主角|重要配角|主要反派|导师同盟|其他"');
+    expect(prompt).not.toContain('"relationships":[{"targetName":');
+    expect(prompt).not.toContain('需要包含 5 个核心人物');
+    expect(prompt).not.toContain('童年被关地下室导致幽闭恐惧');
+    expect(controllerSource).toContain('const confirmedCharacterNames = [');
+    expect(controllerSource).toContain('const characterEvidenceLocations = [...new Set(confirmedCharacterNames)]');
+    expect(controllerSource).toContain('confirmedStoryFields: Object.entries(dto.selectedIdea || {})');
+    expect(controllerSource).not.toContain('chapterOrders: generatedChapterContext.filter');
+    const roleCall=indexOrFail(controllerSource,'await this.prepareCreationCharacters({projectId,dto');
+    const outlinePrompt=indexOrFail(controllerSource,'const chapterPrompt =');
+    const worldDone=indexOrFail(controllerSource,'世界观已完成，先生成角色再规划章纲');
+    expect(roleCall).toBeGreaterThan(worldDone);expect(roleCall).toBeLessThan(outlinePrompt);
+    expect(controllerSource).toContain('【已生成并保存的人物资料；不能覆盖已确认题材或世界规则】');
+    expect(controllerSource).toContain('JSON.stringify(outlineCharacterSources)');
+    expect(controllerSource).toContain('const ideaSpan = `'+String.fromCharCode(36)+'{worldContinuityDirective}');
+    expect(controllerSource).toContain('未定字段不得当作新权限或事实');
+    expect(controllerSource).not.toContain('禁止新增任何不在列的人物或神秘角色');
+    expect(controllerSource).not.toContain('任务A：角色生成（仅当 DB 中无角色时执行）');
+    expect(controllerSource).not.toContain('confirmedStoryEvidence: Object.fromEntries');
+    expect(controllerSource).not.toContain('chapterEvidence: generatedChapterContext');
+    expect(controllerSource).toContain('normalizeGeneratedCharacters(value)');
+  });
+
   it('does not run a late world-depth mutation after downstream canon exists', () => {
     expect(controllerSource).not.toContain('// 世界观 depth\n    enrichTasks.push');
     expect(controllerSource).toContain('世界观已经冻结，只作为输入；顺序：组织 → 地点 → 大纲 → 伏笔');
   });
+
+  it('keeps batch audit out of confirmedStory and persists it separately for diagnostics', () => {
+    const splitAt = indexOrFail(controllerSource, 'separateIdeaDiscoveryAudit(rawSelectedIdea)');
+    const storyAt = indexOrFail(controllerSource, 'constitution.confirmedStory = confirmedStory;');
+    const auditAt = indexOrFail(controllerSource, '...(ideaDiscoveryAudit ? { ideaDiscoveryAudit } : {})');
+    expect(splitAt).toBeLessThan(storyAt);
+    expect(storyAt).toBeLessThan(auditAt);
+    expect(controllerSource).toContain('ideaDiscoveryAudit: _untrustedIdeaDiscoveryAudit');
+    expect(controllerSource).not.toContain('constitution.confirmedStory = dto.selectedIdea');
+  });
+
+  it('routes early creation failures through the persisted failure boundary before returning', () => {
+    const unavailableAt = indexOrFail(controllerSource, 'if (!llmAvailable) {');
+    const unavailableBoundaryAt = controllerSource.indexOf("persistCreationFailure('preflight', errMsg", unavailableAt);
+    const unavailableReturnAt = controllerSource.indexOf('return;', unavailableAt);
+    expect(unavailableBoundaryAt).toBeGreaterThan(unavailableAt);
+    expect(unavailableBoundaryAt).toBeLessThan(unavailableReturnAt);
+
+    const worldFailureAt = indexOrFail(controllerSource, '世界观生成失败，未继续生成大纲，避免上下文不一致。');
+    const worldBoundaryAt = controllerSource.indexOf("persistCreationFailure('world', message", worldFailureAt);
+    const worldReturnAt = controllerSource.indexOf('return;', worldFailureAt);
+    expect(worldBoundaryAt).toBeGreaterThan(worldFailureAt);
+    expect(worldBoundaryAt).toBeLessThan(worldReturnAt);
+    expect(controllerSource).toContain('失败状态写入失败');
+    expect(controllerSource).not.toContain("catch {}\n      this.emitProjectProgress(projectId, { type: 'error', cancelled:");
+  });
+
 });

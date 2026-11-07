@@ -3,6 +3,8 @@ import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import { readConstitution } from '../modules/project/creative-constitution';
+import { generationTasks } from '../common/generation-cancellation';
+import { confirmedWorldProtagonistName } from './source-rule-consistency';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -52,6 +54,16 @@ export class GenerationRecoveryService {
 
   release(projectId: string): void {
     this.runningProjects.delete(projectId);
+  }
+
+  /** Even if a task wrapper has settled, an in-flight LLM run still owns its
+   * project context. Never wipe generated facts until both are quiescent. */
+  isCreationBusy(projectId: string): boolean {
+    if (generationTasks.isRunning('creation', projectId)) return true;
+    const active = this.database.getDb().prepare(
+      "SELECT COUNT(*) AS count FROM generation_runs WHERE project_id=? AND status='running'",
+    ).get(projectId) as { count?: number } | undefined;
+    return Number(active?.count || 0) > 0;
   }
 
   async audit(projectId: string): Promise<GenerationRecoveryAudit> {
@@ -195,7 +207,9 @@ export class GenerationRecoveryService {
     const hasConfirmedSource = Boolean(confirmedStory && typeof confirmedStory === 'object' && Object.keys(confirmedStory).length > 0);
     if (!hasConfirmedSource) consistencyIssues.push('缺少确认灵感/项目种子，无法按原配置恢复');
     const protectedHumanWork = protectionReasons.length > 0;
-    const running = this.isRunning(projectId);
+    // A failed project can still have in-flight creation calls. Recovery must
+    // not erase their source context before the owner task has settled.
+    const running = this.isRunning(projectId) || this.isCreationBusy(projectId);
     const resumableStatus = ['generation_failed', 'creating'].includes(String(project.status));
     const canResume = resumableStatus && !protectedHumanWork && hasConfirmedSource && !running;
 
@@ -230,15 +244,56 @@ export class GenerationRecoveryService {
     if (!['generation_failed', 'creating'].includes(audit.status)) {
       throw new ConflictException('只有创建失败或创建中的项目可以恢复。');
     }
+    if (this.isCreationBusy(projectId)) {
+      throw new ConflictException('原项目生成调用仍在执行，禁止同时清理和恢复生成资料。');
+    }
     if (audit.protectedHumanWork) {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
     }
     const preserveWorld = Boolean(
       this.database.getDb().prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId),
     );
-    // 普通恢复永远保留已经建立的世界观，只清理可再生的下游资料。
-    // “按题材重建”仍走 clearForExplicitSourceRebuild，并在存在世界观时明确拒绝。
-    await this.clearGeneratedAssets(projectId, { preserveWorld });
+    // A successful role batch already belongs to the same immutable world and
+    // selected idea. Recreating it on every fourth-outline transport failure
+    // changes the downstream source hashes and wastes another full model call.
+    // Preserve roles only with a complete canonical + extended-profile batch.
+    // prepareCreationCharacters rechecks protagonist identity and every role
+    // before any chapter plan can consume these saved rows.
+    const db = this.database.getDb();
+    const roles = db.prepare(
+      'SELECT * FROM characters WHERE project_id=?',
+    ).all(projectId) as Array<{ id:string; name:string; identity:string; is_pov_character:number }>;
+    const profiles = db.prepare(
+      'SELECT character_id FROM character_extended_profiles WHERE project_id=?',
+    ).all(projectId) as Array<{ character_id:string }>;
+    const profileIds = new Set(profiles.map(row => String(row.character_id)));
+    const names = roles.map(row => String(row.name || '').trim());
+    const projectRow = db.prepare('SELECT settings FROM projects WHERE id=?').get(projectId) as {settings?:string}|undefined;
+    let confirmedNames:string[]=[];
+    let confirmedLead='';
+    try{
+      const story=JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory;
+      confirmedLead=confirmedWorldProtagonistName(story?.protagonist);
+      confirmedNames=[
+        confirmedLead,
+        ...(Array.isArray(story?.characters)?story.characters:[]).map((row:any)=>
+          confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
+      ].filter(Boolean);
+    }catch{
+      // A malformed source cannot authorize keeping old roles. The saved world
+      // is protected separately, and the creation preflight will report the
+      // exact malformed settings before generating new data.
+      confirmedNames=['__invalid_confirmed_story__'];
+    }
+    const preserveCharacters = preserveWorld && roles.length > 0
+      && names.every(Boolean) && new Set(names).size === roles.length
+      && confirmedNames.every(name=>names.includes(name))
+      && roles.every(row => !!String(row.identity || '').trim() && profileIds.has(String(row.id)))
+      && roles.filter(row => Number(row.is_pov_character) === 1).length === 1
+      && (!confirmedLead || String(roles.find(row=>Number(row.is_pov_character)===1)?.name||'')===confirmedLead);
+    // Normal recovery retains verified upstream Canon; it regenerates only
+    // missing/incomplete downstream data. Explicit source rebuild is separate.
+    await this.clearGeneratedAssets(projectId, { preserveWorld, preserveCharacters });
   }
 
   async clearForExplicitSourceRebuild(projectId: string): Promise<void> {
@@ -268,11 +323,13 @@ export class GenerationRecoveryService {
       )`).get(projectId, projectId, projectId, projectId, projectId) as { n: number }).n);
     if (otherManual) throw new ConflictException('世界观、角色或伏笔有作者修改，不能自动覆盖。');
     await this.clearGeneratedAssets(projectId);
+    const checkpoints = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get();
+    if (checkpoints) db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
   }
 
   private async clearGeneratedAssets(
     projectId: string,
-    options: { preserveWorld?: boolean } = {},
+    options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {},
   ): Promise<void> {
     await this.deleteProjectVectors(projectId);
     const db = this.database.getDb();
@@ -363,10 +420,11 @@ export class GenerationRecoveryService {
     }
   }
 
-  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean } = {}): void {
+  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {}): void {
     const db = this.database.getDb();
     for (const table of RECOVERY_PROFILE_TABLES) {
       if (options.preserveWorld && table === 'world_system_profiles') continue;
+      if (options.preserveCharacters && table === 'character_extended_profiles') continue;
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
         db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId);
       }
@@ -378,7 +436,7 @@ export class GenerationRecoveryService {
     db.prepare('DELETE FROM foreshadowings WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM map_points WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM organizations WHERE project_id=?').run(projectId);
-    db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
+    if (!options.preserveCharacters) db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
     if (!options.preserveWorld) {
       db.prepare('DELETE FROM world_settings WHERE project_id=?').run(projectId);
     }

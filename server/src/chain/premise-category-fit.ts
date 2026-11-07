@@ -37,24 +37,73 @@ export function materializePremiseCategoryFit(value: any, selection: PremiseSele
   const errors = premiseCategoryFitIssues(value, selection);
   if (errors.length) throw new Error(errors.join('；'));
   if (!premiseCategoryCatalog(selection).length) return [];
-  if (value.categoryChecks.some((row: PremiseCategoryCheck) => row.status === 'unknown'))
-    throw new Error('分类与主线适配尚未确认，不能锁定题材');
-  return value.categoryChecks.filter((row: PremiseCategoryCheck) => row.status === 'missing').map((row: PremiseCategoryCheck) => {
+  return value.categoryChecks.filter((row: PremiseCategoryCheck) => row.status !== 'fulfilled').map((row: PremiseCategoryCheck) => {
     const entry = premiseCategoryCatalog(selection).find(item => item.ref === row.ref)!;
     const premise = selection.selected.find(item => item.premiseId === entry.premiseId)!;
     const seed = selection.pool.find(item => item.premiseId === entry.premiseId)!;
     return { kind: 'selection_fit' as const, premiseId: entry.premiseId, referencePremiseId: entry.premiseId,
+       ...(row.status==='unknown'?{repairMode:'replace_from_pool' as const}:{}),
+       ...((row as PremiseCategoryCheck & {protocolIncomplete?:boolean}).protocolIncomplete ? {protocolIncomplete:true} : {}),
       quote: String(premise.coreConflict), referenceQuote: String(seed.storyCore), field: 'storyCategory',
-      reason: `分类【${entry.category}】未落实到核心冲突与人物选择：${row.reason}` };
+      reason: row.status==='unknown' ? `分类【${entry.category}】未确认，禁止锁定：${row.reason}` : `分类【${entry.category}】未落实到核心冲突与人物选择：${row.reason}` };
   });
 }
 
-export function premiseCategoryReviewDirective(selection: PremiseSelectionResult): string {
+export function premiseCategoryReviewDirective(selection: PremiseSelectionResult, includeEvidenceCatalog = true): string {
   const catalog = premiseCategoryCatalog(selection);
   if (!catalog.length) return '';
   return '\n【与完整卡同口径的前置分类审核】' + JSON.stringify(catalog)
     + '；categoryChecks每个ref恰好一项，返回status=fulfilled|missing|unknown、reason至少8字。'
     + '按上方同一份分类标准检查核心冲突、主动选择及兑现，不能因标签相同、职业背景或附带感情就视为分类成立。'
     + 'fulfilled须提供本题材已选展开的evidenceRef；missing须指出具体分类机制缺失，不改题材或分类。'
-    + '\n【已选展开证据目录】' + JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({ id, field, premiseId }) => ({ id, field, premiseId })));
+    + (includeEvidenceCatalog ? '\n【已选展开证据目录】' + JSON.stringify(premiseGenreEvidenceCatalog(selection).map(({ id, field, premiseId }) => ({ id, field, premiseId }))) : '\n分类evidenceRef使用本次同一请求中已列出的完整流派字段编号目录，原文、编号与审核规则全部保留，不重复展开。');
+}
+
+/** Transmit only the official category definitions actually used by this
+ * independent source-review batch. The full verified standards remain in the
+ * controller and in the model-independent quality Gate; unrelated categories
+ * cannot change whether this batch's specific stories fit their own genre. */
+/** The causal/payoff and overlap reviews consume already-reviewed category/genre
+ * verdicts. Keep the full platform and author contract but omit the redundant
+ * category catalogue and following genre glossary from these two specialist
+ * prompts. Source/category/genre review still receives the complete standard. */
+/** Only categories present in the immutable candidate pool can be selected.
+ * Keep the complete source standards while generating the pool; at fixed-pool
+ * selection time omit impossible category glossaries, without losing a single
+ * applicable requirement. Unexpected/missing category bindings fail open to
+ * the FULL standards, never to an incomplete checklist. */
+export function scopePremiseSelectionCategoryStandards<T extends {category:string}>(
+ standards:readonly T[], pool:readonly {storyCategory?:unknown}[],
+):T[] {
+ if(!pool.length)return [...standards];
+ const actual=new Set(pool.map(row=>typeof row.storyCategory==='string'?row.storyCategory.trim():'').filter(Boolean));
+ if(!actual.size)return [...standards];
+ const scoped=standards.filter(row=>actual.has(row.category));
+ return actual.size===new Set(scoped.map(row=>row.category)).size?scoped:[...standards];
+}
+
+export function corePremiseReviewStandard(standard:string):string {
+ const marker='\n【与完整卡一致的分类标准】';
+ const index=standard.lastIndexOf(marker);
+ return index>=0?standard.slice(0,index):standard;
+}
+
+export function scopePremiseReviewCategoryStandards(
+  standard: string, selected: readonly Record<string, unknown>[],
+): string {
+  const marker='\n【与完整卡一致的分类标准】';
+  const markerAt=standard.lastIndexOf(marker);
+  if(markerAt<0)return standard;
+  const from=markerAt+marker.length,until=standard.indexOf('\n',from);
+  if(until<0)return standard;
+  let definitions: unknown;
+  try { definitions=JSON.parse(standard.slice(from,until)); } catch { return standard; }
+  if(!Array.isArray(definitions)||!definitions.every(row=>row&&typeof row==='object'
+    &&typeof (row as any).category==='string'))return standard;
+  // Both source review and fixed-pool selection use one verified category
+  // projection. Missing bindings preserve the complete standards.
+  const relevant=scopePremiseSelectionCategoryStandards(
+    definitions as Array<{category:string}>,selected);
+  if(relevant.length===definitions.length)return standard;
+  return standard.slice(0,from)+JSON.stringify(relevant)+standard.slice(until);
 }

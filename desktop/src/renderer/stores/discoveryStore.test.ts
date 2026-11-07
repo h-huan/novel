@@ -68,3 +68,19 @@ describe('discovery defaults and explicit selection',()=>{
   expect(migrate({narrativePov:'第三人称限知'},4)).toMatchObject({narrativePov:'第三人称限知'});
  });
 });
+
+describe('active idea cancellation identity across route remount',()=>{
+ beforeEach(()=>useDiscoveryStore.getState().reset());
+ it('keeps only the in-memory discovery task ID across page users and clears on reset',()=>{
+  const state=useDiscoveryStore.getState();
+  state.setActiveDiscoveryRequestId('idea-run-123');
+  state.setGenerating(true);
+  expect(useDiscoveryStore.getState()).toMatchObject({isGenerating:true,activeDiscoveryRequestId:'idea-run-123'});
+  // The persisted settings must never resurrect a stale cancelled task on restart.
+  const persisted=useDiscoveryStore.persist.getOptions().partialize!(useDiscoveryStore.getState()) as Record<string,unknown>;
+  expect(persisted).not.toHaveProperty('activeDiscoveryRequestId');
+  expect(persisted).not.toHaveProperty('isGenerating');
+  useDiscoveryStore.getState().resetDiscovery();
+  expect(useDiscoveryStore.getState()).toMatchObject({isGenerating:false,activeDiscoveryRequestId:null});
+ });
+});

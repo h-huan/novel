@@ -374,23 +374,6 @@ const normalizeGoalArc = (value: unknown): GoalArcType => {
   ].includes(arc) ? arc : 'accumulate_burst') as GoalArcType;
 };
 
-const inferRhythmByOrder = (order: number): ChapterFunctionType => {
-  const shortRhythm: ChapterFunctionType[] = [
-    'opening',
-    'exposition',
-    'rising_action',
-    'conflict',
-    'climax',
-    'transition',
-    'climax',
-    'cliffhanger',
-    'resolution',
-  ];
-  if (order >= 1 && order <= shortRhythm.length) return shortRhythm[order - 1];
-  const cycle: ChapterFunctionType[] = ['charging', 'conflict', 'explosion', 'breathing', 'paving', 'cliffhanger'];
-  return cycle[(Math.max(order, 1) - 1) % cycle.length];
-};
-
 const OutlinePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const projectId = id || '';
@@ -401,6 +384,8 @@ const OutlinePage: React.FC = () => {
 
   const [activeView, setActiveView] = useState<'generate' | 'browse'>('browse');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [rolloutBusy, setRolloutBusy] = useState(false);
+  const [rolloutAppendCount, setRolloutAppendCount] = useState<1 | 3 | 5 | 10>(3);
   const [genProgress, setGenProgress] = useState('');
   const [volumes, setVolumes] = useState<VolumeNode[]>([]);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
@@ -485,13 +470,12 @@ const OutlinePage: React.FC = () => {
 
   const toChapterNode = useCallback((ch: any): ChapterNode => {
     const sceneData = parseOutlineScenes(ch);
-    const order = Number(ch.order || ch.chapterNumber || ch.chapter_index || 0);
     const rawFunction = ch.chapterFunction || ch.chapter_function || sceneData.chapterFunction || ch.function;
     const normalizedFunction = normalizeFunction(rawFunction);
     return {
       id: ch.id,
       title: ch.title || '未命名章节',
-      chapterFunction: normalizedFunction === 'paving' && order > 0 ? inferRhythmByOrder(order) : normalizedFunction,
+      chapterFunction: normalizedFunction,
       goalArc: normalizeGoalArc(ch.goalArc || ch.goal_arc || sceneData.goalArc),
       targetWords: Number(ch.targetWords || ch.target_words || sceneData.targetWords || 0),
       content: ch.content || '',
@@ -625,8 +609,18 @@ const OutlinePage: React.FC = () => {
     setSyncMessage('大纲修改已保存。受影响的伏笔位置、时间顺序和人物状态会列入修改提醒，由作者决定是否采用。');
   }, [loadVolumes]);
 
+  // 独立大纲候选不是创建时章纲的第二份事实源：只允许写入尚无大纲的项目。
+  // 已有正式书纲/卷纲/章纲须在原节点编辑或滚动补纲，不允许盲目追加第二棵树。
+  const assertIndependentOutlineDestinationEmpty = useCallback(async () => {
+    const response = await api.get(`/projects/${projectId}/outlines`);
+    const rows = (response as any).data ?? response;
+    if (!Array.isArray(rows)) throw new Error('未取得可核验的大纲清单，停止生成或保存，避免覆盖已有故事事实');
+    if (rows.length > 0) throw new Error('项目已有保存的大纲；独立生成候选不能追加第二套大纲。请直接编辑已有节点，长篇后续细纲使用滚动补纲。');
+  }, [projectId]);
+
   const saveGeneratedOutline = useCallback(async (volumesToSave: VolumeNode[], meta: Record<string, any>) => {
     if (!projectId || volumesToSave.length === 0) return;
+    await assertIndependentOutlineDestinationEmpty();
     let totalChapters = 0;
 
     if (Object.keys(meta).length > 0) {
@@ -685,7 +679,7 @@ const OutlinePage: React.FC = () => {
       const volumeId = volumeData?.id || volumeData?.data?.id;
       if (!volumeId) continue;
 
-      for (const [chapterIndex, chapter] of volume.chapters.entries()) {
+      for (const chapter of volume.chapters) {
         await api.post(`/projects/${projectId}/outlines`, {
           level: 'chapter',
           parentId: volumeId,
@@ -693,9 +687,7 @@ const OutlinePage: React.FC = () => {
           title: chapter.title,
           content: chapter.content || '',
           timeline: chapter.timeline || '',
-          chapterFunction: normalizeFunction(chapter.chapterFunction) === 'paving'
-            ? inferRhythmByOrder(chapterIndex + 1)
-            : normalizeFunction(chapter.chapterFunction),
+          chapterFunction: normalizeFunction(chapter.chapterFunction),
           goalArc: chapter.goalArc || 'accumulate_burst',
           targetWords: (() => {
             const value = Number(chapter.targetWords);
@@ -746,16 +738,14 @@ const OutlinePage: React.FC = () => {
       };
       await api.put(`/projects/${projectId}`, { settings: JSON.stringify(settings) });
     } catch {}
-  }, [projectId]);
+  }, [projectId, assertIndependentOutlineDestinationEmpty]);
 
   const mapGeneratedChapter = (chapter: any, index: number, total: number): ChapterNode => {
     const content = chapter.content || chapter.summary || chapter.description || '';
     return {
       id: `generated-ch-${index + 1}`,
       title: chapter.title || chapter.chapterTitle || `第${index + 1}章`,
-      chapterFunction: normalizeFunction(chapter.chapterFunction || chapter.function) === 'paving'
-        ? inferRhythmByOrder(index + 1)
-        : normalizeFunction(chapter.chapterFunction || chapter.function),
+      chapterFunction: normalizeFunction(chapter.chapterFunction || chapter.function),
       goalArc: normalizeGoalArc(chapter.goalArc),
       targetWords: Number(chapter.targetWords || 0),
       wordCountReason: chapter.wordCountReason || chapter.targetWordsReason || '',
@@ -858,6 +848,7 @@ const OutlinePage: React.FC = () => {
     setGenProgress('正在生成大纲...');
 
     try {
+      await assertIndependentOutlineDestinationEmpty();
       const configuredTotalWords = Number(targetWords || currentProject?.targetWords || 0);
       if (!Number.isInteger(configuredTotalWords) || configuredTotalWords <= 0) throw new Error('项目未配置有效的目标总字数');
       // 走服务端权威入口：服务端先校验项目卡片上的执行标准（平台/分类/基调/文风/流派/视角/题材标签），
@@ -891,7 +882,7 @@ const OutlinePage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, material, targetWords, targetWordsRange, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings, missingStandards, targetWordsBlock]);
+  }, [projectId, material, targetWords, targetWordsRange, generateCount, workScale, updatePlan, projectType, checkAction, currentProject?.targetWords, projectSettings, missingStandards, targetWordsBlock, assertIndependentOutlineDestinationEmpty]);
 
   const handleSaveGenerated = useCallback(async () => {
     setGenProgress('正在保存大纲...');
@@ -979,7 +970,7 @@ const OutlinePage: React.FC = () => {
           reversalPoint: '',
           targetWords: chapterTargetWords,
         }),
-        chapterFunction: inferRhythmByOrder(order),
+        chapterFunction: 'paving',
         goalArc: normalizeGoalArc('accumulate_burst'),
         targetWords: chapterTargetWords,
       });
@@ -1046,40 +1037,6 @@ const OutlinePage: React.FC = () => {
     }
   }, [projectId, refreshAfterChange]);
 
-  const handleContinueCreate = useCallback(async (count: number) => {
-    if (!projectId) return;
-    const targetsInput = window.prompt(
-      `请依次填写 ${count} 个章节的目标字数（每章 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX}，逗号分隔；应按各章任务分别决定）`,
-      '',
-    );
-    if (targetsInput === null) return;
-    const chapterTargets = targetsInput.split(/[,，\s]+/).filter(Boolean).map(Number);
-    if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) {
-      alert(`必须提供 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标。`);
-      return;
-    }
-    try {
-      const res = await api.post(`/projects/${projectId}/outlines/continue`, {
-        fromOutlineId: selectedChapter?.id,
-        count,
-        chapterTargets,
-        planning: {
-          workScale,
-          targetWordsRange,
-          structureMode: 'dynamic_by_story_rhythm',
-          chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX },
-          updatePlan,
-        },
-      });
-      const data = (res as any).data ?? res;
-      const last = data?.outlines?.[data.outlines.length - 1];
-      await refreshAfterChange(last?.id);
-      setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
-    } catch (error: any) {
-      alert(`续创建失败：${error?.message || '未知错误'}`);
-    }
-  }, [projectId, selectedChapter, workScale, targetWordsRange, updatePlan, refreshAfterChange]);
-
   const handleExpandChapter = useCallback(async () => {
     if (!projectId || !selectedChapter) return;
     setGenProgress('正在基于已确认资料生成本章详细大纲…');
@@ -1118,22 +1075,24 @@ const OutlinePage: React.FC = () => {
     }
   }, [projectId, selectedChapter, refreshAfterChange]);
 
-  const handleRolloutOutline = useCallback(async () => {
-    if (!projectId) return;
-    setGenProgress('正在结合已写正文滚动补全后续约20章详细章纲…');
+  const handleRolloutOutline = useCallback(async (appendCount: 1 | 3 | 5 | 10) => {
+    if (!projectId || rolloutBusy) return;
+    setRolloutBusy(true);
+    setGenProgress(`正在按已确认书纲、卷纲、已有章纲与正文补充 ${appendCount} 章，并进行一致性审核…`);
     try {
-      const res = await api.post('/chain/rollout-outline', { projectId });
+      // Explicit append count shares the same audited long-form rollout route
+      // as automatic refill. It never depends on selecting a chapter.
+      const res = await api.post('/chain/rollout-outline', { projectId, appendCount });
       const data = (res as any).data ?? res;
-      setGenProgress(
-        data?.added > 0
-          ? `已结合最新剧情滚动新增 ${data.added} 章详细章纲（当前细纲 ${data.detailedTotal}/${data.totalEstimated} 章）。`
-          : '详细章纲已足够领先当前正文，无需补充。',
-      );
+      if (data?.added !== appendCount) throw new Error('服务端新增章数与请求不一致，请检查大纲记录');
       await refreshAfterChange();
+      setGenProgress(`已新增 ${data.added} 章详细章纲（共 ${data.detailedTotal}/${data.totalEstimated} 章）；新人物、势力、地点和伏笔须在状态确稿中心确认后写正文。`);
     } catch (error: any) {
-      setGenProgress(`滚动补纲失败，未写入内容：${error?.message || '未知错误'}`);
+      setGenProgress(`补充章纲未完成：${error?.message || '未知错误'}`);
+    } finally {
+      setRolloutBusy(false);
     }
-  }, [projectId, refreshAfterChange]);
+  }, [projectId, refreshAfterChange, rolloutBusy]);
 
   const openInsertDialog = useCallback((chapterId: string, position: 'before' | 'after') => {
     openOperationDialog({
@@ -1163,7 +1122,7 @@ const OutlinePage: React.FC = () => {
         const targetWords = Number(values.targetWords);
         if (!values.title.trim() || !Number.isInteger(targetWords) || targetWords < CHAPTER_WORD_MIN || targetWords > CHAPTER_WORD_MAX) throw new Error(`请填写标题和 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数目标字数。`);
         const volume = volumes.find(item => item.id === volumeId); const order = (volume?.chapters.length || 0) + 1;
-        const response = await api.post(`/projects/${projectId}/outlines`, { level: 'chapter', parentId: volumeId, order, title: values.title.trim(), content: '', chapterFunction: inferRhythmByOrder(order), goalArc: 'accumulate_burst', targetWords });
+        const response = await api.post(`/projects/${projectId}/outlines`, { level: 'chapter', parentId: volumeId, order, title: values.title.trim(), content: '', chapterFunction: 'paving', goalArc: 'accumulate_burst', targetWords });
         const data = (response as any).data ?? response;
         await refreshAfterChange(data?.id || data?.data?.id);
         setGenProgress('章节已新增；请补齐具体事件链后再锁定。');
@@ -1219,21 +1178,6 @@ const OutlinePage: React.FC = () => {
       },
     });
   }, [openOperationDialog, projectId, refreshAfterChange, volumes]);
-
-  const openContinueDialog = useCallback((count: number) => {
-    openOperationDialog({
-      title: `续创建 ${count} 章`, description: '请逐章填写目标字数，逗号分隔。系统按实际章节任务创建，不会固定套用章数或字数。', confirmLabel: '确认续创建',
-      fields: [{ key: 'targets', label: `${count} 个目标字数`, initialValue: Array.from({ length: count }, () => '3600').join(',') }],
-      onConfirm: async values => {
-        const chapterTargets = values.targets.split(/[,，\s]+/).filter(Boolean).map(Number);
-        if (chapterTargets.length !== count || chapterTargets.some(value => !Number.isInteger(value) || value < CHAPTER_WORD_MIN || value > CHAPTER_WORD_MAX)) throw new Error(`请填写 ${count} 个 ${CHAPTER_WORD_MIN}-${CHAPTER_WORD_MAX} 之间的整数。`);
-        const response = await api.post(`/projects/${projectId}/outlines/continue`, { fromOutlineId: selectedChapter?.id, count, chapterTargets, planning: { workScale, targetWordsRange, structureMode: 'dynamic_by_story_rhythm', chapterWordRange: { min: CHAPTER_WORD_MIN, max: CHAPTER_WORD_MAX }, updatePlan } });
-        const data = (response as any).data ?? response;
-        await refreshAfterChange(data?.outlines?.at(-1)?.id);
-        setGenProgress(`已续创建 ${data?.outlines?.length || count} 章细纲。`);
-      },
-    });
-  }, [openOperationDialog, projectId, refreshAfterChange, selectedChapter?.id, targetWordsRange, updatePlan, workScale]);
 
   const renderContextPanel = () => {
     if (!selectedChapter || !chapterContext) return null;
@@ -1368,28 +1312,6 @@ const OutlinePage: React.FC = () => {
         <div style={styles.impactNotice}>
           修改后，相关伏笔位置、时间顺序和人物状态会出现在修改提醒中；系统不会擅自改写正文。
         </div>
-        <div style={styles.impactNotice}>
-          续创建：
-          {[1, 2, 5, 10].map(count => (
-            <button key={count} type="button" style={{ ...styles.operationButton, marginLeft: 8 }} onClick={() => openContinueDialog(count)}>
-              续 {count} 章
-            </button>
-          ))}
-        </div>
-
-        {projectType === 'long' && (
-          <div style={styles.impactNotice}>
-            长篇渐进式大纲：创建时只细排前20章，之后在正文生成时自动结合剧情滚动补全；也可现在手动
-            <button
-              type="button"
-              style={{ ...styles.operationButton, marginLeft: 8 }}
-              onClick={handleRolloutOutline}
-              title="结合最新已写正文，把后续详细章纲补到领先约20章"
-            >
-              立即滚动补纲
-            </button>
-          </div>
-        )}
         <div style={styles.qualityPanel}>
           <div style={styles.qualityTitle}>本章写作要点</div>
           <div style={styles.qualityList}>
@@ -1589,8 +1511,58 @@ const OutlinePage: React.FC = () => {
             <EmptyState title="暂无大纲" hint="请在灵感发现中创建项目，或切换到 AI 大纲生成。" action={<button type="button" onClick={() => setActiveView('generate')} style={styles.primarySmallButton}>立即生成大纲</button>} />
           ) : projectType === 'long' ? (
             <>
-              <div style={styles.treePanel}>
-                <div style={styles.treeTitle}>全书骨架</div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                <details style={{ flexShrink: 0, padding: '6px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                    全书骨架 · 世界观／主线与分卷／人物势力／伏笔／时间线
+                  </summary>
+                <p style={{ margin: '8px 0', fontSize: 13, color: 'var(--color-text-dim)', lineHeight: 1.7 }}>
+                  故事核心与结局方向、世界规则、分卷目标、人物与势力、伏笔及时间线共同构成全书骨架；
+                  后续详细章纲只执行骨架，不等于骨架本身。
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+                  <Link to={`/project/${projectId}/dashboard`}>全书主线与创作核心</Link>
+                  <Link to={`/project/${projectId}/world`}>世界观与规则</Link>
+                  <Link to={`/project/${projectId}/characters`}>人物体系</Link>
+                  <Link to={`/project/${projectId}/organization-map`}>势力与地点</Link>
+                  <Link to={`/project/${projectId}/foreshadowing`}>全书／卷级伏笔</Link>
+                  <Link to={`/project/${projectId}/timeline`}>关键时间线</Link>
+                </div>
+                  <div style={{ marginTop: 10, fontSize: 13, color: 'var(--color-text-soft)' }}>
+                    <strong>全书分卷规划</strong>（{volumes.length} 卷）：
+                    {volumes.map(volume => volume.title).join('、') || '尚未生成卷纲'}
+                  </div>
+                </details>
+                <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+                  <div style={styles.treePanel}>
+                <div style={{ ...styles.treeTitle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <span>章节列表（已生成的详细章纲）</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <label htmlFor="rollout-append-count" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>补充后续详细大纲</label>
+                    <select
+                      id="rollout-append-count"
+                      aria-label="选择补充章数"
+                      style={{ ...styles.input, width: 92 }}
+                      value={rolloutAppendCount}
+                      onChange={event => setRolloutAppendCount(Number(event.target.value) as 1 | 3 | 5 | 10)}
+                      disabled={rolloutBusy}
+                    >
+                      <option value={1}>1 章</option>
+                      <option value={3}>3 章</option>
+                      <option value={5}>5 章</option>
+                      <option value={10}>10 章</option>
+                    </select>
+                    <button
+                      type="button"
+                      style={{ ...styles.operationButton, opacity: rolloutBusy ? 0.55 : 1 }}
+                      onClick={() => handleRolloutOutline(rolloutAppendCount)}
+                      disabled={rolloutBusy}
+                      title="依照已确认卷纲与已写正文，补充所选数量的详细章纲；使用原有独立事实审核，不覆盖旧内容"
+                    >
+                      {rolloutBusy ? '补纲中…' : '补充章纲'}
+                    </button>
+                  </div>
+                </div>
                 <div style={styles.treeContent}>
                   {volumes.map(volume => (
                     <div key={volume.id} style={styles.volumeBlock}>
@@ -1636,7 +1608,9 @@ const OutlinePage: React.FC = () => {
                   ))}
                 </div>
               </div>
-              <div style={styles.detailPanel}>{selectedChapter ? renderDetail() : <EmptyState title="点击左侧章节查看详情" />}</div>
+                  <div style={styles.detailPanel}>{selectedChapter ? renderDetail() : <EmptyState title="点击左侧章节查看详情" />}</div>
+                </div>
+              </div>
             </>
           ) : (
             <>

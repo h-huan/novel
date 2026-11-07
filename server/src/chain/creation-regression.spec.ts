@@ -110,7 +110,9 @@ describe('creation failure regressions',()=>{
   const controller=Object.create(ChainController.prototype) as any;
   controller.generationMetrics={beginRun:vi.fn(()=>({id:'review-failed'})),finishRun:vi.fn(),record:vi.fn()};
   controller.llmCallWithRetry=vi.fn(async(_name:any,prompt:any,options:any)=>{
-   expect(prompt).toContain('platformEvidence引用体现平台机制的故事事件');
+   expect(prompt).toContain('platformEvidenceRef指向体现平台机制的实际故事事件');
+   expect(prompt).toContain('原文由服务器回填');
+   expect(prompt).toContain('不得引用executionStandard');
    expect(options.retryInstruction).toContain('不改故事');
    return {data:null,validationIssues:issues,warnings:[]};
   });
@@ -187,4 +189,14 @@ it('keeps related fact fields inside the local outline repair boundary',async()=
  const repair=source.slice(source.indexOf('【局部修复硬约束】禁止重新生成完整章纲'),source.indexOf('if (repair.runId) shortOutlineSourceRunIds'));
  expect(repair).toContain('${OUTLINE_FACT_REPAIR_SYNC_POLICY}');
  expect(repair).not.toContain('未点名字段必须保持当前值');
+});
+
+it('normalizes the actual problem-keyed title rejection without converting it into a pass',()=>{
+ const card={title:'打饭阿姨的验收单'};
+ const row={position:1,title:card.title,titleCompelling:false,issues:[{field:'C1.title',criterion:'titleCompelling',problem:'标题只叠加身份与道具，缺少具体利益冲突和点击理由'}]};
+ const normalized=targetIdeaReviews({reviews:[row]},[card],[]).reviews[0];
+ expect(normalized.titleCompelling).toBe(false);expect(normalized.issues).toEqual(['C1.title（titleCompelling）：标题只叠加身份与道具，缺少具体利益冲突和点击理由']);
+ const conflict={...row.issues[0],reason:'另一份冲突理由不能被静默丢弃'};
+ expect(targetIdeaReviews({reviews:[{...row,issues:[conflict]}]},[card],[]).reviews[0].issues).toEqual([conflict]);
+ expect(targetIdeaReviews({reviews:[{...row,titleCompelling:true}]},[card],[]).reviews[0].issues).toEqual(row.issues);
 });

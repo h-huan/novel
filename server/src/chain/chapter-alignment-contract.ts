@@ -155,14 +155,33 @@ export function chapterMissingItemTexts(rows:any[]) {
  }).filter(Boolean);
 }
 
-export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string) {
- return '\n原正文证据目录：'+JSON.stringify(causalEvidenceAnchors(body,{}))+'\n禁止重写或转录引文，只选择目录body段落编号，用evidenceAnchorIds数组返回，可多段共同支持。简短应答和结果段可与实际行动上下文共同选择，不能只用孤立短句证明完整行动。仅引文定位错误时保留该行原status与reason，不重新评判其它行。错误：'+JSON.stringify(errors)+'\n原检查：'+JSON.stringify(rows)+'\n只返回JSON:{"obligationChecks":[{"ref":"点名M编号","status":"covered|missing|unknown","reason":"实际语义依据","evidenceAnchorIds":["body:p原文编号"]}]}';
+/** One stable, paragraph-only address catalog for the fixed-action receipt.
+ * The general causal catalog also contains clauses and sentence anchors;
+ * exposing them while asking for paragraph IDs made the model invent
+ * unsupported body:p locations. Do not use a second numbering system. */
+function chapterObligationParagraphAnchors(body:string){
+ return causalEvidenceAnchors(body,{}).filter(row=>/^body:p[1-9]\d*$/.test(row.id))
+   .map(({id,text})=>({id,text}));
+}
+export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string,
+ catalog:ReturnType<typeof chapterObligationCatalog>=[]) {
+ const anchors=chapterObligationParagraphAnchors(body);
+ const targetSources=catalog.filter(row=>targets.includes(row.ref));
+ return '\n【仅纠正证据定位，不重新审判固定行动或改正文】本次章纲目标：'+JSON.stringify(targetSources)
+   +'\n原正文段落证据目录（唯一可引用的编号）：'+JSON.stringify(anchors)
+   +'\n【合法编号全集】'+JSON.stringify(anchors.map(row=>row.id))
+   +'\n禁止重写或转录引文、编造段落编号或使用句子/子句编号，只能从合法编号全集逐字选取body:p数字形式，用evidenceAnchorIds数组返回。对无法从原文证明的行动保留missing或unknown，不能杜撰证据升级covered。简短应答和结果段须连同真实行动上下文选择；仅引文定位错误时保留原status与reason，其它已成立结论不重判。错误：'+JSON.stringify(errors)
+   +'\n原检查：'+JSON.stringify(Array.isArray(rows)?rows.filter(row=>targets.includes(row?.ref)):[])
+   +'\n只返回JSON:{"obligationChecks":[{"ref":"点名M编号","status":"covered|missing|unknown","reason":"实际语义依据","evidenceAnchorIds":["body:p1"]}]}';
 }
 export function materializeChapterObligationEvidence(rows:any,original:any,errors:string[],body:string) {
  if(!Array.isArray(rows))throw new Error('固定行动纠错没有返回检查行');
- const anchors=new Map(causalEvidenceAnchors(body,{}).map(row=>[row.id,row.text]));
+ const anchors=new Map(chapterObligationParagraphAnchors(body).map(row=>[row.id,row.text]));
  return rows.map(row=>{
-  if(!Array.isArray(row?.evidenceAnchorIds)||row.evidenceAnchorIds.some((id:any)=>!anchors.has(id)))throw new Error('固定行动纠错包含不存在的正文证据编号');
+  if(!Array.isArray(row?.evidenceAnchorIds))throw new Error('固定行动纠错缺少正文段落编号');
+  const unknown=row.evidenceAnchorIds.filter((id:any)=>typeof id!=='string'||!anchors.has(id));
+  if(unknown.length)throw new Error('固定行动纠错包含不存在的正文证据编号：'
+   +JSON.stringify(unknown.slice(0,6))+'；合法编号仅有 '+JSON.stringify([...anchors.keys()].slice(0,100)));
   const old=Array.isArray(original)?original.find(old=>old.ref===row.ref):undefined;
   const ownErrors=errors.filter(error=>error.includes(row.ref));
   const quoteOnly=old&&ownErrors.length&&ownErrors.every(error=>error===row.ref+'行动证据不能定位实际正文');

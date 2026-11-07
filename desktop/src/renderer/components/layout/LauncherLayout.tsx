@@ -95,7 +95,7 @@ const LauncherLayout: React.FC<LauncherLayoutProps> = ({ children }) => {
         }}>
           {isElectron ? (
             <>
-              {serverStatus === 'connecting' ? '🟡 正在连接服务器...' : <>🔴 {serverError || '服务器未连接'} — 尝试启动中...&nbsp;</>}
+              {serverStatus === 'connecting' ? '🟡 正在连接服务器...' : <>🔴 {serverError || '服务器未连接'} — 请在 server 目录单独启动后端&nbsp;</>}
               {serverStatus === 'offline' && (
                 <button onClick={() => startHealthPolling()} style={{
                   padding: '2px 10px', backgroundColor: 'rgba(231,76,60,0.2)', border: '1px solid rgba(231,76,60,0.3)',

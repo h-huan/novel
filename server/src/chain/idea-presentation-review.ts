@@ -1,4 +1,31 @@
-import { fictionNarrativeText } from '../../shared/src/fiction-naming';
+
+/** Preserve one-call aggregate coverage when the shared allowance cannot fund
+ * all independent partitions. Batching is a latency optimization, never a
+ * prerequisite for completing a valid five-card review under a small budget. */
+export function shouldBatchIdeaPresentation(count:number,groupingMode:number,batchSize:number,availableReviewCalls:number):boolean {
+  return groupingMode===0&&count>=4&&batchSize>=1&&count>batchSize
+    &&availableReviewCalls>=Math.ceil(count/batchSize);
+}
+/** Reference cards are comparison material, not additional cards to be
+ * assessed. Preserve every narrative fact needed for genuine relation,
+ * choice, escalation, reversal and payoff comparison, without retransmitting
+ * labels, author self-praise or execution settings for each peer review.
+ * The actual target cards remain completely unchanged. */
+export function compactIdeaPresentationReferences(references:readonly Record<string,any>[]) {
+  // Keep the complete peer narrative AND the authored classification,
+  // tone, genre, style and POV dimensions needed for valid cross-card
+  // comparison. Only source-unproven self-praise is removed: noveltyProof was
+  // already excluded, and uniquePoint is another unaudited claim about the
+  // same events rather than an additional fact. No genuine narrative field,
+  // author setting or stage outcome is dropped from these references.
+  const narrative=['position','title','storyType','targetPlatform','storyCategory',
+    'hook','description','setting','protagonist','coreConflict','mainReversal',
+    'ending','scopeBreakdown','storyTone','writingStyle','webNovelGenre',
+    'plotTags','submissionTags','pov'] as const;
+  return references.map(row=>Object.fromEntries(narrative
+    .filter(key=>row[key]!==undefined).map(key=>[key,row[key]])));
+}
+import { ideaReviewCitableNarrativeText } from './idea-review-evidence';
 import { resolveQualityEvidence } from '../modules/writing-quality/quality-issue';
 import { readerGoalReviewIssues, readerGoalGateIssues, type ReaderGoalReview } from './reader-goal-review';
 
@@ -21,39 +48,103 @@ export interface IdeaPresentationVerdict {
   readerGoals?: ReaderGoalReview;
 }
 
+/** Verdict position is server-owned. Titles are NOT unique identities.
+ * A title-keyed Map silently reused the last verdict when two candidates
+ * shared a title, causing false rejection and further needless repair calls.
+ * Bind to the exact original objects using the validated original positions. */
+export function bindIdeaPresentationVerdicts<T extends {title:string}>(
+ cards:readonly T[], verdicts:readonly IdeaPresentationVerdict[],
+):Map<T,IdeaPresentationVerdict>{
+ const bound=new Map<T,IdeaPresentationVerdict>();
+ for(const verdict of verdicts){
+   if(!Number.isInteger(verdict?.position)||verdict.position<1||verdict.position>cards.length)
+     throw Error('完整卡独立审核位置缺失或越界，不得按标题猜测归属');
+   const candidate=cards[verdict.position-1];
+   if(verdict.title!==candidate.title||bound.has(candidate))
+     throw Error('完整卡独立审核标题、位置不匹配或重复，不得错配其它故事');
+   bound.set(candidate,verdict);
+ }
+ if(bound.size!==cards.length)throw Error('完整卡独立审核未覆盖全部实际候选');
+ return bound;
+}
+
+/** Repair only an unambiguous same-row envelope error; never infer a verdict. */
+function normalizePresentationEnvelope(row: any): any {
+  const bridge = row?.payoffBridge;
+  if (!row || typeof row !== 'object' || !bridge || typeof bridge !== 'object' || Array.isArray(bridge)) return row;
+  const next = { ...row, payoffBridge: { ...bridge } };
+  for (const key of ['readerGoals', 'issues', 'warnings']) {
+    if (bridge[key] === undefined) continue;
+    if (row[key] !== undefined && JSON.stringify(row[key]) !== JSON.stringify(bridge[key]))
+      throw new Error('payoffBridge内外的' + key + '冲突，不能猜测审核结论');
+    next[key] = bridge[key];
+    delete next.payoffBridge[key];
+  }
+  return next;
+}
+/** A reviewer restating an already-locked reader question is not a new quality verdict.
+ * A missing/short restatement is a transport defect. Reuse only the actual
+ * card's source-bound question; never manufacture a question or change any
+ * negative six-criterion, payoff or reader-goal judgment. */
+function restoreLockedReaderQuestion(row:any,cards:readonly any[]):any {
+  const card=Number.isInteger(row?.position)?cards[row.position-1]:undefined;
+  if(!card||card.title!==row?.title)return row;
+  const locked=card?.noveltyProof?.readerQuestion;
+  if(typeof locked!=='string'||locked.trim().length<8)return row;
+  const received=typeof row?.readerQuestion==='string'?row.readerQuestion.trim():'';
+  return received.length<8?{...row,readerQuestion:locked.trim()}:row;
+}
 /** Reference verdicts are never accepted again; unknown/duplicate target rows still fail. */
 export function targetIdeaReviews(value: any, cards: readonly any[], references: readonly any[]): any {
   if (!Array.isArray(value?.reviews)) return value;
   const targets = new Set(cards.map(card => card.title));
   const referenceTitles = new Set(references.map(card => card.title).filter(title => !targets.has(title)));
-  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map((row:any)=>({
+  return { ...value, reviews: value.reviews.filter((row: any) => !referenceTitles.has(row?.title)).map(normalizePresentationEnvelope).map((row:any)=>restoreLockedReaderQuestion(row,cards)).map((row:any)=>({
     ...row, issues: Array.isArray(row?.issues) ? row.issues.map((issue:any)=> {
       if (typeof issue==='string') return issue;
       const criteria=['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'];
       const criterion = issue?.criterion ?? issue?.judgment;
-      const reason = issue?.reason ?? issue?.detail;
+      const reason = issue?.reason ?? issue?.detail ?? issue?.problem;
       // Only a recognized structured reason is converted. Verdicts and evidence stay unchanged.
       if (issue && typeof issue==='object' && !Array.isArray(issue) && typeof reason==='string' && reason.trim()
-        && !(issue.reason !== undefined && issue.detail !== undefined && issue.reason !== issue.detail)
+        && [issue.reason,issue.detail,issue.problem].filter(value=>value!==undefined).every(value=>value===reason)
+        && (issue.problem===undefined || row[criterion]===false)
         && criteria.includes(criterion) && !(issue.criterion !== undefined && issue.judgment !== undefined && issue.criterion !== issue.judgment)
         && (issue.field === undefined || (typeof issue.field==='string' && issue.field.trim())))
         return issue.field ? `${issue.field}（${criterion}）：${reason}` : `${criterion}：${reason}`;
       return issue;
     }) : row?.issues,
+    // This normalization can only preserve an already-rejected verdict. It
+    // cannot make an all-true report pass or hide a blocking defect as advice.
+    warnings:Array.isArray(row?.warnings)?row.warnings.map((warning:any)=>{
+      if(typeof warning==='string')return warning;
+      const criterion=warning?.criterion;
+      if(warning&&typeof warning==='object'&&!Array.isArray(warning)
+        &&['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'].includes(criterion)
+        &&row[criterion]===false&&typeof warning.suggestion==='string'&&warning.suggestion.trim()
+        &&Object.keys(warning).every(key=>['criterion','suggestion'].includes(key)))
+        return criterion+'：'+warning.suggestion;
+      return warning;
+    }):row?.warnings,
   })) };
 }
 
 /** Bind an independent semantic judgement to exactly the cards actually reviewed. */
 export function presentationReviewIssues(value: any, cards: readonly any[], requireReaderGoals = false): string[] {
-  if (!Array.isArray(value?.reviews) || value.reviews.length !== cards.length) return ['标题与首屏审查必须逐卡返回完整结论'];
+  if (!Array.isArray(value?.reviews)) return ['标题与首屏审查必须逐卡返回完整结论：缺少reviews数组'];
+  if (value.reviews.length !== cards.length) {
+    const seen=new Set(value.reviews.map((row:any)=>row?.position).filter((pos:unknown)=>Number.isInteger(pos)));
+    const missing=cards.map((_card,index)=>index+1).filter(pos=>!seen.has(pos));
+    return ['标题与首屏审查必须逐卡返回完整结论：要求'+cards.length+'项，实际'+value.reviews.length+'项，缺失位置='+JSON.stringify(missing)];
+  }
   const seen = new Set<number>();
   const issues: string[] = [];
   for (const row of value.reviews) {
-    if (requireReaderGoals || row?.readerGoals !== undefined) issues.push(...readerGoalReviewIssues(row?.readerGoals, fictionNarrativeText(cards[row?.position - 1] || {})).map(issue => '第' + (row?.position ?? '?') + '张题材审查：readerGoals.' + issue));
+    if (requireReaderGoals || row?.readerGoals !== undefined) issues.push(...readerGoalReviewIssues(row?.readerGoals, ideaReviewCitableNarrativeText(cards[row?.position - 1] || {})).map(issue => '第' + (row?.position ?? '?') + '张题材审查：readerGoals.' + issue));
     if (!Number.isInteger(row?.position) || row.position < 1 || row.position > cards.length || seen.has(row.position)
       || row.title !== cards[row.position - 1].title
       || ['titleCompelling', 'openingCompelling', 'distinctFromBatch', 'storyCoherent', 'payoffCredible', 'platformFit'].some(key => typeof row[key] !== 'boolean')
-      || ['storyEvidence', 'payoffEvidence', 'platformEvidence'].some(key => !resolveQualityEvidence(fictionNarrativeText(cards[row.position - 1]), row[key]).verified)
+      || ['storyEvidence', 'payoffEvidence', 'platformEvidence'].some(key => !resolveQualityEvidence(ideaReviewCitableNarrativeText(cards[row.position - 1]), row[key]).verified)
       || typeof row.qualityReason !== 'string' || row.qualityReason.trim().length < 8
       || typeof row.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8
       || !Array.isArray(row.issues) || row.issues.some((issue: any) => typeof issue !== 'string' || !issue.trim())
@@ -65,7 +156,7 @@ export function presentationReviewIssues(value: any, cards: readonly any[], requ
         if (typeof row?.[key] !== 'boolean') issues.push(`${prefix}：${key}必须为布尔值`);
       }
       for (const key of ['storyEvidence', 'payoffEvidence', 'platformEvidence']) {
-        if (!card || !resolveQualityEvidence(fictionNarrativeText(card), row?.[key]).verified) issues.push(`${prefix}：${key}不能连续定位到题材卡原文；必须逐字引用对应卡的hook、setting、description、ending或scopeBreakdown，不得引用executionStandard、分类规则或参考卡，不得改写或拼接`);
+        if (!card || !resolveQualityEvidence(ideaReviewCitableNarrativeText(card), row?.[key]).verified) issues.push(`${prefix}：${key}不能连续定位到题材卡原文；必须逐字引用对应卡的hook、setting、description、ending或scopeBreakdown，不得引用executionStandard、分类规则或参考卡，不得改写或拼接`);
       }
       if (typeof row?.qualityReason !== 'string' || row.qualityReason.trim().length < 8) issues.push(`${prefix}：qualityReason至少8字`);
       if (typeof row?.readerQuestion !== 'string' || row.readerQuestion.trim().length < 8) issues.push(`${prefix}：readerQuestion至少8字`);

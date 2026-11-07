@@ -183,16 +183,44 @@ export function crossStageRepairDiagnosticPositions(anchors:RepairAnchor[],targe
   });
   return positions;
 }
-export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:readonly {id:string;chapterId:string;content:string}[],findings:readonly string[]) {
+export function crossStageRepairFocusedAnchors(anchors:RepairAnchor[],targets:readonly {id:string;chapterId:string;content:string}[],findings:readonly string[],originalBundle?:Record<string,any[]>) {
   const positions=crossStageRepairDiagnosticPositions(anchors,targets,findings);
-  if(!positions.length||positions.some(position=>!position.anchorIds.length))return anchors;
+  // Source-boundary units cover only a subset of the cross-stage findings.
+  // When their coordinates are known, don't hide a different, explicitly
+  // cited mutable field (e.g. characters.2.relationships and profile_json)
+  // from the SAME existing repair call. The group has already been scoped
+  // by crossStageRepairRequests; never infer a target from a loose quote.
+  const citedFields=new Set<string>();
+  if(originalBundle)for(const collection of ['characters','organizations','mapPoints','chapters','foreshadowings']){
+    for(const [index,row] of (originalBundle[collection]||[]).entries()){
+      if(!anchors.some(anchor=>anchor.entityId===row.id))continue;
+      for(const field of Object.keys(row)){
+        const dotted=collection+'.'+index+'.'+field;
+        const bracketed = collection + '[' + index + '].' + field;
+        const mentioned=(path:string)=>findings.some(finding=>{
+          const offset=finding.indexOf(path);
+          if(offset<0)return false;
+          const previous=finding[offset-1]||'',following=finding[offset+path.length]||'';
+          return !/[A-Za-z0-9_]/.test(previous)&&!/[A-Za-z0-9_]/.test(following);
+        });
+        if(mentioned(dotted)||mentioned(bracketed))citedFields.add(row.id+':'+field);
+      }
+    }
+  }
+  // A reviewer may cite exact indexed character JSON fields without a chapter
+  // source-unit ID. Do not expand that precise repair to every unrelated
+  // character merely because no source-boundary position was emitted.
+  // An unresolved source-unit position still requires the full safe fallback.
+  if(positions.some(position=>!position.anchorIds.length))return anchors;
+  if(!positions.length&&!citedFields.size)return anchors;
   const ids=new Set(positions.flatMap(position=>position.anchorIds));
   const kinds=new Set(targets.filter(target=>positions.some(position=>position.sourceUnit===target.id)).flatMap(target=>sourceBoundaryRiskKinds(target.content)));
   const related=targets.filter(target=>sourceBoundaryRiskKinds(target.content).some(kind=>kinds.has(kind)));
   for(const position of crossStageRepairDiagnosticPositions(anchors,related,related.map(target=>target.id)))for(const id of position.anchorIds)ids.add(id);
   // All affected chapter action chains stay available for causal replacement,
   // not merely the faulty conclusion or one copied projection.
-  return anchors.filter(anchor=>ids.has(anchor.id)||(anchor.entityType==='chapter'&&anchor.field==='content')
+  return anchors.filter(anchor=>ids.has(anchor.id)||citedFields.has(anchor.entityId+':'+anchor.field)
+    ||(anchor.entityType==='chapter'&&anchor.field==='content')
     || isWorldPlanPatchTarget(anchor.entityType));
 }
 
@@ -225,8 +253,12 @@ export function crossStageRepairDependencyView(bundle:Record<string,any[]>,targe
 export function crossStageRepairContext(bundle:Record<string,any[]>,findings:string[]) {
   const text=findings.join('\n'),quotes=[...text.matchAll(/[“"]([^”"\n]{8,500})[”"]/g)].map(match=>match[1]);
   const mutable=new Set(['characters','organizations','mapPoints','chapters','foreshadowings']);
-  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>
-    text.includes(row.id)||text.includes(`${key}[${index}]`)).map(row=>row.id)));
+  const referenced=new Set(Object.entries(bundle).filter(([key])=>mutable.has(key)).flatMap(([key,rows])=>rows.filter((row,index)=>{
+    const bracketed=key+'['+index+']';
+    // Match a complete dotted array index: characters.2 must not include characters.20.
+    const dotted=new RegExp('(^|[^A-Za-z0-9_])'+key+'\\.'+index+'(?=[^A-Za-z0-9_]|$)');
+    return text.includes(row.id)||text.includes(bracketed)||dotted.test(text);
+  }).map(row=>row.id)));
   return Object.fromEntries(Object.entries(bundle).map(([key,rows])=>[key,!mutable.has(key)?rows:
     rows.filter(row=>!referenced.size||referenced.has(row.id)).map(row=>Object.fromEntries(Object.entries(row).map(([field,value])=>{
       if(typeof value!=='string'||['id','title','name'].includes(field))return [field,value];
@@ -263,7 +295,15 @@ export function crossStageRepairRequests(bundle:Record<string,any[]>,findings:st
       const matches=entities.filter(entity=>typeof entity.id==='string'&&entity.id.toLowerCase().startsWith(token.toLowerCase()));
       return matches.length===1?[matches[0].id]:[];
     });
+    // The independent reviewer cites indexed JSON as characters.2.relationships
+    // as well as characters[2]. Match the precise index (not characters.20).
+    const citesDottedEntity=(reference:string):boolean=>{
+      const dotted=reference.replace(/\[(\d+)\]$/,'.$1');
+      return dotted!==reference && new RegExp('(^|[^A-Za-z0-9_])'
+        +dotted.replaceAll('.','\\.')+'(?=[^A-Za-z0-9_]|$)').test(finding);
+    };
     const targetIds=entities.filter(entity=>finding.includes(entity.id)||finding.includes(entity.reference)
+      ||citesDottedEntity(entity.reference)
       ||entity.namedReferences.some(ref=>finding.includes(ref))||prefixIds.includes(entity.id)
       ||(entity.planField==='endingDirection'&&/world(?:\.constraints)?\.endingDirection|world\[\d+\]\.constraints\.endingDirection/.test(finding))
       ||(entity.planField==='ending'&&/worldProfiles?(?:\[\d+\])?\.ending\b/.test(finding))).map(entity=>entity.id);

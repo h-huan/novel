@@ -22,10 +22,14 @@ const conflict = {
 describe('outline fact review pipeline', () => {
   it('passes the complete persisted world, including constraints and social rules, to framework audits', async () => {
     const controller=controllerFixture(),world={era:'现代',rules:'许可仅对持有人生效',constraints:'许可不保证设备持续打开',social_rules:'他人必须各自取得许可',rule_system_json:'{"revoke":"过期失效"}'},outlines=[{order:1,content:'持有人刷卡进入'}];
-    const prepare=vi.fn((sql:string)=>sql.includes('world_settings')?{get:()=>world}:{all:()=>outlines});
+    const prepare=vi.fn((sql:string)=>({
+      get:()=>sql.includes('world_settings')?world:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }));
     controller.db={getDb:()=>({prepare})};controller.assertOutlineCandidateFacts=vi.fn().mockResolvedValue(undefined);
     await controller.assertOutlineFactLedger('p','故事目标','执行标准');
-    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledWith('p','故事目标','执行标准',world,outlines);
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledWith('p','故事目标','执行标准',
+      {world,worldProfile:undefined,characters:[]},outlines);
     expect(prepare.mock.calls.some(([sql])=>sql.includes('SELECT * FROM world_settings'))).toBe(true);
   });
   it('keeps wrong-chapter quotations in review correction and never calls candidate repair', async () => {
@@ -131,8 +135,10 @@ describe('outline fact review pipeline', () => {
   ])('keeps original evidence across batches when the ledger is empty: %s', async (_genre, before, after) => {
     const controller = controllerFixture();
     const outlines = Array.from({ length: 5 }, (_, order) => ({ order, content: order === 0 ? before : order === 4 ? after : '经过' }));
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '故事世界规则' }) } : { all: () => outlines } }) };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'故事世界规则'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }) }) };
     controller.llmCallWithRetry.mockResolvedValueOnce({ data: { consistent: true, contradictions: [], ledger: [] }, warnings: [] })
       .mockImplementationOnce(async (_label: string, prompt: string) => {
         const rawSources = prompt.split('【已确认前章原始资料】')[1].split('【前批事实台账】')[0].trim();
@@ -199,8 +205,10 @@ describe('outline fact review pipeline', () => {
   it('inherits history across activation batches with no changes', async () => {
     const controller = controllerFixture();
     const outlines = Array.from({ length: 5 }, (_, order) => ({ order, title: '章' + (order + 1), content: '事件' }));
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '已保存规则' }) } : { all: () => outlines } }) };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'已保存规则'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }) }) };
     controller.llmCallWithRetry
       .mockResolvedValueOnce({ data: { consistent: true, contradictions: [], ledger: [{ current: '门后时间：倒退一小时' }] }, warnings: [] })
       .mockImplementationOnce(async (_label: string, prompt: string, options: any) => {
@@ -218,8 +226,10 @@ describe('outline fact review pipeline', () => {
 
   it('blocks actual activation contradictions and persists both quoted evidence and failure category', async () => {
     const controller = controllerFixture();
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '时间倒退一小时' }) } : { all: () => [{ order: 0, content: '时间快一小时' }] } }) };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'时间倒退一小时'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:[{order:0,content:'时间快一小时'}],
+    }) }) };
     controller.llmCallWithRetry.mockResolvedValue({ data: { consistent: false, contradictions: [conflict], ledger: [] }, warnings: [] });
     await expect(controller.assertOutlineFactLedger('project', '{}', '标准')).rejects.toThrow('已举证的事实矛盾');
     const record = JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]);

@@ -66,6 +66,24 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       actions.push('quality_benchmark_samples.chapter_index');
     }
 
+    if (hasTable(db, 'generation_step_metrics')) {
+      if (!hasColumn(db, 'generation_step_metrics', 'discovery_request_id')) {
+        db.exec('ALTER TABLE generation_step_metrics ADD COLUMN discovery_request_id TEXT');
+        actions.push('generation_step_metrics.discovery_request_id');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generation_step_metrics_discovery_request ON generation_step_metrics(discovery_request_id,created_at)');
+    }
+
+    // Pre-project idea calls must be attributable even before any step metric
+    // finishes. Existing databases are reconciled without losing old runs.
+    if (hasTable(db, 'generation_runs')) {
+      if (!hasColumn(db, 'generation_runs', 'discovery_request_id')) {
+        db.exec('ALTER TABLE generation_runs ADD COLUMN discovery_request_id TEXT');
+        actions.push('generation_runs.discovery_request_id');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_discovery_request ON generation_runs(discovery_request_id,started_at)');
+    }
+
     // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，
     // 生成在进入质量评估前失败时会永久留下 failed + not_evaluated，界面和恢复逻辑
     // 无法分辨“没评审”与“已经失败”。把这个约束下沉到数据库边界，避免每个调用点
@@ -107,6 +125,39 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');
       for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {
         if (hasColumn(db, 'projects', column)) { db.exec(`ALTER TABLE projects DROP COLUMN ${column}`); actions.push(`drop_legacy_column.projects.${column}`); }
+      }
+    }
+
+    // Initial creation and resumed creation insert the same canonical world/profile
+    // fields. Historical databases may already have migration 001 recorded but
+    // still predate these columns; CREATE TABLE IF NOT EXISTS cannot add them.
+    // Reconcile only required write/read fields, never replace either table or
+    // the persisted story facts. Keep the source-review/transaction Gate intact.
+    const worldCreationColumns: Array<{table:string;columns:Array<[string,string]>}> = [
+      {table:'world_settings',columns:[
+        ['rules',"TEXT DEFAULT '[]'"],['atmosphere',"TEXT DEFAULT ''"],
+        ['story_premise',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT '[]'"],
+        ['social_rules',"TEXT DEFAULT ''"],['special_settings',"TEXT DEFAULT ''"],
+        ['setting_type',"TEXT DEFAULT 'full'"],
+      ]},
+      {table:'world_system_profiles',columns:[
+        ['synopsis',"TEXT DEFAULT ''"],['basic_info',"TEXT DEFAULT ''"],
+        ['era',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT ''"],
+        ['atmosphere_tone',"TEXT DEFAULT ''"],['rules',"TEXT DEFAULT ''"],
+        ['social_structure',"TEXT DEFAULT ''"],['tech_supernatural',"TEXT DEFAULT ''"],
+        ['system_mechanics',"TEXT DEFAULT ''"],['culture_customs',"TEXT DEFAULT ''"],
+        ['naming_rules',"TEXT DEFAULT ''"],['scale_plan',"TEXT DEFAULT ''"],
+        ['ending',"TEXT DEFAULT ''"],['hierarchy_rules',"TEXT DEFAULT ''"],
+        ['supplementary',"TEXT DEFAULT ''"],
+      ]},
+    ];
+    for (const {table,columns} of worldCreationColumns) {
+      if (!hasTable(db,table)) continue;
+      for (const [name,definition] of columns) {
+        if (!hasColumn(db,table,name)) {
+          db.exec(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${definition}`);
+          actions.push(`creation_world_column.${table}.${name}`);
+        }
       }
     }
 

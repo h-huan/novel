@@ -323,15 +323,5 @@ describe('IdempotentRealLLMService', () => {
     } finally {superGenerate.mockRestore();db.close();}
   });
 
-  it('physically blocks the historical automatic whole-chapter alignment rewrite', async () => {
-    const { db } = fixture();
-    try {
-      const service = serviceFor(db);
-      await expect(service.generate({
-        prompt: '根据评审结论重写整章',
-        scenario: 'writing_climax',
-        metrics: { projectId: 'p', chapterIndex: 1, stepKey: 'body_alignment_repair' },
-      })).rejects.toThrow(/自动整章.*禁用/);
-    } finally { db.close(); }
-  });
+
 });

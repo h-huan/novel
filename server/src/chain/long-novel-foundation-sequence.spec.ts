@@ -6,14 +6,17 @@ import { describeChapterResponsibilityPlan } from '../../shared/src/chapter-resp
 
 const input = { projectId: 'sequence-test', story_setting: '番茄悬疑，主角追查旧站', targetWords: 100, genre: '悬疑' };
 const skeleton = {
-  coreSetting: { title: '旧站之谜', coreConflict: '寻找失踪证据' },
-  skeletonVolumes: [{ volumeNumber: 1, title: '旧站卷', estimatedChapters: 250, chapterCountReason: '完整调查事件链需要250章' }],
+  coreSetting: { title: '旧站之谜', protagonist:'陆舟，旧站巡查员', coreConflict: '寻找失踪证据',initialDilemma:'旧站封闭导致关键目击者无法出站',emotionalEnding:'揭开真相后承担失去同僚信任的代价' },
+  skeletonVolumes: [{ volumeNumber: 1, title: '旧站卷',theme:'进站与寻找证据',description:'从夜间封站逐步走到人员证词和账本校验', estimatedChapters: 250, chapterCountReason: '完整调查事件链需要250章' }],
 };
 
+const validWorld={worldview:{geography:[{name:'旧站',description:'查证车站与人证的具体地点'}],factions:[{name:'巡查班',description:'负责旧站登记与巡查',coreGoal:'查明封站来源',leader:'老周'}],socialStructure:'车站工作人员按职责进行登记和核验',powerSystem:'现实查证与授权进入旧站的规章',economy:'车站维护成本与运营资金之间的取舍',culture:'巡查团队重视安全责任与相互信任',history:[]}};
 describe('long novel foundation dependency', () => {
   it('retains quoted plan text when only JSON escaping is missing, and stops genuinely malformed upstream structure', async () => {
-    const generate = vi.fn().mockResolvedValueOnce({ content: '{"coreSetting":{"title":"目标从"救一个人"变成"留证""}}' })
-      .mockResolvedValueOnce({ content: '{"worldview":{}}' });
+    const title='目标从"救一个人"变成"留证"';
+    const malformedQuote=JSON.stringify({...skeleton,coreSetting:{...skeleton.coreSetting,title}}).replace(/\\"/g,'"');
+    const generate = vi.fn().mockResolvedValueOnce({ content: malformedQuote })
+      .mockResolvedValueOnce({ content: JSON.stringify(validWorld) });
     const chain = new ChainTemplateService(new ChainEngineService(new PromptRegistryService(), { generate } as any));
     const result = await chain.executeChain('long-novel-init-foundation', input);
     expect(result.status).toBe('completed');
@@ -27,8 +30,8 @@ describe('long novel foundation dependency', () => {
     const chapterResponsibilities = [{ chapter: 1, title: '旧站', function: '追查', responsibility: '取得进站线索', prerequisites: ['持有送货凭证'], timeline: '当夜，倒计时尚未结束', exitState: '取得旧站钥匙' }];
     const generate = vi.fn()
       .mockResolvedValueOnce({ content: JSON.stringify({ chapterResponsibilities }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ volumes: [{ volumeNumber: 1, chapters: [] }] }) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ volumes: [{ volumeNumber: 1, chapters: [] }] }) });
+      .mockResolvedValueOnce({ content: JSON.stringify({ volumes: [{ volumeNumber: 1, title: '旧站卷', estimatedChapters: 5, chapterCountReason: '五章递进追查', outline: '逐步获得证据', chapters: [] }] }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ volumes: [{ volumeNumber: 1, title: '旧站卷', estimatedChapters: 5, chapterCountReason: '五章递进追查', outline: '逐步获得证据', chapters: [] }] }) });
     const chain = new ChainTemplateService(new ChainEngineService(new PromptRegistryService(), { generate } as any));
     await chain.executeChain('long-novel-flexible-outline', { ...input, story_setting: '核心事件必须在一夜内结束，之后才是多年后的收束。', chapterLimit: 5, wordRangeText: '3000–5000字', platform_directive: '按项目执行标准规划' });
     const prompt = generate.mock.calls[2][0].prompt;
@@ -44,7 +47,7 @@ describe('long novel foundation dependency', () => {
     }
     expect(generate.mock.calls[0][0].planningSources).toBeUndefined();
     expect(generate.mock.calls[0][0].planningResponsibilityPreflight).toBe(true);
-    expect(generate.mock.calls[2][0].planningSources?.volumes).toEqual({ volumes: [{ volumeNumber: 1, chapters: [] }] });
+    expect(generate.mock.calls[2][0].planningSources?.volumes).toEqual({ volumes: [{ volumeNumber: 1, title: '旧站卷', estimatedChapters: 5, chapterCountReason: '五章递进追查', outline: '逐步获得证据', chapters: [] }] });
   });
   it('stops before downstream planning when the entry plan is absent', async () => {
     const generate = vi.fn().mockResolvedValue({ content: JSON.stringify({ volumes: [] }) });
@@ -63,7 +66,7 @@ describe('long novel foundation dependency', () => {
   it('passes the accepted skeleton into a separate world generation request', async () => {
     const generate = vi.fn()
       .mockResolvedValueOnce({ content: JSON.stringify(skeleton) })
-      .mockResolvedValueOnce({ content: JSON.stringify({ worldview: { geography: [], factions: [] } }) });
+      .mockResolvedValueOnce({ content: JSON.stringify(validWorld) });
     const chain = new ChainTemplateService(new ChainEngineService(new PromptRegistryService(), { generate } as any));
     const result = await chain.executeChain('long-novel-init-foundation', input);
     expect(result.status).toBe('completed');

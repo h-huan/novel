@@ -17,6 +17,18 @@ describe('generic character voice execution',()=>{
       expect(snapshot.rulesetVersion).toBe(SYSTEM_WORKFLOW_RULESET_VERSION);
     }
   });
+  it('does not treat voice differentiation as permission to create unsanctioned chapter actors',()=>{
+    new ModuleStandardsService().onModuleInit();
+    for(const stage of ['outline','writing','review','polish']){
+      const directive=standardDirectiveCache.get(stage);
+      expect(directive).toContain('只继承当前已确认人物档案');
+      expect(directive).toContain('不得为补对白、区分声音或推动现场临时增加有姓名、有台词或承担关键行动的角色');
+      expect(directive).toContain('未具名第一人称主角不得自行赋予姓名、姓氏或外号');
+    }
+    const creation=standardDirectiveCache.get('character_design');
+    expect(creation).toContain('角色创建或已确认的滚动建档阶段');
+    expect(CHARACTER_VOICE_POLICY).toContain('既有角色建档机制确认后');
+  });
   it('keeps knowledge, relationships, intent and causality in every local repair',()=>{
     for(const strategy of Object.keys(repairStrategies)){
       expect(repairPrompt(strategy)).toContain('[GEN-006]');

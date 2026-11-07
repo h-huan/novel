@@ -78,6 +78,7 @@ export interface StoryFoundation {
   escalation?: string;
   mainReversal?: string;
   endingDirection?: string;
+  scopeBreakdown?: unknown[];
   uniquePoint?: string;
   setting?: string;
   characters?: unknown[];
@@ -182,9 +183,10 @@ export function buildStoryFoundation(confirmedStory: unknown): StoryFoundation {
   assign('activeChoice', firstText(story.activeChoice));
   assign('escalation', firstText(story.escalation, story.secondOrderConsequence));
   assign('mainReversal', firstText(story.mainReversal, story.reversalEffect));
-  assign('endingDirection', firstText(story.endingDirection, story.payoff));
+  assign('endingDirection', firstText(story.endingDirection, story.ending, story.payoff));
   assign('uniquePoint', firstText(story.uniquePoint, story.uniqueSelling, story.differentiation));
   assign('setting', firstText(story.setting));
+  if (Array.isArray(story.scopeBreakdown) && story.scopeBreakdown.length) assign('scopeBreakdown', structuredClone(story.scopeBreakdown));
   if (Array.isArray(story.characters) && story.characters.length) assign('characters', structuredClone(story.characters));
   const targetWords = story.recommendedTargetWords ?? story.estimatedWords;
   if ((typeof targetWords === 'number' && Number.isFinite(targetWords)) || (typeof targetWords === 'string' && targetWords.trim())) {

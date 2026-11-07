@@ -3,7 +3,8 @@
  * 测试 chain 编排引擎的核心功能
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ChainEngineService, chapterSynthesisMaxTokens } from './chain-engine.service';
+import { ChainEngineService } from './chain-engine.service';
+import { ChainTemplateService } from './chain-template.service';
 import { PromptRegistryService } from './prompt-registry.service';
 import { RealLLMService } from './real-llm.service';
 import { GateRejectionError, classifyGateFailure, firstGateReportFromChain } from '../modules/writing-quality/gate-failure';
@@ -22,9 +23,7 @@ describe('ChainEngineService', () => {
     promptTemplateId: 'test-template',
     modelConfig: { temperature: 0.5 },
     inputMapping: { test: 'user_input.test' },
-    outputMapping: { result: 'test_node.result' },
     timeout: 30,
-    retryCount: 1,
     description: '测试节点',
   };
 
@@ -35,8 +34,6 @@ describe('ChainEngineService', () => {
     description: '用于单元测试的Chain',
     nodes: [mockNode],
     variables: [],
-    executionMode: 'sequential' as const,
-    config: { timeout: 60, maxRetries: 2, enableLogging: false, strictMode: false },
   };
 
   beforeEach(async () => {
@@ -74,7 +71,7 @@ describe('ChainEngineService', () => {
     expect(service).toBeDefined();
   });
 
-  it.each(['blocked', 'not_evaluated'] as const)('stops downstream calls after an upstream quality %s even in a non-strict chain', async (gateStatus) => {
+  it.each(['blocked', 'not_evaluated'] as const)('stops downstream calls after an upstream quality %s', async (gateStatus) => {
     const report = classifyGateFailure({ evaluationStatus: 'evaluated', topic: 'quality_gate', gateStatus,
       buckets: gateStatus === 'blocked' ? { prose_hardline: ['当前卷纲违反已确认事实'] } : { review_incomplete: ['当前卷纲评审缺少可核对依据'] } });
     generate.mockRejectedValueOnce(new GateRejectionError(report, '未通过卷纲')).mockResolvedValue(mockLLMOutput);
@@ -85,51 +82,135 @@ describe('ChainEngineService', () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps ordinary non-strict optional-node failure behavior', async () => {
-    generate.mockRejectedValueOnce(new Error('optional input unavailable')).mockResolvedValue(mockLLMOutput);
+  it('stops the next production node after any missing upstream model result', async () => {
+    generate.mockRejectedValueOnce(new Error('上游调用失败')).mockResolvedValue(mockLLMOutput);
     const result = await service.execute({ ...testChain, nodes: [mockNode, { ...mockNode, id: 'downstream' }] }, { test: 'hello' });
-    expect(result.status).toBe('partial');
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(result.errors[0].message).toContain('上游调用失败');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('fixed production chains contain only current long-outline prompt nodes, not legacy body synthesis', () => {
+    const registry = new ChainTemplateService(service);
+    for (const id of ['long-novel-init-foundation', 'long-novel-flexible-outline']) {
+      const production = registry.getDetail(id);
+      expect(production.nodes.length).toBeGreaterThan(0);
+      expect(production.nodes.every(node => node.type === 'prompt')).toBe(true);
+      expect(production.nodes.every(node => !!node.promptTemplateId)).toBe(true);
+    }
+  });
+
+  it('passes accepted upstream skeleton into the next node input mapping',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-init-foundation');
+    const skeleton={coreSetting:{title:'现有世界',protagonist:'阿舟，列车调度员',coreConflict:'停运封锁与乘客救援冲突',initialDilemma:'必须查明列车停运来源',emotionalEnding:'揭晓责任后接受离别代价'},skeletonVolumes:[{volumeNumber:1,title:'铁轨',theme:'真相',description:'追查停运与保全证据',estimatedChapters:8,chapterCountReason:'八个独立的行动与反制阶段'}]};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
+      .mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城',description:'主线查证地点'}],factions:[{name:'维护班组',description:'负责线路维护',coreGoal:'恢复车站运营',leader:'陈明'}],socialStructure:'调度系统按责任归属管理',powerSystem:'正常工程核验与调度权限',economy:'城市运输收益与应急成本',culture:'职员以乘客安全为首要价值',history:[]}})});
+    const render=(service as any).promptRegistry.render as ReturnType<typeof vi.fn>;
+    const result=await service.execute(chain,{story_setting:'锁定题材',targetWords:20000,genre:'现实'});
+    expect(result.status).toBe('completed');
     expect(result.nodeResults).toHaveLength(2);
+    const downstream=render.mock.calls.find(call=>call[0]==='long-novel-init-worldview');
+    expect(downstream).toBeDefined();
+    expect(downstream![1].skeleton).toEqual(skeleton);
+    expect(downstream![1].chain_output.node_1_skeleton).toEqual(skeleton);
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
-  describe('chapter synthesis token budget', () => {
-    it('keeps a 3000-5000 character chapter within a single-chapter output budget', () => {
-      expect(chapterSynthesisMaxTokens(3000)).toBe(3600);
-      expect(chapterSynthesisMaxTokens(3600)).toBe(4140);
-      expect(chapterSynthesisMaxTokens(4000)).toBe(4600);
-      expect(chapterSynthesisMaxTokens(5000)).toBe(5750);
-      expect(chapterSynthesisMaxTokens(5000)).toBeLessThan(6000);
-    });
+  it('accepts one balanced JSON object without swallowing a trailing explanation',async()=>{
+    const world={worldview:{geography:[{name:'地下车站'}],factions:[{name:'维护处'}]}};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'输出如下：\n'+JSON.stringify(world)+'\n以上为世界规则。'});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('completed');
+    expect(result.nodeResults[0].output).toEqual(world);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it('rewrites an overlong synthesis instead of accepting or truncating it', async () => {
-    const firstDraft = '甲'.repeat(7138);
-    const contractedDraft = '乙'.repeat(3600);
-    generate
-      .mockResolvedValueOnce({ content: firstDraft })
-      .mockResolvedValueOnce({ content: contractedDraft });
-    const node = {
-      ...mockNode,
-      id: 'node_9_chapter_synthesis',
-      type: 'transform' as const,
-      promptTemplateId: undefined,
-    };
-    const context = {
-      chainId: 'body-by-outline',
-      variables: { chapterFunction: 'development', chapterNumber: 1, chapterOutline: '有效详细大纲'.repeat(20) },
-      nodeOutputs: {}, retryCounters: {},
-      startTime: new Date(), timestamps: {}, metadata: {},
-    };
-    const result = await (service as any).executeTransformNode(node, {
-      goal: '目标', trigger: '诱因', action: '行动', obstacle: '阻碍',
-      misjudge: '误判', reversal: '反转', cost: '代价', hook: '钩子',
-      targetWords: 3600, chapterNumber: 1,
-      chapterOutline: '有效详细大纲'.repeat(20), chapterContext: { confirmed: true },
-    }, context);
+  it('rejects multiple independent JSON documents instead of choosing one silently',async()=>{
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"factions":[]}}\n{"worldview":{"factions":[1]}}'});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults[0].error).toContain('未返回合法JSON对象');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
 
+  it('rejects incomplete JSON and does not fabricate missing data',async()=>{
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:'{"worldview":{"geography":['});
+    const result=await service.execute(testChain,{});
+    expect(result.status).toBe('failed');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops a malformed long-novel world at its producer, without marking it as a completed foundation',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-init-foundation');
+    const skeleton={coreSetting:{title:'桥下的账',protagonist:'韩星，账房',coreConflict:'旧账牵涉家族争议',initialDilemma:'遗失了关键账页',emotionalEnding:'交出真实账册承担代价'},skeletonVolumes:[{title:'账本',theme:'查账',description:'获取账册与理解缺口',estimatedChapters:8,chapterCountReason:'八个独立阶段'}]};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify(skeleton)})
+      .mockResolvedValueOnce({...mockLLMOutput,content:'{"wrongWorld":{"geography":[]}}'});
+    const result=await service.execute(chain,{story_setting:'锁定主线',targetWords:20000});
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(2);
+    expect(result.nodeResults[1].status).toBe('failed');
+    expect(result.nodeResults[1].error).toContain('worldview必须是对象');
     expect(generate).toHaveBeenCalledTimes(2);
-    expect(result.fullText).toBe(contractedDraft);
+  });
+
+  it('rejects a world-rule object masquerading as an if-then rule array in its original producing call',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_2_worldview')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{node_1_skeleton:{}},timestamps:{},startTime:new Date()};
+    const worldview={geography:[{name:'旧城',description:'用于查证的主线地点'}],
+      factions:[{name:'调查局',description:'查明矛盾',coreGoal:'核实证据',leader:'陈明'}],
+      socialStructure:'按规章处理案件',powerSystem:'按真实法律取证',economy:'收入与成本',culture:'承诺与信任',history:[],rules:{unknown:'模型臆造的规则'}};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('worldview.rules');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it('rejects incomplete long foundation world dimensions at their producer, without paying for characters or chapter outlines',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_2_worldview')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{node_1_skeleton:{}},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({worldview:{geography:[{name:'旧城'}],factions:[{name:'组织'}]}})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');expect(result.error).toContain('worldview缺少socialStructure');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it('rejects long skeleton missing independently important confirmed facts at the producer',async()=>{
+    const chain=new ChainTemplateService(service).getDetail('long-novel-init-foundation');
+    const node=chain.nodes.find(row=>row.id==='node_1_skeleton')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认题材'}},nodeOutputs:{},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,content:JSON.stringify({coreSetting:{title:'只写标题'},skeletonVolumes:[{estimatedChapters:8}]})});
+    const result=await service.executeNode(node,context,chain);
+    expect(result.status).toBe('failed');expect(result.error).toContain('coreSetting缺少protagonist');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it('rejects an incomplete volume count before sending it into long-novel chapter outlining',async()=>{
+    const registry=new ChainTemplateService(service);
+    const chain=registry.getDetail('long-novel-flexible-outline');
+    const volNode=chain.nodes.find(node=>node.id==='node_2_volumes')!;
+    const context={chainId:chain.id,variables:{user_input:{story_setting:'确认故事'}},
+      nodeOutputs:{node_1_analysis:{chapterResponsibilities:[]}},timestamps:{},startTime:new Date()};
+    generate.mockResolvedValueOnce({...mockLLMOutput,
+      content:'{"volumes":[{"title":"第一卷","estimatedChapters":0,"chapterCountReason":"","outline":"事件"}]}'});
+    const result=await service.executeNode(volNode,context,chain);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('第1卷缺少有效章数');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call a downstream node when a fixed long-outline prerequisite fails', async () => {
+    const registry = new ChainTemplateService(service);
+    const production = registry.getDetail('long-novel-flexible-outline');
+    generate.mockRejectedValueOnce(new Error('前序关键节点无有效模型结果')).mockResolvedValue(mockLLMOutput);
+    const result = await service.execute({
+      ...production, nodes: [mockNode, { ...mockNode, id: 'downstream' }],
+    }, { test: 'hello' });
+    expect(result.status).toBe('failed');
+    expect(result.nodeResults).toHaveLength(1);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 
   describe('execute', () => {
@@ -166,7 +247,6 @@ describe('ChainEngineService', () => {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
         nodeOutputs: {},
-        retryCounters: {},
         startTime: new Date(),
         timestamps: {},
         metadata: {},
@@ -176,16 +256,16 @@ describe('ChainEngineService', () => {
       expect(result.nodeId).toBe('test_node');
     });
 
-    it('does not replay the same prompt when a node fails without corrective evidence', async () => {
+    it('makes one LLM attempt for a failed fixed production node', async () => {
       generate.mockRejectedValue(new Error('schema mismatch'));
       const context = {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
-        nodeOutputs: {}, retryCounters: {},
-        startTime: new Date(), timestamps: {}, metadata: {},
+        nodeOutputs: {},
+        startTime: new Date(), timestamps: {},
       };
 
-      const result = await service.executeNode({ ...mockNode, retryCount: 5 }, context, testChain);
+      const result = await service.executeNode(mockNode, context, testChain);
 
       expect(result.status).toBe('failed');
       expect(result.retryCount).toBe(0);
@@ -209,11 +289,11 @@ describe('ChainEngineService', () => {
       const context = {
         chainId: 'test-chain',
         variables: { user_input: { test: 'hello' }, test: 'hello' },
-        nodeOutputs: {}, retryCounters: {},
-        startTime: new Date(), timestamps: {}, metadata: {},
+        nodeOutputs: {},
+        startTime: new Date(), timestamps: {},
       };
 
-      const result = await service.executeNode({ ...mockNode, retryCount: 0 }, context, testChain);
+      const result = await service.executeNode(mockNode, context, testChain);
 
       expect(result.status).toBe('failed');
       expect(result.gateReport).toEqual(report);

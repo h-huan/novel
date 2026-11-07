@@ -39,6 +39,7 @@ function fixture(type: 'long_novel' | 'short_story', targetWords: number) {
     CREATE TABLE timelines (id TEXT PRIMARY KEY,project_id TEXT);
     CREATE TABLE timeline_events (id TEXT PRIMARY KEY,timeline_id TEXT);
     CREATE TABLE version_history (id TEXT PRIMARY KEY,entity_id TEXT,created_by TEXT);
+    CREATE TABLE generation_runs (id TEXT PRIMARY KEY,project_id TEXT,status TEXT);
   `);
   db.prepare('INSERT INTO projects VALUES (?,?,?,?,?,?)').run(
     'p', type, 'creating', targetWords, projectSettings(type, targetWords), new Date().toISOString(),

@@ -12,6 +12,12 @@ export interface ChapterActionRejection extends Error {
  * This is a view over the existing audit, never a second semantic judgment.
  * Keep unknown addresses visible instead of guessing another field's location.
  */
+/** The independent model's JSON body includes server-owned chapter identity and
+ * function. The repairer must build addresses from this exact same serialized
+ * candidate, not from the unnormalized model output. */
+export function planningChapterForCausalReview(chapter: Record<string,any>,chapterNumber:number,chapterFunction:string) {
+ return {...chapter,chapterNumber,chapterFunction};
+}
 export function chapterActionRepairEvidence(chapter: unknown, failure: ChapterActionRejection | null) {
   const anchors = causalEvidenceAnchorOptions(JSON.stringify([chapter]), {});
   const address = (id?: string) => anchors.find(anchor => anchor.id === id && anchor.source === 'body');

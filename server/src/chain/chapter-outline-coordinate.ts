@@ -20,6 +20,16 @@ export function readOrderedChapterOutlines(db: ChapterDb, projectId: string): an
     ORDER BY COALESCE(p."order",0), o."order", o.id`).all(projectId);
 }
 
+/** Single global chapter numbering for persisted creation timeline fallback. */
+export function creationTimelineFallbackChapters(db: ChapterDb, projectId: string): Array<{
+  title: string; content: string; description: string; chapterReference: number;
+}> {
+  return readOrderedChapterOutlines(db, projectId).map((row, index) => ({
+    title: String(row.title || ''), content: String(row.content || ''),
+    description: String(row.content || ''), chapterReference: index + 1,
+  }));
+}
+
 /** A persisted chapter binding is authoritative. No zero/one-origin guessing. */
 export function findChapterOutline(db: ChapterDb, projectId: string, chapterIndex: number, chapterId?: string): any {
   if (!Number.isSafeInteger(chapterIndex) || chapterIndex < 1) return undefined;
@@ -27,6 +37,33 @@ export function findChapterOutline(db: ChapterDb, projectId: string, chapterInde
     WHERE c.project_id=? AND ${chapterId ? 'c.id=?' : 'c.chapter_index=?'} AND o.level='chapter' LIMIT 1`)
     .get(projectId, chapterId || chapterIndex);
   if (linked) return linked;
+  // A chapter row with an invalid outline_id must NOT silently borrow the
+  // neighbouring chapter's plan merely because their sort positions match.
+  // The positional fallback is only for the outline editor before any
+  // chapter row with this number exists.
   if (chapterId) throw new Error('当前章节没有有效的章纲绑定，停止生成，禁止按排序猜测另一章');
-  return readOrderedChapterOutlines(db, projectId)[chapterIndex - 1];
+  const existingChapter = db.prepare('SELECT id,outline_id FROM chapters WHERE project_id=? AND chapter_index=? LIMIT 1')
+    .get(projectId, chapterIndex);
+  const orderedOutlines = readOrderedChapterOutlines(db, projectId);
+  // Deleted outlines must not turn an existing non-null binding into an outline-free draft.
+  if (existingChapter?.outline_id) throw new Error('第' + chapterIndex + '章的已有正文记录与章纲绑定失效，禁止按章节排序借用另一章章纲');
+  if (orderedOutlines.length === 0) return undefined; // legitimate unbound manual draft
+  if (existingChapter) throw new Error('第' + chapterIndex + '章的已有正文记录与章纲绑定失效，禁止按章节排序借用另一章章纲');
+  return orderedOutlines[chapterIndex - 1];
+}
+
+/** Display/depth columns are projections of accepted events, never another story generator. */
+export function projectOutlineDepthFields(row:any):Record<string,string>|null{
+  let plan:any=row.scenes;try{if(typeof plan==='string')plan=JSON.parse(plan);}catch{return null;}
+  if(!plan||typeof plan!=='object'||Array.isArray(plan)||!Array.isArray(plan.scenes))return null;
+  const type=String(row.chapter_function||plan.chapterFunction||plan.responsibilityContract?.function||'');
+  if(!type)return null;
+  const text=(v:unknown):string=>v==null?'':typeof v==='string'?v:JSON.stringify(v);
+  const locations=[...new Set(plan.scenes.map((scene:any)=>typeof scene==='string'?scene:scene?.location||scene?.name||'').filter(Boolean))];
+  const highlights=plan.highlights??plan.highlight??[];
+  return {chapter_type:type,pov_ratio:text(plan.pov_ratio??plan.povRatio),
+    hot_scenes:text(plan.hot_scenes??plan.hotScenes??highlights),setback_scenes:text(plan.setback_scenes??plan.setbackScenes),
+    ending_setup:text(plan.hook),conflict_design:text(plan.conflicts??plan.conflict),
+    system_hints:text(plan.system_hints??plan.systemHints),location_summary:locations.join(' → '),
+    highlight_points:JSON.stringify(Array.isArray(highlights)?highlights:highlights?[highlights]:[])};
 }

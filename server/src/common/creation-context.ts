@@ -18,6 +18,16 @@ export interface CreationCtx {
 
 export const creationAsyncStorage = new AsyncLocalStorage<CreationCtx>();
 
+export interface DiscoveryRequestCtx {
+  discoveryRequestId: string;
+}
+
+export const discoveryRequestAsyncStorage = new AsyncLocalStorage<DiscoveryRequestCtx>();
+
+export function currentDiscoveryRequestId(): string | null {
+  return discoveryRequestAsyncStorage.getStore()?.discoveryRequestId ?? null;
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 只认 UUID 形态，避免把别的业务 id 误当成项目 id */

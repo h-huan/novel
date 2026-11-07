@@ -3,7 +3,7 @@ import { quotedText } from '../../chain/quoted-text';
 import { applyLocalPatches, localPatchBudgetDirective } from './local-repair';
 import type { QualityIssue } from './quality-issue';
 import { attributeCharacterEvidence, type CharacterVoiceContract } from './character-contract';
-import { getSystemWorkflowRule } from '../module-standards/system-workflow-rules.registry';
+import { STRUCTURAL_QUALITY_REPAIR_RULE_IDS, getSystemWorkflowRule } from '../module-standards/system-workflow-rules.registry';
 
 type Input = { content: string; issues: QualityIssue[]; contracts?: CharacterVoiceContract[]; structured?: boolean };
 const definitions = {
@@ -23,7 +23,7 @@ const hasRuleSegment = (rule: string, segment: string): boolean =>
   rule === segment || rule.startsWith(`${segment}.`) || rule.endsWith(`.${segment}`) || rule.includes(`.${segment}.`);
 export function defaultRepairStrategy(rules: string[]): RepairStrategyId {
   return rules.some(r => r.includes('character_voice')) ? 'character_voice_contract_patch'
-    : rules.some(r => r.startsWith('ai_trace.') || hasRuleSegment(r, 'structure') || hasRuleSegment(r, 'pacing')
+    : rules.some(r => STRUCTURAL_QUALITY_REPAIR_RULE_IDS.includes(r) || r.startsWith('ai_trace.') || hasRuleSegment(r, 'structure') || hasRuleSegment(r, 'pacing')
       || hasRuleSegment(r, 'timeline') || hasRuleSegment(r, 'world_rules') || hasRuleSegment(r, 'context') || hasRuleSegment(r, 'logic')) ? 'scene_structure_patch'
     : rules.some(r => r.startsWith('platform.')) ? 'platform_metric_patch' : 'unique_local_replacement';
 }

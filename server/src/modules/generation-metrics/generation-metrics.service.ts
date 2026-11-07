@@ -74,6 +74,7 @@ export function chapterResponsibilityIssueSignature(issues: string[]): string {
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
   runId?: string;
+  discoveryRequestId?: string | null;
   projectId?: string | null;
   chapterIndex?: number | null;
   stepKey?: string | null;
@@ -202,7 +203,7 @@ export class GenerationMetricsService implements OnModuleInit {
     return Number(result.changes || 0);
   }
 
-  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
+  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true, discoveryRequestId?: string | null) {
     const db = this.databaseService.getDb();
     // 项目内场景缺 projectId 一律阻断：以前这里静默取 constitution=null、runId 不注入 systemPrompt、
     // 记录退化成平台级，等于「没有执行标准的链路」照常跑完却看着正常（review/summary 判定失标的真因）。
@@ -216,9 +217,10 @@ export class GenerationMetricsService implements OnModuleInit {
     const id = crypto.randomUUID();
     const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
     const stage = qualityStage(scenario, stepKey);
-    db.prepare(`INSERT INTO generation_runs (id, project_id, stage, scenario, status, constitution_revision,
-      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-      id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
+    db.prepare(`INSERT INTO generation_runs (id, project_id, discovery_request_id, stage, scenario, status, constitution_revision,
+      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, projectId ?? null, scenario === 'idea_generate' ? discoveryRequestId ?? null : null,
+      stage, scenario, 'running', constitution?.revision ?? null,
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
     const compiled = row ? compileContext(db, { projectId: projectId!, stage, chapterIndex }) : null;
     const context = compiled?.snapshot || '';
@@ -366,8 +368,7 @@ export class GenerationMetricsService implements OnModuleInit {
     // fallback executor see the whole open issue cluster so it can choose the
     // structural repair that is capable of fixing every occurrence together.
     const structuralCompanions = issues.filter(i => i.status === 'open'
-      && (i.ruleId.includes('structure') || i.ruleId.includes('pacing')
-        || i.ruleId.includes('timeline.repetition') || i.ruleId.startsWith('ai_trace.')));
+      && defaultRepairStrategy([i.ruleId]) === 'scene_structure_patch');
     const focus = blocking.length
       ? [...blocking, ...structuralCompanions.filter(i => !blocking.includes(i))]
       : severe.length ? severe : issues.filter(i => i.status === 'open');
@@ -384,7 +385,8 @@ export class GenerationMetricsService implements OnModuleInit {
     // 实测 unique_local_replacement / platform_metric_patch 在多个规则轴上 0% 接受率，
     // 却因为候选池里只剩它们而持续被选中，累计白烧数千秒与数百万 token。
     // 全部候选都不合格时返回确定性默认策略，而不是继续挑一个已知无效的策略。
-    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r));
+    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r)
+      && (fallback !== 'scene_structure_patch' || r.strategy_id === 'scene_structure_patch'));
     eligible.sort((a,b) => repairStrategyUtility(b) - repairStrategyUtility(a) || a.strategy_id.localeCompare(b.strategy_id));
     return eligible[0]?.strategy_id || fallback;
   }
@@ -719,15 +721,16 @@ export class GenerationMetricsService implements OnModuleInit {
       this.databaseService.getDb()
         .prepare(
           `INSERT INTO generation_step_metrics
-            (id, project_id, chapter_index, step_key, scenario, model_version, attempt, phase,
+            (id, project_id, discovery_request_id, chapter_index, step_key, scenario, model_version, attempt, phase,
              status, fail_reason, duration_ms, prompt_chars, output_chars, output_words,
              target_words, deficit_words, prompt_tokens, completion_tokens, total_tokens,
              internal_retries, created_at, run_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
           input.projectId ?? null,
+          input.discoveryRequestId ?? null,
           input.chapterIndex ?? null,
           stepKey,
           scenario,

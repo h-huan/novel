@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
 
 describe('configured long novel planning acceptance', () => {
+  it('stops on a changed named protagonist before paying for characters or chapter planning',async()=>{
+    const controller:any=Object.create(ChainController.prototype);
+    controller.resolvePlatformToneDirective=vi.fn(()=>'');
+    controller.llmCallWithRetry=vi.fn();
+    controller.chainTemplate={executeChain:vi.fn(async (_id:string,_params:any,onProgress:any)=>{
+      const skeleton={coreSetting:{protagonist:'邵工，巡查员',coreConflict:'身份冲突'},
+        skeletonVolumes:[{title:'争执卷',estimatedChapters:2,chapterCountReason:'两次行动导致状态变化'}]};
+      onProgress?.(0,'node_1_skeleton','completed',{output:skeleton});
+      return {outputs:{node_1_skeleton:skeleton}};
+    })};
+    await expect(controller.generateConfiguredLongNovelPlan({projectId:'p',title:'原题材',storySetting:'林川追查停运',
+      confirmedProtagonist:'林川，调查员',targetWords:8000,targetWanZi:0.8,genre:'悬疑',
+      chapterWordMin:3000,chapterWordMax:5000})).rejects.toThrow('骨架主角与已确认题材身份不符');
+    expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+    expect(controller.chainTemplate.executeChain).toHaveBeenCalledTimes(1);
+  });
   it('dynamically plans enough 3000-5000 word chapters for two million words and uses token configuration only as batch size', async () => {
     const controller: any = Object.create(ChainController.prototype);
     controller.logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -31,7 +47,7 @@ describe('configured long novel planning acceptance', () => {
     controller.chainTemplate = {
       executeChain: vi.fn(async (_name: string, _params: any, onProgress: any) => {
         const skeleton = {
-        coreSetting: { title: '长篇验证', coreConflict: '真相与秩序冲突' },
+        coreSetting: { title: '长篇验证', protagonist:'林川，调查员', coreConflict: '真相与秩序冲突' },
         skeletonVolumes: [
           { volumeNumber: 1, title: '追查卷', theme: '追查', description: '找到入口', estimatedChapters: 251, chapterCountReason: '调查链包含建立、误判、升级与阶段揭示，需要251个独立事件节点' },
           { volumeNumber: 2, title: '兑现卷', theme: '兑现', description: '完成回收', estimatedChapters: 250, chapterCountReason: '真相推进、关系决裂和伏笔回收形成250个不可合并节点' },
@@ -46,9 +62,16 @@ describe('configured long novel planning acceptance', () => {
     controller.realLLM = { getConfiguredMaxTokens: vi.fn(() => 1400) };
     const outlineCalls: string[] = [];
     controller.llmCallWithRetry = vi.fn(async (step: string, prompt: string) => {
-      if (step === '长篇角色架构') return { data: { characters: [{ name: '林川', identity: '调查员', arc: '从怀疑到承担' }] }, rawContent: '', warnings: [] };
+      if (step === '长篇角色架构') return { data: { characters: [
+        { name: '段辅', identity: '旧站知情人', arc: '从隐瞒到配合' },
+        { name: '林川', identity: '调查员', arc: '从怀疑到承担' },
+      ] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [{ content: '旧信日期', type: 'identity', scope: 'global', setupChapter: 1, recoveryChapter: 501, recoveryWindowStart: 495, recoveryWindowEnd: 501, evidenceText: '信纸日期早于车站建成', riskLevel: 'high', recoveryCondition: '抵达终点', payoffDescription: '揭示循环' }] }, rawContent: '', warnings: [] };
       outlineCalls.push(step);
+      const prior = JSON.parse(prompt.split('本批之前已经生成的完整章节事实（含前卷，只读事实来源，不得只依据上一章推翻更早事件）：')[1].split('\n')[0]);
+      const next = Number(prompt.match(/全书第(\d+)-/)?.[1]);
+      expect(prior.map((chapter:any)=>chapter.chapterNumber)).toEqual(Array.from({length:next-1},(_,index)=>index+1));
+      if(next>2)expect(prior[0].content).toBe('第1章的具体事件链和结果');
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]);
       const start = Number(prompt.match(/全书第(\d+)-/)?.[1]);
       return { data: { chapters: Array.from({ length: count }, (_, index) => ({
@@ -68,6 +91,7 @@ describe('configured long novel planning acceptance', () => {
 
     const chapters = result.volumes.flatMap((volume: any) => volume.chapters);
     expect(chapters).toHaveLength(20);
+    expect(result.characters.map((ch:any)=>ch.name)).toEqual(['林川','段辅']);
     expect(result.volumes.map((volume: any) => volume.chapters.length)).toEqual([20, 0]);
     expect(result.volumes.map((volume: any) => volume.estimatedChapters)).toEqual([251, 250]);
     expect(chapters.every((chapter: any) => chapter.targetWords >= 3000 && chapter.targetWords <= 5000 && chapter.wordCountReason)).toBe(true);
@@ -93,7 +117,7 @@ describe('configured long novel planning acceptance', () => {
       executeChain: vi.fn(async (_name: string, params: any, onProgress: any) => {
         foundationParams = params;
         const skeleton = {
-          coreSetting: { title: '标准注入验证', coreConflict: '规则与生存冲突' },
+          coreSetting: { title: '标准注入验证', protagonist:'周砚，巡查员', coreConflict: '规则与生存冲突' },
           skeletonVolumes: [
             { volumeNumber: 1, title: '入楼卷', theme: '入楼', description: '触发规则', estimatedChapters: 2, chapterCountReason: '两次独立触规事件不可合并' },
           ],
@@ -108,7 +132,8 @@ describe('configured long novel planning acceptance', () => {
     const calls: Array<{ step: string; prompt: string }> = [];
     controller.llmCallWithRetry = vi.fn(async (step: string, prompt: string) => {
       calls.push({ step, prompt });
-      if (step === '长篇角色架构') return { data: { characters: [{ name: '周砚', identity: '巡查员', arc: '从服从到反抗' }] }, rawContent: '', warnings: [] };
+      expect(prompt).toContain('旧楼'); // actual world facts must reach EVERY downstream stage
+      if (step === '长篇角色架构') return { data: { characters: [{ name: '周砚', identity: '巡查员', arc: '从服从到反抗', abilities: '只能查看本人巡查记录', goalMotivation: '查明失踪搭档的去向', relationships: [{name:'搭档',relation:'共同巡查'}] }] }, rawContent: '', warnings: [] };
       if (step === '长篇跨卷伏笔') return { data: { foreshadowings: [] }, rawContent: '', warnings: [] };
       const count = Number(prompt.match(/共(\d+)章；全书第/)?.[1]) || 1;
       const start = Number(prompt.match(/全书第(\d+)-/)?.[1]) || 1;
@@ -134,6 +159,10 @@ describe('configured long novel planning acceptance', () => {
     expect(calls.find(item => item.step === '长篇角色架构')?.prompt).toContain(STANDARD);
     expect(calls.find(item => item.step === '长篇跨卷伏笔')?.prompt).toContain(STANDARD);
     expect(calls.some(item => /^长篇第\d+卷章纲/.test(item.step) && item.prompt.includes(STANDARD))).toBe(true);
+    for(const item of calls.filter(item=>/^长篇第\d+卷章纲/.test(item.step)||item.step==='长篇跨卷伏笔')){
+      expect(item.prompt).toContain('只能查看本人巡查记录');expect(item.prompt).toContain('查明失踪搭档的去向');expect(item.prompt).toContain('共同巡查');
+    }
+    expect(calls.find(item=>item.step==='长篇跨卷伏笔')?.prompt).toContain('第1章的具体事件链和结果');
     // 回归：不存在第二份"回落口径"。此前 resolvePlatformToneDirective 返空时会另拼一份
     // 宪法+平台基准+三标签，那份必然缺分类/视角/目标读者，等于用降级标准生成地基。
     expect(String(foundationParams.story_setting)).not.toContain('【项目创作宪法 · 必须严格执行】');

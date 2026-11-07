@@ -1,5 +1,5 @@
 /** Chapter criteria are rendered from ARCH-005; no parallel rule definitions. */
-import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, STORY_CAUSAL_REVIEW_POLICY } from './system-workflow-rules.registry';
+import { getSystemWorkflowRule, OUTLINE_STATE_CONTINUITY_POLICY, STORY_CAUSAL_REVIEW_POLICY, CHAPTER_OUTCOME_EVIDENCE_POLICY } from './system-workflow-rules.registry';
 
 const responsibilityRule = getSystemWorkflowRule('ARCH-005')!;
 
@@ -30,8 +30,54 @@ export const CHAPTER_RESPONSIBILITY_JUDGMENT_RULES: string = CHAPTER_RESPONSIBIL
 export const CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE = responsibilityRule.contracts!.scopeDiscipline;
 
 /** 审查器的输出契约：必须同时给出通过与冲突两种形状，否则模型会被"只演示失败形状"的示例带偏。 */
-export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT =
-  '只输出JSON对象：全部可在已确认规则内执行时返回 {"consistent":true,"contradictions":[]}；确有冲突时返回 {"consistent":false,"contradictions":[{"chapter":1,"criterion":"CR-1","task":"存在冲突的任务原文","conflict":"违反了哪条判据与哪条已确认规则，以及为何无法执行","ruleEvidence":"被违反的判据编号与【已确认世界规则/执行标准】原文逐字引用","retain":"必须保留的故事目标","fix":"不新增任何能力、且可直接执行的替代任务"}]}。criterion 必须是上列判据编号之一，ruleEvidence 必须是逐字引用；给不出逐字证据的疑虑不得写成冲突。';
+/** The short/long creation entry/exit review uses the same verdict as other
+ * chapter checks, but MUST include conditionChecks even when consistent=true.
+ * This is a transport contract, not a weaker semantic quality gate. */
+/** The two real callers use different citation transports. Render the
+ * correct ONE shape at the shared rule source; mixing quote examples into
+ * ID-address prompts made the model omit required chapter checks. The verdict,
+ * independent causal Gate, and evidence requirements stay unchanged. */
+export function chapterResponsibilityAuditOutputContract(
+ entryExitContract=false,evidenceMode:'quotes'|'anchors'='quotes',
+):string{
+ const condition=(status:'supported'|'gap')=>!entryExitContract?{}:{
+  conditionChecks:[evidenceMode==='anchors'?{
+   chapter:1,taskAnchorId:'chapter:c1:task',status,
+   bridgeAnchorIds:status==='gap'?[]:['chapter:c1:task'],
+   reason:'逐章核对实际取得的行动、条件时效及完整出口结果',
+  }:{
+   chapter:1,status,
+   bridgeEvidence:status==='gap'?'':'本章或前章responsibility中明确安排执行的条件取得动作逐字原文',
+   reason:'逐章核对条件的可执行取得动作、有效时间及完整出口结果',
+  }]
+ };
+ const conflict=evidenceMode==='anchors'&&entryExitContract?{
+  chapter:1,criterion:'CR-1',taskAnchorId:'chapter:c1:task',
+  conflict:'已确认规则与实际行动之间的具体冲突',
+  ruleAnchorIds:['project_context:v1'],retain:'必须保留的目标',
+  fix:'沿确认规则可执行的替代任务',
+ }:{
+  chapter:1,criterion:'CR-1',task:'发生冲突的本章责任原文',
+  conflict:'已确认规则与实际行动之间的具体冲突',
+  ruleEvidence:'已确认世界规则或执行标准中的连续逐字原文',
+  retain:'必须保留的目标',fix:'沿确认规则可执行的替代任务',
+ };
+ return '只输出JSON对象：无真实冲突时返回 '
+  +JSON.stringify({consistent:true,contradictions:[],...condition('supported')})
+  +'；仅有实际条件取得缺口、但无被违反的CR规则时返回 '+JSON.stringify({consistent:false,contradictions:[],...condition('gap')})
+  +'；确有世界规则冲突时返回 '+JSON.stringify({consistent:false,contradictions:[conflict],...condition('gap')})
+  +'。以上仅为字段结构示例，不是对任一章节的事实判定；不得复制示例引用地址或假定全部章节supported。'
+  +' gap始终是未通过的规划问题，必须回到现有章责修订；不得因找不到CR冲突证据而改成supported。contradictions仅记录有CR及冻结原文双边证据的真实规则冲突；纯规划缺口时保持空数组，不伪造规则。criterion必须是已有判据编号，真实冲突需有冻结来源的逐字双边证据。'
+  +(entryExitContract?
+   ' conditionChecks必须每章一项（每章恰好一项），包含所有章节，章号准确且不重复；真实状态按supported、gap、not_required选择。'
+   +' 普通自主行动且不依赖外部资格时用not_required并说明，不能为凑supported虚构已取得条件。'
+   +' supported必须引用本章已明确规划执行、或前章规划已完成且在本章仍有效的条件取得动作，不能只引用prerequisites名称、timeline、exitState结果或世界规则；gap必须对应contradictions中的真实冲突，不得擅自放行。'
+   +(evidenceMode==='anchors'?
+    ' conditionChecks只返回taskAnchorId、bridgeAnchorIds及状态理由，证据编号须从本次服务端目录选择，不返回taskEvidence/bridgeEvidence。'
+    :' conditionChecks只返回chapter、status、bridgeEvidence、reason；服务器按真实章号绑定responsibility与exitState原文，不需要模型复制这两个字段。bridgeEvidence必须是本次或前章responsibility中可执行的具体取得动作连续原文，不能只列前置条件名称或出口结果。')
+   :'');
+}
+export const CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT=chapterResponsibilityAuditOutputContract();
 
 /** 修复器的修订边界：与判据同源，避免修复提示里再抄一份走样表述。 */
 export const CHAPTER_RESPONSIBILITY_REPAIR_BOUNDARIES = responsibilityRule.contracts!.repairBoundary;
@@ -85,9 +131,15 @@ export function chapterResponsibilityPlanningDirective(includeSharedPolicies = t
   return [
     "【生成前规则执行编译 · 判据与审查/修复同源】逐项核对所有受世界规则约束的事件、程序与效果：作用主体、作用对象、载体、全部前置条件、人数/数量、证据组合、触发时点和能力范围都必须与已确认世界规则一致；不得因章纲压缩而省略会改变是否生效的必要条件。",
     responsibilityJudgmentRules(includeSharedPolicies),
+    CHAPTER_OUTCOME_EVIDENCE_POLICY,
+    "【条件取得动作与证据同源】每章先分清已经具备的资源、需要本章新取得的条件和无需外部条件的自主动作。prerequisites只登记进入条件及其已知来源，不代表人物已经实际取得；如果本章结果取决于新取得的授权、证据、钥匙、他人同意或其它条件，必须在本章responsibility中明确安排由谁、对谁、通过何种可执行动作取得它，再安排依赖它的结果；已由前章取得且仍有效的条件必须能在前章responsibility找到取得动作。若此路径在原故事中不成立，应调整本章可实现的状态或保持等待，不得靠exitState结果反证已取得。普通自主行动不用编造第三方许可或行政手续。这条同时供章节规划和独立审查执行，不增加独立审核步骤。",
+    "【跨章已完成结果不得重复兑现】规划章节唯一责任时，为每章分别明确此前尚未完成的结果和本章实际新增的行动。前章已经通过联名、审批、签字或其它决定完成的保全、留任、撤销、救助，后章仅持有同一张纸、回忆旧事或重复强调既定承诺，不能再次声称完成同一结果；后章须承接真实尚未发生的经营、付出代价、关系转变、剩余危机或新的有效行动。每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明，而不是借前章的结果自证。不要制造多余反转或额外条件；保持已确认故事结果及合法重复发生的日常机制。",
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
   ].join("\n");
 }
+
+/** Shared output contract for short and long chapter planning. */
+export const CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE = { chapterResponsibilities: [{chapter:1,title:'原章节标题',function:'章节功能',responsibility:'人物实际执行的唯一推进任务；若结果依赖本章新取得条件，这里先写实际取得动作和可执行顺序',prerequisites:['进入本章时已有且仍有效的条件及来源；新取得动作写在responsibility；普通自主动作允许空数组'],timeline:'继承既定期限的相对时点，不补精确时长',exitState:'本章行动实际产生的状态，未完成目标明确保留'}] };
 
 /** The same entry/exit contract must survive analysis -> volume -> detail. */
 export function describeChapterResponsibilityPlan(value: unknown, chapterLimit?: unknown): string[] {
@@ -116,6 +168,7 @@ export interface ChapterResponsibilityAuditPromptInput {
   includeSharedPolicies?: boolean;
   plan: unknown;
   entryExitContract?: boolean;
+  evidenceMode?: 'quotes'|'anchors';
 }
 
 /** 边界审查提示词：判据、判定纪律与「通过与冲突两种形状」的输出契约必须完整注入。 */
@@ -125,12 +178,18 @@ export function buildChapterResponsibilityAuditPrompt(input: ChapterResponsibili
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
     `【待审查章节分工】${JSON.stringify(input.plan)}`,
-    input.entryExitContract ? '本次为进入/退出合同审查。按chapterResponsibilities逐章核对：关键结果依赖什么，具体怎样取得，该章是否仍有效，前章退出状态有没有撤销它。名称重复或写在prerequisites里不等于已经取得；受规则约束的进出、位置变化和终局反制也不能只列目标而省略成立路径。普通自主行动及自身直接结果不强加额外程序。除原consistent/contradictions外，返回conditionChecks，每章恰好一项：{"chapter":1,"taskEvidence":"本章responsibility逐字原文","status":"supported|gap|not_required","bridgeSource":"body或project_context","bridgeEvidence":"计划中实际取得路径或已确认规则明确允许直接执行的逐字依据；gap可空","reason":"具体条件如何取得、跨章是否失效；not_required说明为何是普通自主行动"}。gap必须对应同章contradictions，supported必须给实际桥接证据；不能只返回consistent:true跳过核对。' : '',
+    input.entryExitContract ? '本次为尚未展开正文的进入/退出规划合同审查：核对每章责任中明确安排执行的动作能否满足实际取得条件，以及承接前章规划结果时条件是否仍有效。不能要求未写出的正文已经发生，但不能把希望、前置条件名称或出口目标当作已计划的执行动作。逐章判断完整exitState能否由这些可执行的动作与真实资源产生。普通自主行动无外部许可依赖时用not_required并说明；涉及他人决定、权限、移交和归责须有独立实际桥接，缺少则报告gap；仅当另有冻结来源证据证明违反CR规则时才报告contradictions。不能把普通取得缺口伪造为规则冲突。consistent=true也必须逐章输出conditionChecks；JSON字段遵循末尾唯一格式示例。' : '',
     "逐章按下列判据检查：",
     responsibilityJudgmentRules(input.includeSharedPolicies !== false),
     CHAPTER_RESPONSIBILITY_SCOPE_DISCIPLINE,
+    ...(input.entryExitContract&&Array.isArray(input.plan)
+      ?[`【本次逐章审核身份目录】${JSON.stringify(input.plan.map((row:any,index:number)=>({
+        chapter:Number(row?.chapter)||index+1,
+        ...(input.evidenceMode==='anchors'
+          ?{taskAnchorId:'chapter:c'+String(Number(row?.chapter)||index+1)+':task'}:{}),
+      })))}。conditionChecks必须与该目录一一对应且每章一行；不得仅复制单章JSON示例，也不得为凑supported引用prerequisites或出口目标。核对外部依赖是否在本章responsibility中真正安排取得，或在前章已执行且仍有效；普通自主行动按not_required解释，不编造额外手续。`]:[]),
     "若某任务冲突，必须返回可直接替换章节责任的 fix，而不是只批评。",
-    CHAPTER_RESPONSIBILITY_AUDIT_OUTPUT_CONTRACT,
+    chapterResponsibilityAuditOutputContract(input.entryExitContract===true,input.evidenceMode||'quotes'),
   ].join("\n");
 }
 
@@ -149,10 +208,10 @@ export interface ChapterResponsibilityRepairPromptInput {
 /** 语义修复提示词：修订边界与判据同源，不再内联第二份走样表述。 */
 export function buildChapterResponsibilityRepairPrompt(input: ChapterResponsibilityRepairPromptInput): string {
   return [
-    "修订当前全书章节分工，只处理审查明确指出的世界规则、时间因果和跨章边界冲突；保留没有被指出的问题章节、已确认人物、真相、核心反转与结局，不得把冲突任务换一种说法保留。",
+    "修订当前全书章节分工，只处理审查明确指出的世界规则、时间因果、跨章边界冲突或缺失的条件取得动作；保留没有被指出的问题章节、已确认人物、真相、核心反转与结局，不得把冲突任务换一种说法保留。",
     `【本轮修复策略】${input.strategyDirective}`,
     `【可执行修复合同】${JSON.stringify(input.issueContracts)}`,
-    "合同中的 forbiddenTask 必须从问题章删除，requiredReplacement 是已经过审查器约束的执行方式，必须落实而非当作参考；retain 只能保留目标，不能保留违规机制。requiredReplacement是待实现的约束，不是其机制已经成立的证明。修订后沿受影响行动到最终exitState核对整条必要条件链，不能只补被点名的一步就重复结论；普通自主行动不额外追加程序。必要条件落实为人物行动、可用资源与具体结果，不把自检过程写成正文解释段。",
+    "合同中实际存在 forbiddenTask 的规则冲突必须从问题章删除违规机制，requiredReplacement 是受审查器约束的替代方向；仅有 raw 条件取得缺口时不得虚构 forbiddenTask，也不能任意删除原已成立行动，应在既定资源与人物动机内补齐实际取得/传递/生效动作或修正尚未生效的阶段结果。retain 只能保留已确定的目标，不能保留违规机制。requiredReplacement不是其机制已经成立的证明。修订后沿受影响行动到最终exitState核对整条必要条件链，不能只补被点名的一步就重复结论；普通自主行动不额外追加程序。必要条件落实为人物行动、可用资源与具体结果，不把自检过程写成正文解释段。",
     `【当前章节分工】${JSON.stringify(input.currentPlan)}`,
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,

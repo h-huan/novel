@@ -1,11 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { applyOutlineCandidateFactPatches, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
+import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 
 const candidates = () => [{ order: 4, title: '收束', targetWords: 2000,
   content: '核对账目。'.repeat(100) + '积攒多年',
   scenes: JSON.stringify({ scenes: [{ content: '积攒多年' }], wordCountReason: '完整收束' }) }];
 const patch = (field = 'content', match = '积攒多年', replacement = '此前积攒') =>
   ({ chapterNumber: 5, field, match, replacement });
+
+describe('cited outline conflict repair targeting', () => {
+ const before=[
+  {order:0,content:'旧图走的是南边大道，大道被塌坡截断了。另有旁白。'+'无关的军中行军记录已经明确保留。'.repeat(32),scenes:'{"scenes":[]}'},
+  {order:2,content:'郭崇说，南边大道上没有塌坡。他据此质问何三。'+'除此之外其他既定军情并未变化。'.repeat(32),scenes:'{"scenes":[]}'},
+ ];
+ const evidence=[JSON.stringify({
+  location1:'本批·第1章.content',location2:'本批·第3章.content',
+  quote1:before[0].content,quote2:before[1].content,
+  conflict:'第1章称“旧图走的是南边大道，大道被塌坡截断了”，第3章却说“南边大道上没有塌坡”，同一道路互斥。',
+ })];
+ it('rejects an unrelated edit even when JSON and all paths are legal',()=>{
+  const other=applyOutlineCandidateFactPatches(before,{patches:[
+   {chapterNumber:3,field:'content',match:'他据此质问何三',replacement:'他直接追问何三'},
+  ]});
+  expect(outlineCandidateFactRepairTargetIssues(before,other,evidence).join('；')).toContain('冲突原句');
+ });
+ it('accepts a direct evidence-targeted patch, leaving the independent semantic Gate mandatory',()=>{
+  const changed=applyOutlineCandidateFactPatches(before,{patches:[
+   {chapterNumber:3,field:'content',match:'南边大道上没有塌坡',replacement:'旧图南边大道已被塌坡截断'},
+  ]});
+  expect(outlineCandidateFactRepairTargetIssues(before,changed,evidence)).toEqual([]);
+  expect(before[1].content).toContain('南边大道上没有塌坡');
+ });
+ it('does not invent evidence when a semantic conflict lacks verbatim quoted text',()=>{
+  expect(outlineCandidateFactRepairTargetIssues(before,before,['事实互斥，具体原文待进一步审核'])).toEqual([]);
+ });
+});
 
 describe('pending outline fact patches', () => {
   it('supports repeated fact projections beyond eight replacements within the same budget', () => {
@@ -15,6 +43,21 @@ describe('pending outline fact patches', () => {
     expect(applyOutlineCandidateFactPatches(input, { patches })[0].content).not.toContain('错误投影');
     expect(() => applyOutlineCandidateFactPatches(input, { patches: Array(OUTLINE_FACT_REPAIR_LIMITS.maxPatches + 1).fill(patch()) })).toThrow('项局部替换');
   });
+  it('minimally reconciles the observed group-reply conflict without deleting private-message or signature evidence', () => {
+    const content = '安全员翻出工作群报修消息，底下没人回。随后他另行展示助理发来的私聊回复。陈总问工作群报修底下的回复是谁留的，安全员把手机举高，回复就挂在报修底下，头像是沈曼助理。沈曼承认是她让助理在群里回复“今天拍完、明天换”。导演先签安全条款，威亚组、安全员和替身随后签字。';
+    const input = [{ order: 2, title: '第3章', targetWords: 3500, content,
+      scenes: JSON.stringify({ scenes: [{ outcome: '安全员展示工作群报修消息与另行收到的助理私聊回复。' }], wordCountReason: '按本章事件量安排' }) }];
+    const result = applyOutlineCandidateFactPatches(input, { patches: [
+      { chapterNumber: 3, field: 'content', match: '底下没人回', replacement: '底下有一条群回复' },
+    ] });
+    expect(result[0].content).not.toContain('底下没人回');
+    expect(result[0].content).toContain('底下有一条群回复');
+    expect(result[0].content).toContain('助理发来的私聊回复');
+    expect(result[0].content).toContain('沈曼承认是她让助理在群里回复');
+    expect(result[0].content).toContain('导演先签安全条款');
+    expect(input[0].content).toBe(content);
+  });
+
   it('repairs both projections atomically and preserves other fields and originals', () => {
     const input = candidates();
     const result = applyOutlineCandidateFactPatches(input, { patches: [patch(), patch('scenes')] });

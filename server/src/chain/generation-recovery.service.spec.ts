@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GenerationRecoveryService } from './generation-recovery.service';
 import { VectorIndexService } from '../rag/vector-index.service';
+import { generationTasks } from '../common/generation-cancellation';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
@@ -37,6 +38,7 @@ describe('GenerationRecoveryService', () => {
       CREATE TABLE timelines (id TEXT PRIMARY KEY,project_id TEXT);
       CREATE TABLE timeline_events (id TEXT PRIMARY KEY,timeline_id TEXT);
       CREATE TABLE version_history (id TEXT PRIMARY KEY,entity_id TEXT,created_by TEXT);
+      CREATE TABLE generation_runs (id TEXT PRIMARY KEY,project_id TEXT,status TEXT);
     `);
     vectors = {
       [VectorIndexService.COLLECTIONS.CHARACTERS]: [],
@@ -69,6 +71,83 @@ describe('GenerationRecoveryService', () => {
     expect(audit.canResume).toBe(true);
     expect(audit.missingModules).toEqual(expect.arrayContaining(['世界观', '人物', '章节大纲', '正文空壳', '时间线']));
     expect(audit.missingModules).not.toEqual(expect.arrayContaining(['组织', '地点', '伏笔']));
+  });
+
+  it('does not clear a failed-status project while its original creation task still runs', async () => {
+    db.prepare("INSERT INTO characters VALUES ('generated-character','p1')").run();
+    let finish!: () => void;
+    const hold = new Promise<void>(resolve => { finish = resolve; });
+    const task = generationTasks.run('creation', 'p1', '', async () => { await hold; });
+    try {
+      const audit = await service.audit('p1');
+      expect(audit.running).toBe(true);
+      expect(audit.canResume).toBe(false);
+      await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('原项目生成调用仍在执行');
+      expect((db.prepare('SELECT status FROM projects WHERE id=?').get('p1') as any).status).toBe('generation_failed');
+      expect((db.prepare('SELECT COUNT(*) count FROM characters WHERE project_id=?').get('p1') as any).count).toBe(1);
+    } finally { finish(); await task; }
+    const after = await service.audit('p1');
+    expect(after.running).toBe(false);
+    expect(after.canResume).toBe(true);
+  });
+
+  it('retains a complete model-generated role batch and world during outline recovery', async () => {
+    db.exec(`ALTER TABLE characters ADD COLUMN name TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
+    db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
+    db.prepare("INSERT INTO characters VALUES ('c1','p1','江芥','藏经阁杂役',1)").run();
+    db.prepare("INSERT INTO character_extended_profiles VALUES ('cp1','p1','c1','{}')").run();
+    db.prepare("INSERT INTO character_relationships VALUES ('rel1','p1','c1','c1')").run();
+    db.prepare("INSERT INTO outlines VALUES ('temporary-outline','p1','chapter',3200,'planned',1)").run();
+
+    await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM world_settings WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM characters WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM character_extended_profiles WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM character_relationships WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM outlines WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT status FROM projects WHERE id='p1'").get() as any).status).toBe('creating');
+  });
+
+  it('regenerates incomplete character sources instead of falsely preserving them', async () => {
+    db.exec(`ALTER TABLE characters ADD COLUMN name TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
+    db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
+    db.prepare("INSERT INTO characters VALUES ('c1','p1','江芥','藏经阁杂役',1)").run();
+    // Missing extended profile means this is not an accepted role batch.
+    await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM characters WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM world_settings WHERE project_id='p1'").get() as any).n).toBe(1);
+  });
+
+  it('does not reuse a role batch with the wrong confirmed protagonist even when rows are complete', async () => {
+    db.exec(`ALTER TABLE characters ADD COLUMN name TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
+    const settings = JSON.parse((db.prepare("SELECT settings FROM projects WHERE id='p1'").get() as any).settings);
+    settings.creativeConstitution.confirmedStory = {protagonist:'苏青',characters:[]};
+    db.prepare("UPDATE projects SET settings=? WHERE id='p1'").run(JSON.stringify(settings));
+    db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
+    db.prepare("INSERT INTO characters VALUES ('c1','p1','王明','藏经阁杂役',1)").run();
+    db.prepare("INSERT INTO character_extended_profiles VALUES ('cp1','p1','c1','{}')").run();
+    await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM characters WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM world_settings WHERE project_id='p1'").get() as any).n).toBe(1);
+  });
+
+  it('rejects unsafe recovery while database model calls remain running after a task wrapper settles', async () => {
+    db.prepare("INSERT INTO characters VALUES ('source-character','p1')").run();
+    db.prepare("INSERT INTO generation_runs VALUES ('model-run','p1','running')").run();
+    expect(generationTasks.isRunning('creation', 'p1')).toBe(false);
+    const audit = await service.audit('p1');
+    expect(audit.running).toBe(true);
+    expect(audit.canResume).toBe(false);
+    await expect(service.clearFailedGeneratedAssets('p1')).rejects.toThrow('原项目生成调用仍在执行');
+    expect((db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id='p1'").get() as any).count).toBe(1);
+    db.prepare("UPDATE generation_runs SET status='cancelled' WHERE id='model-run'").run();
+    expect((await service.audit('p1')).canResume).toBe(true);
   });
 
   it('blocks cleanup when a chapter contains body text without falsely classifying its author', async () => {

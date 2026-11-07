@@ -35,13 +35,13 @@ export class ChainTemplateService {
           id: 'node_1_skeleton', name: '主线与结局骨架', type: 'prompt', chainId: 'outline',
           promptTemplateId: 'long-novel-main-skeleton', modelConfig: { temperature: 0.7 },
           inputMapping: { story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre' },
-          outputMapping: {}, timeout: 120, retryCount: 0,
+          timeout: 120,
         },
         {
           id: 'node_2_worldview', name: '世界规则', type: 'prompt', chainId: 'world_building',
           promptTemplateId: 'long-novel-init-worldview', modelConfig: { temperature: 0.6 },
           inputMapping: { story_setting: 'user_input.story_setting', skeleton: 'chain_output.node_1_skeleton', genre: 'user_input.genre' },
-          outputMapping: {}, timeout: 120, retryCount: 0,
+          timeout: 120,
         },
       ],
       variables: [
@@ -49,8 +49,6 @@ export class ChainTemplateService {
         { name: 'targetWords', source: 'user_input', path: 'user_input.targetWords', required: true },
         { name: 'genre', source: 'user_input', path: 'user_input.genre', required: false },
       ],
-      executionMode: 'sequential',
-      config: { timeout: 300, maxRetries: 0, enableLogging: true, strictMode: true },
       createdAt: now,
       updatedAt: now,
     });
@@ -68,7 +66,7 @@ export class ChainTemplateService {
             story_setting: 'user_input.story_setting', targetWords: 'user_input.targetWords', genre: 'user_input.genre',
             chapterLimit: 'user_input.chapterLimit', platform_directive: 'user_input.platform_directive',
           },
-          outputMapping: {}, timeout: 240, retryCount: 0,
+          timeout: 240,
         },
         {
           id: 'node_2_volumes', name: '分卷大纲', type: 'prompt', chainId: 'long-novel-flexible-outline',
@@ -77,7 +75,7 @@ export class ChainTemplateService {
             story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive',
             chapterLimit: 'user_input.chapterLimit',
           },
-          outputMapping: {}, timeout: 420, retryCount: 0,
+          timeout: 420,
         },
         {
           id: 'node_3_chapters', name: '章纲生成', type: 'prompt', chainId: 'long-novel-flexible-outline',
@@ -86,7 +84,7 @@ export class ChainTemplateService {
             story_setting: 'user_input.story_setting', platform_directive: 'user_input.platform_directive',
             chapterLimit: 'user_input.chapterLimit', wordRangeText: 'user_input.wordRangeText',
           },
-          outputMapping: {}, timeout: 600, retryCount: 0,
+          timeout: 600,
         },
       ],
       variables: [
@@ -98,8 +96,6 @@ export class ChainTemplateService {
         { name: 'wordRangeText', source: 'user_input', path: 'user_input.wordRangeText', required: true },
         { name: 'planning', source: 'user_input', path: 'user_input.planning', required: false },
       ],
-      executionMode: 'sequential',
-      config: { timeout: 1500, maxRetries: 0, enableLogging: true, strictMode: false },
       createdAt: now,
       updatedAt: now,
     });
@@ -125,8 +121,6 @@ export class ChainTemplateService {
       description: template.description,
       nodes: template.nodes,
       variables: template.variables,
-      executionMode: template.executionMode,
-      config: template.config,
     };
     return this.chainEngine.execute(chain, userInput, onProgress);
   }
@@ -148,8 +142,6 @@ export class ChainTemplateService {
       description: template.description,
       nodes: [template.nodes[0]],
       variables: template.variables,
-      executionMode: 'sequential',
-      config: template.config,
     };
     return this.chainEngine.execute(chain, userInput, onProgress);
   }
