@@ -270,10 +270,12 @@ export class GenerationRecoveryService {
     const names = roles.map(row => String(row.name || '').trim());
     const projectRow = db.prepare('SELECT settings FROM projects WHERE id=?').get(projectId) as {settings?:string}|undefined;
     let confirmedNames:string[]=[];
+    let confirmedLead='';
     try{
       const story=JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory;
+      confirmedLead=confirmedWorldProtagonistName(story?.protagonist);
       confirmedNames=[
-        confirmedWorldProtagonistName(story?.protagonist),
+        confirmedLead,
         ...(Array.isArray(story?.characters)?story.characters:[]).map((row:any)=>
           confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
       ].filter(Boolean);
@@ -288,10 +290,7 @@ export class GenerationRecoveryService {
       && confirmedNames.every(name=>names.includes(name))
       && roles.every(row => !!String(row.identity || '').trim() && profileIds.has(String(row.id)))
       && roles.filter(row => Number(row.is_pov_character) === 1).length === 1
-      && (!confirmedNames[0]||!confirmedWorldProtagonistName(
-        JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory?.protagonist)
-        || String(roles.find(row=>Number(row.is_pov_character)===1)?.name||'')===
-          confirmedWorldProtagonistName(JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory?.protagonist));
+      && (!confirmedLead || String(roles.find(row=>Number(row.is_pov_character)===1)?.name||'')===confirmedLead);
     // Normal recovery retains verified upstream Canon; it regenerates only
     // missing/incomplete downstream data. Explicit source rebuild is separate.
     await this.clearGeneratedAssets(projectId, { preserveWorld, preserveCharacters });
