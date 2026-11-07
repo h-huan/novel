@@ -6632,7 +6632,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                       refillPeers=[...peers];if(initialIdentityChecksPassed)sameBatchPremises=[...selectedPremises,...peers];
                       if(preparing){preparedApproved.set(String(premise.premiseId),premise);releasePreparedApproved();}
                       else if(initialIdentityChecksPassed)refillWork!.approve(premise,peers);
-                    },cardLimiter);
+                    },cardLimiter,undefined,selectedPremises.map(item=>String(item.storyCategory)));
                   for(const premise of reviewed.selected){
                     const id=String(premise.premiseId);
                     if(previouslySelectedIds.has(id))throw Error('补足候选重复使用已进入完整卡的题材身份');
@@ -7073,7 +7073,8 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   }
 
   private async reconcilePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>, requestedCount: number,
-    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}, deliveryCount=requestedCount,onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>,initialPreparation?:PremiseSourcePreparation) {
+    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}, deliveryCount=requestedCount,onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>,initialPreparation?:PremiseSourcePreparation,
+    previouslyVettedCategories:readonly string[]=[]) {
     const sourceReceipts:PremiseSourceReceipts=new Map();
     let protectedPremiseIds:readonly string[]=[];
     const sourceScope=JSON.stringify({standard,requiredGenres});
@@ -7453,7 +7454,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
             const scoped={...selected,selected:[source]};
             const reviewed={passed:false,issues:slot.issues} as PremiseSelectionReview;
             const normalized=normalizeTargetedPremiseReselection(
-              {replacements:[response]},scoped,reviewed,1,poolTarget,categories,1);
+              {replacements:[response]},scoped,reviewed,1,poolTarget,categories,1,previouslyVettedCategories);
             assertPremiseCausalPlans(normalized);
             if(String(normalized.selected[0]?.premiseId)!==candidateId)continue;
             valid.set(id,normalized.selected[0]);
@@ -7469,7 +7470,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         recordValidatedSlots(value);
         const rows=(value as any)?.replacements;
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
-        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,Math.min(requestedCount,selected.selected.length));
+        const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,Math.min(requestedCount,selected.selected.length),previouslyVettedCategories);
         return candidate;
       };
       try{
