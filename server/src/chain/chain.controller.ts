@@ -4973,9 +4973,9 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         complexTimeoutMs:discoveryBudget.complexTimeoutMs,
       }));
       const presentationCallLimit=discoveryBudget.presentationMaxPhysicalCalls;
-      // All source/cause/genre/category and pairwise evidence is established
-      // before full cards. No source credits are reserved for a later card
-      // replacement phase: selected vetted premises are expanded together.
+      // The same source budget funds initial independent review and the one
+      // possible post-card refill. reserveFinalRefillReviewCapacity protects
+      // refill capacity during initial screening; no credits are cloned.
       const sourceCompletionBudget={remaining:discoveryBudget.sourceMaxPhysicalCalls};
       // Generated in the existing pool calls; ranking metadata never becomes canonical story fact.
       const premiseMaturityScores=new Map<string,number>();
