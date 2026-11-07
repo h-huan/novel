@@ -89,6 +89,23 @@ it('keeps the defective source plan and complete independent-review selection wh
   expect(JSON.stringify(prompt).length).toBeLessThan(JSON.stringify(selected).length);
 });
 
+it('rechecks a one-category replacement using vetted whole-request diversity, never a false refill-only diversity failure',()=>{
+  const pool=['A','B','C'].map(premise);
+  const categories=['悬疑','都市'];
+  const original=normalizePremiseSelectionPayload({pool,selectedPremises:pool.slice(0,2)},2,3,categories,2,['都市']);
+  const review:PremiseSelectionReview={passed:false,issues:[{
+    kind:'selection_fit',premiseId:'B',referencePremiseId:'B',repairMode:'replace_from_pool',
+    quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+    reason:'原池中的重要结果没有有效行动依据，需要原池其它真实身份补位',
+  }]};
+  const answer={replacements:[{replacesPremiseId:'B',premise:premise('C')}]};
+  expect(()=>normalizeTargetedPremiseReselection(answer,original,review,2,3,categories,2))
+    .toThrow('全部落在同一分类');
+  const repaired=normalizeTargetedPremiseReselection(answer,original,review,2,3,categories,2,['都市']);
+  expect(repaired.selected.map(item=>item.premiseId)).toEqual(['A','C']);
+  expect(repaired.selected.map(item=>item.storyCategory)).toEqual(['悬疑','悬疑']);
+});
+
 it('allows citation-only correction for an evidenced selection-fit slot without regenerating its story', () => {
   const plan=(id:string)=>[{action:{field:'activeChoice',quote:premise(id).activeChoice},
     conditions:[{field:'escalation',quote:premise(id).escalation}],
