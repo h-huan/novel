@@ -1226,7 +1226,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               return __respNoThink;
             }
             lastEmptyError = new Error(
-              `模型恢复补发未取得完整正文(finishReason=${noThinkResult.finishReason ?? 'unknown'}, hasContent=${Boolean(noThinkResult.content.trim())}): model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
+              `模型返回空内容或截断(关闭思考补发未取得完整正文, finishReason=${noThinkResult.finishReason ?? 'unknown'}, hasContent=${Boolean(noThinkResult.content.trim())}): model=${modelName}, scenario=${request.scenario || 'daily'}, maxTokens=${currentMaxTokens}`,
             );
             this.logger.warn(lastEmptyError.message);
             emit('empty', { reason: lastEmptyError.message });
