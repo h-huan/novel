@@ -350,8 +350,14 @@ export function causalPlanningProofPromptCatalog(
            &&!actionLookup.some(hint=>hint.resultAnchorId===reviewedResult.id&&hint.actionAnchorId===actionId))
            actionLookup.push({resultAnchorId:reviewedResult.id,actionAnchorId:actionId});
    }
+   // The latest live review spent its bounded correction on dozens of
+   // result-self citations despite the chapter already containing explicit
+   // character actions. Surface only the existing same-chapter ACTION field
+   // addresses, never a pre-decided causal link or a new story fact.
+   const actionAnchorIds=Array.isArray(actions)?actions.map((_action:any,i:number)=>
+     fields.get(index+'.characterActions.'+i+'.action')).filter((id):id is string=>typeof id==='string'):[];
    return {chapterNumber:entry.chapterNumber,bodyIndex:index,
-     resultAnchorIds:[...entry.resultAnchorIds],actionLookup};
+     resultAnchorIds:[...entry.resultAnchorIds],actionAnchorIds,actionLookup};
  });
 }
 
