@@ -91,6 +91,7 @@ function makePremiseReviewFixture(prompt: string) {
   const categoryCatalog = promptArray(prompt, '【与完整卡同口径的前置分类审核】', '；categoryChecks', true);
   const payoffCatalog = promptArray(prompt, '【必返payoffChecks目录】', '\n【逐环节因果计划目录');
   const causalCatalog = promptArray(prompt, '【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】', '\n先核对每个causalPlan环节');
+  const unmappedCatalog = promptArray(prompt, '【因果计划未逐字覆盖的已有结果句（仅定位，非新增质量门）】', '。这只是对原有反转/兑现字段', true);
   const genreCatalog = promptArray(prompt, '【额外必返genreChecks】', '；每个ref返回status=fulfilled|missing|unknown', true);
   const genreEvidence = promptArray(prompt, '【流派证据目录：只含已选展开】', '\n【genreChecks单项形状】', true);
   return {
@@ -107,6 +108,9 @@ function makePremiseReviewFixture(prompt: string) {
       const prefix = row.ref.slice(0, row.ref.indexOf('.') + 1);
       return {
         ref: row.ref, status: 'supported',
+        unmappedChecks: unmappedCatalog.filter(item => String(item.ref).startsWith(prefix)).map((_,index) => ({
+          ordinal:index+1,status:'context_only',reason:'此用例模拟独立审查，以检查生产流程调度及身份绑定；不作为真实因果判定',
+        })),
         actionEvidenceRef: prefix + 'activeChoice',
         conditionEvidenceRef: prefix + 'escalation',
         reversalCheck: {status:'supported',actionEvidenceRef:prefix+'activeChoice',reason:'本题材已先采取具体行动，并由升级条件触发反转变化'},
