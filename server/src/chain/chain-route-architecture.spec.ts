@@ -70,6 +70,8 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('const screened=batch.screened??screenPremisePoolBatch(batch.candidates)');
     expect(source).toContain('就在本次生成调用内改构该槽位');
     expect(source).toContain('不能把补造条件留到选优、成卡或终审');
+    expect(source).toContain('已经发出或交付的原件不能仍留在主角手中');
+    expect(source).toContain('不能拿主线调查成功自动担保');
     // These constraints now live in the single canonical selection directive,
     // not a fragile controller-side string replacement.
     const selectionDirective = read('idea-discovery-contract.ts');
