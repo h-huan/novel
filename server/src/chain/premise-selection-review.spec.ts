@@ -173,7 +173,7 @@ it('selects two original-pool alternatives for one real delivery shortfall and s
   expect(result.selected.map((item:any)=>item.premiseId)).toEqual(['A','B','C','D','I']);
   expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
   expect(result.selectionAudit).toMatchObject({
-    partial:true,completeCardGatePending:true,
+    partial:false,completeCardGatePending:true,
     reviewedRecoveryCandidates:2,deliveryCount:5,
     excludedPremiseIds:expect.arrayContaining(['J']),
     discardedSurplusPremiseIds:expect.arrayContaining(['G','H']),
@@ -211,7 +211,7 @@ it('aggregates five rejected preselection positions once, then retains independe
   expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','I','L']);
   expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
   expect(result.selectionAudit.finalReview.passed).toBe(true);
-  expect(result.selectionAudit.partial).toBe(true);
+  expect(result.selectionAudit.partial).toBe(false);
   expect(result.selectionAudit.excludedPremiseIds).toContain('J');
   expect(result.selectionAudit.selectionStopReason).toBe('reviewed_hedge_filled_delivery');
 
@@ -267,7 +267,7 @@ it('does not spend an optional hedge when reselection allowance is unavailable',
    expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
  });
 
-it('uses the full existing funded preselection reserve before costly full-card reviews',async()=>{
+it('never spends the optional preselection hedge when five independently vetted originals already cover five final-card slots',async()=>{
  const ids='ABCDEFGHIJK'.split('');
  const input=normalizePremiseSelectionPayload({pool:ids.map(premise),
    selectedPremises:ids.slice(0,8).map(premise)},8,15);
@@ -280,25 +280,19 @@ it('uses the full existing funded preselection reserve before costly full-card r
      reason:'核对该题材原池与展开中行动及必要条件后形成实际判定',
    }))},current);
  });
- controller.llmCallWithRetry=vi.fn(async(_label:string,prompt:string,options:any)=>{
-   expect(prompt).toContain('replacements恰好3项');
-   const data={replacements:[
-     {replacesPremiseId:'F',premise:premise('I')},
-     {replacesPremiseId:'G',premise:premise('J')},
-     {replacesPremiseId:'H',premise:premise('K')},
-   ]};
-   expect(options.validate(data)).toBe(true);
-   return {data};
- });
+ controller.llmCallWithRetry=vi.fn(async()=>{throw Error('five already vetted; optional hedge must not consume a call')});
  const shared={reviews:{remaining:12},reselection:{remaining:3}};
  const result=await controller.reconcilePremiseSelection(input,8,15,['悬疑'],'',[],shared,5);
- expect(controller.llmCallWithRetry).toHaveBeenCalledOnce();
- expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E','I','J','K']);
- expect(result.selectionAudit.reselectionAttempted).toBe(true);
+ expect(controller.llmCallWithRetry).not.toHaveBeenCalled();
+ expect(result.selected.map((row:any)=>row.premiseId)).toEqual(['A','B','C','D','E']);
+ expect(result.selectionAudit).toMatchObject({
+   reselectionAttempted:false,partial:false,deliveryShortfall:0,screeningCapacityGap:3,
+   selectionStopReason:'delivery_capacity_met',completeCardGatePending:true,
+ });
  expect(result.selectionAudit.finalReview.passed).toBe(true);
- // The source, pair and selection Gates all still run from the SAME physical allowance.
- expect(shared.reselection.remaining).toBeLessThanOrEqual(3);
- expect(shared.reviews.remaining).toBeLessThanOrEqual(12);
+ expect(controller.reviewPremiseSelection).toHaveBeenCalledTimes(2);
+ expect(shared.reselection.remaining).toBe(3);
+ expect(shared.reviews.remaining).toBe(12);
  expect(input.selected.map((row:any)=>row.premiseId)).toEqual('ABCDEFGH'.split(''));
 });
 
