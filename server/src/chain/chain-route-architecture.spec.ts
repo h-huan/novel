@@ -275,10 +275,10 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('partial:retained.selection.selected.length<deliveryCount');
     expect(source).toContain('screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length)');
     expect(source).toContain('这些胚子尚未通过完整卡终审');
-    expect(source).toContain('本次原池已授权的一次换选');
-    expect(source).toContain("if (missingSlots === 0) {");
+    expect(source).toContain('停止可选冗余换选，直接成卡及独立终审');
     expect(source).toContain("selectionStopReason:'delivery_capacity_met'");
-    expect(source).toContain('真实缺卡才从未使用原池一次补位');
+    expect(source).not.toContain('affordablePreselectionHedge');
+    expect(source).not.toContain('capacityMet?');
     expect(source).toContain('partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length)');
   });
 
