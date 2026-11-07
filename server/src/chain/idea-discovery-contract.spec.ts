@@ -684,6 +684,17 @@ describe('category diversity before story-card creation', () => {
     const value = normalizePremiseSelectionPayload(payload(['悬疑惊悚', '现实生活', '古代言情']), 3, 9, ['悬疑惊悚', '现实生活', '古代言情']);
     expect(value.selected.map(x => x.storyCategory)).toEqual(['悬疑惊悚', '现实生活', '古代言情']);
   });
+  it('accepts a single-category refill only when the entire independently vetted discovery already crossed categories', () => {
+    const single=payload(['悬疑惊悚','悬疑惊悚']);
+    const options=['悬疑惊悚','现实生活','古代言情'];
+    expect(()=>normalizePremiseSelectionPayload(single,2,6,options,2)).toThrow('全部落在同一分类');
+    expect(()=>normalizePremiseSelectionPayload(single,2,6,options,2,['悬疑惊悚'])).toThrow('全部落在同一分类');
+    const refill=normalizePremiseSelectionPayload(single,2,6,options,2,['古代言情','现实生活']);
+    expect(refill.selected.map(item=>item.storyCategory)).toEqual(['悬疑惊悚','悬疑惊悚']);
+    expect(refill.selected.every(item=>item.premiseId.startsWith('P'))).toBe(true);
+    expect(()=>normalizePremiseSelectionPayload(payload(['不存在的分类','悬疑惊悚']),2,6,options,2,['古代言情']))
+      .toThrow('不在本次平台分类候选');
+  });
   it('rejects a batch collapsed into one category when several were explicitly offered', () => {
     expect(() => normalizePremiseSelectionPayload(payload(['悬疑惊悚', '悬疑惊悚']), 2, 6, ['悬疑惊悚', '现实生活'])).toThrow('全部落在同一分类');
   });
