@@ -46,6 +46,13 @@ export class CreationOutlineCheckpoint {
       .run(projectId, stageKey, sourceHash, JSON.stringify(payload), new Date().toISOString());
   }
 
+  /** Aggregate repair changed already vetted chapter projections. Retain the
+   * immutable approved responsibility plan, but never reuse stale chapter facts. */
+  invalidateChapters(projectId: string): void {
+    this.db.prepare(`DELETE FROM creation_outline_checkpoints
+      WHERE project_id=? AND stage_key LIKE 'chapter_%' AND stage_key!='chapter_plan'`).run(projectId);
+  }
+
   clear(projectId: string): void {
     this.db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
   }
