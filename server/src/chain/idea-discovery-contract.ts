@@ -345,9 +345,11 @@ export function sourceReadyScoredPremiseSelection(
   pool: readonly Record<string, unknown>[],
   scores: ReadonlyMap<string, number>,
   target: number,
+  poolTarget: number,
   categoryOptions?: readonly string[],
 ): PremiseSelectionResult | null {
-  if (!Number.isSafeInteger(target) || target < 1 || pool.length < target) return null;
+  if (!Number.isSafeInteger(target) || target < 1 || pool.length < target
+    || !Number.isSafeInteger(poolTarget) || poolTarget < target) return null;
   const ranked=rankPremisePoolByMaturityScore(pool,scores);
   const ready: Array<{ row: Record<string,unknown>; category: string }>=[];
   for (const seed of ranked) {
@@ -359,7 +361,7 @@ export function sourceReadyScoredPremiseSelection(
     try {
       const projected=projectPremiseSourceChoices([row],pool);
       const sample=normalizePremiseSelectionPayload({pool,selectedPremises:projected},
-        1,pool.length,categoryOptions,1);
+        1,poolTarget,categoryOptions,1);
       if(sample.selected.length===1 && premiseCausalPlanIssues(sample.selected[0]).length===0)
         ready.push({row,category:String(sample.selected[0].storyCategory||'')});
     } catch { /* No semantic relaxation: the existing selector handles this pool. */ }
@@ -377,7 +379,7 @@ export function sourceReadyScoredPremiseSelection(
   try {
     return normalizePremiseSelectionPayload({
       pool,selectedPremises:projectPremiseSourceChoices(chosen.map(item=>item.row),pool),
-    },target,pool.length,categoryOptions,target);
+    },target,poolTarget,categoryOptions,target);
   } catch { return null; }
 }
 
