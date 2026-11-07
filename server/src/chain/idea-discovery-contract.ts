@@ -342,6 +342,9 @@ export function normalizePremiseSelectionPayload(
   poolTarget: number,
   categoryOptions?: readonly string[],
   minimumSelectedCount = requestedCount,
+  // Only a supplemental selection may supply already independently vetted first-wave categories.
+  // Cross-category exploration is a property of the WHOLE discovery request, not each refill shard.
+  previouslyVettedCategories: readonly string[] = [],
 ): PremiseSelectionResult {
   if (!Number.isInteger(requestedCount) || requestedCount <= 0) {
     throw new Error('创建前题材筛选的目标数量无效。');
@@ -430,7 +433,7 @@ export function normalizePremiseSelectionPayload(
   });
 
   if (requestedCount > 1 && categoryOptions && new Set(categoryOptions).size > 1
-    && new Set(selected.map(item => item.storyCategory)).size < 2) {
+    && new Set([...previouslyVettedCategories, ...selected.map(item => item.storyCategory)]).size < 2) {
     throw new Error('未预选分类的发现批次全部落在同一分类，未执行跨分类题材探索；不创建同分类的整批故事卡。');
   }
 
