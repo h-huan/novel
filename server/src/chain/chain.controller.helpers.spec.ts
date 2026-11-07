@@ -1715,7 +1715,8 @@ describe('idea discovery orchestrator with simulated model responses', () => {
       const step = request.metrics?.stepKey;
       if (step === 'idea_premise_pool_generation') {
         expect(request.prompt).toContain('自动选择的storyTone含浪漫');
-        expect(request.prompt).toContain('不能共享一条低职位忍让');
+        expect(request.prompt).toContain('同批各项应具有不同的人物欲望、主动策略、对手响应、局势转向与实际代价');
+        expect(request.prompt).not.toContain('低职位忍让、保留账本或日志');
         expect(request.prompt).toContain('不能只是道具加动作的意象暂名');
         expect(request.prompt).toContain('不能用补造事件、剧透最终结果替代点击动机');
         expect(request.prompt).toContain('五节合计优先300—450汉字');
