@@ -27,6 +27,8 @@ function singleReceipt(selection:PremiseSelectionResult,review:PremiseSelectionR
  const rows=(values:any[]|undefined)=>values?.filter(row=>row.ref.startsWith(prefix)).map(row=>Object.fromEntries(
   Object.entries(row).map(([key,value])=>[key,(key==='ref'||/evidenceRef$/i.test(key))&&typeof value==='string'?rebind(value)
    :key==='links'&&Array.isArray(value)?value.map(link=>({...link,ref:rebind(link.ref)}))
+    :key==='unmappedChecks'&&Array.isArray(value)?value.map(check=>({...check,
+      ...(typeof check.actionEvidenceRef==='string'?{actionEvidenceRef:rebind(check.actionEvidenceRef)}:{})}))
     :key==='reversalCheck'&&value&&typeof value==='object'
       ?{...value,...(typeof (value as any).actionEvidenceRef==='string'?{actionEvidenceRef:rebind((value as any).actionEvidenceRef)}:{})}
       :value])));
