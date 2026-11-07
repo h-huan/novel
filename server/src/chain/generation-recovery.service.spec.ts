@@ -91,6 +91,37 @@ describe('GenerationRecoveryService', () => {
     expect(after.canResume).toBe(true);
   });
 
+  it('retains a complete model-generated role batch and world during outline recovery', async () => {
+    db.exec(`ALTER TABLE characters ADD COLUMN name TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
+    db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
+    db.prepare("INSERT INTO characters VALUES ('c1','p1','江芥','藏经阁杂役',1)").run();
+    db.prepare("INSERT INTO character_extended_profiles VALUES ('cp1','p1','c1','{}')").run();
+    db.prepare("INSERT INTO character_relationships VALUES ('rel1','p1','c1','c1')").run();
+    db.prepare("INSERT INTO outlines VALUES ('temporary-outline','p1','chapter',3200,'planned',1)").run();
+
+    await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM world_settings WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM characters WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM character_extended_profiles WHERE project_id='p1'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM character_relationships WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM outlines WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT status FROM projects WHERE id='p1'").get() as any).status).toBe('creating');
+  });
+
+  it('regenerates incomplete character sources instead of falsely preserving them', async () => {
+    db.exec(`ALTER TABLE characters ADD COLUMN name TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
+      ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
+    db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
+    db.prepare("INSERT INTO characters VALUES ('c1','p1','江芥','藏经阁杂役',1)").run();
+    // Missing extended profile means this is not an accepted role batch.
+    await service.clearFailedGeneratedAssets('p1');
+    expect((db.prepare("SELECT COUNT(*) AS n FROM characters WHERE project_id='p1'").get() as any).n).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM world_settings WHERE project_id='p1'").get() as any).n).toBe(1);
+  });
+
   it('rejects unsafe recovery while database model calls remain running after a task wrapper settles', async () => {
     db.prepare("INSERT INTO characters VALUES ('source-character','p1')").run();
     db.prepare("INSERT INTO generation_runs VALUES ('model-run','p1','running')").run();
