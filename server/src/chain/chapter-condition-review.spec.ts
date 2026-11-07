@@ -1,3 +1,4 @@
+import { buildChapterResponsibilityAuditPrompt, chapterResponsibilityPlanningDirective, CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE } from '../../shared/src/chapter-responsibility-review';
 import {describe,expect,it} from 'vitest';
 import {chapterConditionReviewIssues,materializeChapterConditionSources,chapterConditionTaskAnchors,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 const plan=[{chapter:1,responsibility:'住户取出钥匙打开门',prerequisites:['住户持有旧钥匙'],timeline:'当夜',exitState:'主角已进入屋内'},{chapter:2,responsibility:'主角翻开抽屉取得文件',prerequisites:['主角已进入屋内'],timeline:'进入后',exitState:'主角持有文件'}];
@@ -82,4 +83,25 @@ describe('short and long preflight evidence share an exact chapter source contra
   expect(chapterConditionReviewIssues(bound,plan,'{}',
    check=>chapterConditionBridgeAnchorsVerified(check,plan,byId,'{}'),true).length).toBeGreaterThan(0);
  });
+});
+
+it('uses the same real acquisition-action contract in planning and every-chapter independent boundary audit',()=>{
+ const planning=chapterResponsibilityPlanningDirective(false);
+ expect(planning).toContain('prerequisites只登记进入条件及其已知来源');
+ expect(planning).toContain('本章responsibility中明确安排');
+ expect(CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE.chapterResponsibilities[0].responsibility).toContain('实际取得动作');
+ const chapters=[1,2,3].map(chapter=>({
+  chapter,title:'章'+chapter,function:'conflict',
+  responsibility:'本章人物通过既定行动获取已授权的证据并推动新局面'+chapter,
+  prerequisites:[],timeline:'接续上一章的相对时间',exitState:'本章已完成新局面'+chapter,
+ }));
+ const prompt=buildChapterResponsibilityAuditPrompt({
+  executionStandard:'既有规则',creativeBrief:'已确认故事',shortStoryCard:{},worldContinuityDirective:'已确认世界机制',
+  plan:chapters,includeSharedPolicies:false,entryExitContract:true,evidenceMode:'quotes',
+ });
+ expect(prompt).toContain('【本次逐章审核身份目录】');
+ const indexes=JSON.parse(prompt.split('【本次逐章审核身份目录】')[1].split('。conditionChecks必须')[0]);
+ expect(indexes.map((row:any)=>row.chapter)).toEqual([1,2,3]);
+ expect(indexes.map((row:any)=>row.taskAnchorId)).toEqual(['chapter:c1:task','chapter:c2:task','chapter:c3:task']);
+ expect(prompt).toContain('普通自主行动按not_required解释');
 });
