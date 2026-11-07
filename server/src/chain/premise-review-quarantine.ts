@@ -11,7 +11,7 @@ const reason = PREMISE_REVIEW_PROTOCOL_REASON + '，不能确认通过，已隔�
  * is a failed Gate, never a fabricated pass. Unattributable rows still fail the
  * whole batch because their owner cannot be established safely. */
 export function quarantineIncompletePremiseReviews(value: any, selection: PremiseSelectionResult,
-  requiredGenres: readonly string[]): any {
+  requiredGenres: readonly string[], requireUnmappedCoverage=false): any {
   if (!value || typeof value !== 'object' || !Array.isArray(value.sourceChecks)
     || !Array.isArray(value.payoffChecks)
     || (premiseGenreFitCatalog(selection,requiredGenres).length > 0 && !Array.isArray(value.genreChecks))
@@ -46,6 +46,8 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
       ...(row.conditionEvidenceRef ? { conditionEvidenceRef: rebind(row.conditionEvidenceRef) } : {}),
       ...(row.reversalCheck ? { reversalCheck: { ...row.reversalCheck,
         ...(row.reversalCheck.actionEvidenceRef ? { actionEvidenceRef: rebind(row.reversalCheck.actionEvidenceRef) } : {}) } } : {}),
+      ...(Array.isArray(row.unmappedChecks) ? { unmappedChecks: row.unmappedChecks.map((check: any) => ({ ...check,
+        ...(check?.actionEvidenceRef ? { actionEvidenceRef: rebind(check.actionEvidenceRef) } : {}) })) } : {}),
       ...(Array.isArray(row.links) ? { links: row.links.map((link: any) => ({ ...link,
         ref: typeof link?.ref === 'string' ? rebind(link.ref) : link?.ref })) } : {}),
     }));
@@ -55,7 +57,7 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
     }, scoped);
     const checks: Record<Family,string[]> = {
       sourceChecks: premiseSourceReviewIssues(local,scoped),
-      payoffChecks: premisePayoffReviewIssues(local,scoped),
+      payoffChecks: premisePayoffReviewIssues(local,scoped,requireUnmappedCoverage),
       genreChecks: premiseGenreFitIssues(local,scoped,requiredGenres),
       categoryChecks: premiseCategoryFitIssues(local,scoped),
     };
@@ -67,6 +69,7 @@ export function quarantineIncompletePremiseReviews(value: any, selection: Premis
       const foreign = originalRows[family].filter(row => row.ref.startsWith(prefix))
         .some((row: any) => [row.evidenceRef,row.actionEvidenceRef,row.conditionEvidenceRef,
           row.reversalCheck?.actionEvidenceRef,
+          ...(Array.isArray(row.unmappedChecks) ? row.unmappedChecks.map((check:any)=>check?.actionEvidenceRef) : []),
           ...(Array.isArray(row.links) ? row.links.map((link: any) => link?.ref) : [])]
           .some(ref => typeof ref === 'string' && /^S\d+\./.test(ref) && !ref.startsWith(prefix)));
       if (foreign) checks[family].push('审核证据跨题材引用，不能证明本卡独立结论');
