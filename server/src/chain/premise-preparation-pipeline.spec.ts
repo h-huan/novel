@@ -4,8 +4,9 @@ import {SELECTED_PREMISE_FIELDS,normalizePremiseSelectionPayload} from './idea-d
 import {premiseSourceComparisonCatalog} from './premise-selection-review';
 import * as budgets from '../config/generation-budgets';
 import * as concurrency from './discovery-concurrency';
+import { independentOutcomeStubReceipts } from './premise-payoff-review.fixture';
 const fixture=()=>normalizePremiseSelectionPayload({pool:['A','B','C','D','E','F'].map(premiseId=>({premiseId,workingTitle:'题材'+premiseId,storyCore:'我打开堵住库房的旧木箱，保留已确认的真实行动与结果。'+premiseId})),selectedPremises:['A','B','C','D','E','F'].map(premiseId=>({premiseId,...Object.fromEntries(SELECTED_PREMISE_FIELDS.filter(f=>f!=='differentiation').map(f=>[f,'原题材的真实行动和结果边界'+f+premiseId])),activeChoice:'我打开堵住库房的旧木箱并将其推到门外。'+premiseId,reversalEffect:'库房入口已经腾空，可以进入取出工具。'+premiseId,payoff:'我拿到了库房工具，完成自己的修理。'+premiseId}))},6,6);
-const report=(batch:any)=>({sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前原文保持原池确认行动及结果的范围'})),payoffChecks:batch.selected.map((_:any,i:number)=>({ref:'S'+(i+1)+'.payoff',status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'实际清空入口的动作支持当前直接结果'},reason:'逐项核对同一行动实际造成的日常直接结果'}))});
+const report=(batch:any)=>({sourceChecks:premiseSourceComparisonCatalog(batch).map(row=>({ref:row.ref,status:'preserved',reason:'当前原文保持原池确认行动及结果的范围'})),payoffChecks:batch.selected.map((_:any,i:number)=>({ref:'S'+(i+1)+'.payoff',status:'supported',unmappedChecks:independentOutcomeStubReceipts(batch,i),actionEvidenceRef:'S'+(i+1)+'.activeChoice',reversalCheck:{status:'supported',actionEvidenceRef:'S'+(i+1)+'.activeChoice',reason:'实际清空入口的动作支持当前直接结果'},reason:'逐项核对同一行动实际造成的日常直接结果'}))});
 const tick=async()=>{for(let i=0;i<25;i++)await Promise.resolve();};
 afterEach(()=>vi.restoreAllMocks());
 describe('premise citation preparation pipeline',()=>{
