@@ -124,7 +124,8 @@ export function materializePremiseSourceReview(value: unknown, selection: Premis
 
 /** Only the original pool may be used before lock; unaffected choices stay server-owned. */
 export function normalizePremiseReselection(value: unknown, original: PremiseSelectionResult,
-  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount): PremiseSelectionResult {
+  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount,
+  previouslyVettedCategories: readonly string[] = []): PremiseSelectionResult {
   const rows = (value as any)?.selectedPremises;
   if (!Array.isArray(rows)) throw new Error('原池重选须提供selectedPremises');
   const affected = new Set(review.issues.map(issue => issue.premiseId));
@@ -139,7 +140,7 @@ export function normalizePremiseReselection(value: unknown, original: PremiseSel
       storyCore: seed.storyCore, ...(seed.storyCategory ? { storyCategory: seed.storyCategory } : {}),
       ...(seed.storyCategoryId ? { storyCategoryId: seed.storyCategoryId } : {}) };
   });
-  const normalized = normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories, minimumSelectedCount);
+  const normalized = normalizePremiseSelectionPayload({ pool: original.pool, selectedPremises }, requestedCount, poolTarget, categories, minimumSelectedCount, previouslyVettedCategories);
   if (original.selected.some(item => item.causalPlan !== undefined)) assertPremiseCausalPlans(normalized);
   return normalized;
 }
@@ -240,7 +241,8 @@ export function premiseReselectionPlan(original: PremiseSelectionResult, review:
 
 /** Targeted protocol: repair only named slots, merge in original order, then run all existing gates. */
 export function normalizeTargetedPremiseReselection(value: unknown, original: PremiseSelectionResult,
-  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount): PremiseSelectionResult {
+  review: PremiseSelectionReview, requestedCount: number, poolTarget: number, categories?: readonly string[], minimumSelectedCount = requestedCount,
+  previouslyVettedCategories: readonly string[] = []): PremiseSelectionResult {
   const plan = premiseReselectionPlan(original, review);
   const replacements = (value as any)?.replacements;
   if (!Array.isArray(replacements) || replacements.length !== plan.repairSlots.length) throw new Error('定向重选必须逐项覆盖所有问题位置，只返回replacements，不返回整批题材');
@@ -268,7 +270,7 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
     bySlot.set(slotId, row);
   }
   const selectedPremises = original.selected.map(item => bySlot.get(String(item.premiseId)) || item);
-  return normalizePremiseReselection({selectedPremises}, original, review, requestedCount, poolTarget, categories, minimumSelectedCount);
+  return normalizePremiseReselection({selectedPremises}, original, review, requestedCount, poolTarget, categories, minimumSelectedCount, previouslyVettedCategories);
 }
 
 /** Isolate evidenced failures after completed reviews, without rewriting retained premises.
