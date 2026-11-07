@@ -414,7 +414,7 @@ describe('premise selection before identity lock', () => {
  const review:PremiseSelectionReview={passed:false,issues:[{kind:'source_drift',premiseId:'B',referencePremiseId:'B',
    quote:premise('B').activeChoice,referenceQuote:premise('B').storyCore,reason:'决定性物证缺少实际取得和交付条件'}],
    sourceChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.activeChoice',status:id==='B'?'drift':'preserved',reason:'对照原池事实与展开内容，核对当前行动是否保留'})),
-   payoffChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.payoff',status:id==='B'?'gap':'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',conditionEvidenceRef:'S'+(index+1)+'.escalation',links:[{ref:'S'+(index+1)+'.causalPlan.1',status:id==='B'?'gap':'supported',reason:'逐环核对本题材的实际必要条件是否成立'}],reason:'核对决定性结果的必要行动与条件是否实际成立'})),
+   payoffChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.payoff',status:id==='B'?'gap':'supported',actionEvidenceRef:'S'+(index+1)+'.activeChoice',conditionEvidenceRef:'S'+(index+1)+'.escalation',unmappedChecks:[{ordinal:1,status:'context_only' as const,actionEvidenceRef:'S'+(index+1)+'.activeChoice',reason:'此处验证审核记录重映射，不额外推断语义'}],links:[{ref:'S'+(index+1)+'.causalPlan.1',status:id==='B'?'gap':'supported',reason:'逐环核对本题材的实际必要条件是否成立'}],reason:'核对决定性结果的必要行动与条件是否实际成立'})),
    categoryChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.category',status:'fulfilled',evidenceRef:'S'+(index+1)+'.activeChoice',reason:'当前主线选择落实对应分类机制'})),
    genreChecks:['A','B','C'].map((id,index)=>({ref:'S'+(index+1)+'.genre',status:'fulfilled',evidenceRef:'S'+(index+1)+'.activeChoice',reason:'当前人物行动落实本卡已选流派机制'}))};
  const retained=retainReviewedPremises(original,review);
@@ -426,6 +426,7 @@ describe('premise selection before identity lock', () => {
  expect(finalReview.payoffChecks?.map(row=>row.ref)).toEqual(['S1.payoff','S2.payoff']);
  expect(finalReview.payoffChecks?.map(row=>row.actionEvidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
  expect(finalReview.payoffChecks?.map(row=>row.conditionEvidenceRef)).toEqual(['S1.escalation','S2.escalation']);
+ expect(finalReview.payoffChecks?.map(row=>row.unmappedChecks?.[0]?.actionEvidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
  expect(finalReview.payoffChecks?.map(row=>row.links?.[0].ref)).toEqual(['S1.causalPlan.1','S2.causalPlan.1']);
  expect(finalReview.categoryChecks?.map(row=>row.ref)).toEqual(['S1.category','S2.category']);
  expect(finalReview.categoryChecks?.map(row=>row.evidenceRef)).toEqual(['S1.activeChoice','S2.activeChoice']);
