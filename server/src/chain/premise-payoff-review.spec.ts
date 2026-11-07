@@ -147,6 +147,8 @@ it('permits restoring an omitted condition only with real same-ID original-pool 
  }
  expect(premisePayoffReviewIssues({payoffChecks:[{...raw,status:'supported'}]},selection).length).toBeGreaterThan(0);
  expect(premisePayoffReviewDirective(selection)).toContain('sourceConditionQuote');
+ expect(premisePayoffReviewDirective(selection)).toContain('该具体让步究竟怎样缓解对方遭受的阻碍');
+ expect(premisePayoffReviewDirective(selection)).toContain('整体payoffChecks应判gap');
 });
 it('allows an actual independent condition in payoff outside the generator index, but does not prove story semantics',()=>{
  const p={...selection.selected[0],payoff:'她把录音交给值班人员，值班人员核验来访登记后通知警员到场。警方暂停处理。',
