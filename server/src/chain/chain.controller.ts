@@ -7304,60 +7304,19 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       partialSelection = retained.selection;
       partialReview = retainPremiseReviewEvidence(previouslyReviewedSelection, partialReview, partialSelection);
       if (partialReview.passed) {
-        const missingSlots = Math.max(0, deliveryCount - partialSelection.selected.length);
-        // This is only the PRESELECTION Gate, never a claim that five final
-        // cards have passed. Once its mandatory delivery floor is covered,
-        // do not pay a second selection/source audit merely to reach an
-        // OPTIONAL screening hedge. The existing full-card Gate is next; its
-        // proven deficit alone may activate the already-authorized original
-        // pool refill. The unused original pool stays available for that case.
-        if (missingSlots === 0) {
-          this.logger?.log('固定原池来源/因果前审已保留 '+partialSelection.selected.length
-            +'/'+deliveryCount+' 个交付候选（未通过完整卡终审）；不为可选预选冗余再次选优或重复审核，'
-            +'直接进入现有完整卡终审；真实缺卡才从未使用原池一次补位。');
-          return {...partialSelection,selectionAudit:{
-            initialReview,reselectionAttempted:false,finalReview:partialReview,
-            partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length),
-            deliveryShortfall:0,selectionStopReason:'delivery_capacity_met',
-            excludedPremiseIds:[...partialExcludedIds],reasons:[...initialReview.issues],
-            completeCardGatePending:true,
-          }};
-        }
-        // A surviving 5/5 preselection is NOT five approved final cards. If
-        // this very review proved that other preselected premises are bad,
-        // use the existing fixed-pool correction slots for a small vetted
-        // hedge while the first approved cards can already be structured.
-        // Do not add provider credits, invent extra slots, or demand eight
-        // final deliveries from a five-card author request.
-        const enoughOriginalCandidates = repairPlan.availableCandidates.length >= recoverySlots.length;
-        const group=readGenerationBudgets();
-        const requiredRecoveryReviewCalls=recoverySlots.length
-          ?minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
-            group.sourceBatchSize,group.reviewGroupingMode):0;
-        const enoughSharedBudget = !shared || (shared.reselection.remaining > 0
-          && shared.reviews.remaining >= requiredRecoveryReviewCalls);
-        const affordablePreselectionHedge = recoverySlots.length > 0
-          && partialSelection.selected.length < requestedCount
-          && enoughOriginalCandidates && enoughSharedBudget;
-        // Stop ONLY if the original, unchanged call allowance cannot fund
-        // the optional hedge. Final quality acceptance remains independent.
-        if (!affordablePreselectionHedge) {
-          const capacityMet=missingSlots===0;
-          const capacityMessage='锁定前筛选保留 '+partialSelection.selected.length+' 个独立复核合格候选；目标交付 '+deliveryCount
-            +(capacityMet?' 张，当前候选容量已达到最低交付目标，完整卡终审仍待执行；不为可选冗余继续换选。':' 张，原池候选或共享预算不足，仍有实际缺额。');
-          if(capacityMet)this.logger?.log(capacityMessage);
-          else this.logger?.warn(capacityMessage);
-          return { ...partialSelection, selectionAudit: {
-            initialReview, reselectionAttempted: false, finalReview: partialReview,
-            partial:missingSlots>0, screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length),
-            minimumSelectableCount, deliveryShortfall:missingSlots, selectionStopReason:capacityMet?'delivery_capacity_met':'original_pool_or_budget_shortfall',
-            excludedPremiseIds: [...partialExcludedIds], reasons: [...initialReview.issues],
-            completeCardGatePending: true,
-          } };
-        }
-        this.logger?.log('固定原池首次前审保留 '+partialSelection.selected.length+' 个来源/因果/分类合格胚子，目标是最终交付 '+deliveryCount
-          +' 张完整题材卡；这些胚子尚未通过完整卡终审。仅在本次原池已授权的一次换选中增加已付款审核的备用胚子，不另起循环或补造题材。');
-        break;
+        // The loop's admission guard above guarantees at least the actual
+        // delivery floor, so no further preselection is authorized solely
+        // to meet the larger optional screening capacity. The original pool
+        // remains available to the existing ONE final-card deficit refill.
+        this.logger?.log('固定原池前审保留 '+partialSelection.selected.length
+          +'/'+deliveryCount+' 个真实合格预选（尚非完整卡）；停止可选冗余换选，直接成卡及独立终审。');
+        return {...partialSelection,selectionAudit:{
+          initialReview,reselectionAttempted:false,finalReview:partialReview,
+          partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length),
+          deliveryShortfall:0,selectionStopReason:'delivery_capacity_met',
+          excludedPremiseIds:[...partialExcludedIds],reasons:[...initialReview.issues],
+          completeCardGatePending:true,
+        }};
       }
     }
     // Selecting fresh identities is pointless when the SAME source/overlap
