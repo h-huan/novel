@@ -8752,6 +8752,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       let outlineWriteCount = 0;
       let volumeWriteCount = 1;
       let outlineEnvironmentContext = '';
+      let savedWorldForOutline: Record<string, any> | null = null;
       let volId = '';
       let chapterTitles: any[] = [];
 
@@ -8946,11 +8947,12 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
         }
         // 无论新建还是已存在，都把已保存世界观回读为大纲上下文（世界严格先于大纲；重跑时若已有世界观，大纲也必须有世界观上下文，不得为空）
         activeFailureOrigin = 'persistence_readback';
-        const savedWorld = db.prepare(`SELECT id, era, geography, factions, rules, atmosphere, constraints, story_premise, locations, social_rules, special_settings, setting_type FROM world_settings WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`).get(projectId) as any;
+        const savedWorld = db.prepare(`SELECT * FROM world_settings WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`).get(projectId) as Record<string,any>|undefined;
         if (!savedWorld) {
           throw new Error('世界观生成步骤结束但主记录未保存，停止生成大纲；请检查世界观审查与写入日志。');
         }
         assertWorldProfileAvailable(db, projectId, String(savedWorld.id));
+        savedWorldForOutline=savedWorld;
         // Execute the original world-rule completeness Gate here, before paying
         // for the story card and per-chapter outlines. Do not repeat it late.
         this.assertProjectSourceCompleteness(projectId);
@@ -8973,7 +8975,7 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
       emit('world', 25, '世界观已完成，先生成角色再规划章纲', 'done');
       emit('characters',26,'依据确认题材与已保存世界观生成角色...');
       warnings.push(...(await this.prepareCreationCharacters({projectId,dto,constitution,styleInstruction,isShort,canonicalCreativeBrief,
-        world:db.prepare('SELECT * FROM world_settings WHERE project_id=? ORDER BY created_at ASC LIMIT 1').get(projectId),emit})).warnings);
+        world:savedWorldForOutline,emit})).warnings);
       const outlineCharacterSources=db.prepare('SELECT name,identity,background,personality,abilities,relationships,arc,profile_json FROM characters WHERE project_id=? ORDER BY name,id').all(projectId) as any[];
       if(!outlineCharacterSources.length)throw Error('章纲前角色资料未保存，未开始章纲生成');
       emit('outline', 30, '按已保存世界与人物资料生成大纲...');
@@ -8981,8 +8983,9 @@ JSON格式:{"era":"...","storyPremise":"${protagonistName ? `必须包含已确�
       {
         let chapterCount = 0;
         let shortStoryCard: Record<string, any> | null = null;
-        const worldRowForOutline = db.prepare(`SELECT atmosphere, story_premise, rules, special_settings, social_rules, constraints
-          FROM world_settings WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`).get(projectId) as any;
+        // Same persisted world snapshot is consumed by characters, chapter planning,
+        // fact/action review and the eventual repair. Never select a second row.
+        const worldRowForOutline=savedWorldForOutline;
         // Saved world fields may be JSON-encoded arrays/objects in SQLite.
         // Decode the prompt VIEW only, never mutate the canonical saved world
         // or the independent review input. Otherwise `rules` is double-escaped
@@ -9242,8 +9245,7 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         volId = uuid();
         const acceptedOutlineSources: Record<string, unknown>[] = [];
         let priorOutlineFactLedger: OutlineFactLedgerEntry[] = [];
-        const currentWorldForOutlineReview = db.prepare(`SELECT * FROM world_settings
-          WHERE project_id=? ORDER BY created_at ASC LIMIT 1`).get(projectId);
+        const currentWorldForOutlineReview=savedWorldForOutline;
         let plannedChapterWords = 0;
         const shortOutlineSourceRunIds = new Set<string>();
         const preparedChapters: Array<{
