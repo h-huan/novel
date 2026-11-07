@@ -1,4 +1,4 @@
-import {STORY_PREREQUISITE_POLICY} from '../../shared/src/执行标准';
+import {STORY_PREREQUISITE_POLICY,OUTLINE_PROJECTION_POLICY} from '../../shared/src/执行标准';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
@@ -156,13 +156,13 @@ describe('creation consistency architecture invariants', () => {
     expect(selectionDirectiveSource).toContain('每项兑现都必须有对应前置行动');
     expect(controllerSource).not.toContain('【选优终检：不得留给后续长时复审才发现】');
     expect(controllerSource).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
-    expect(controllerSource).toContain('先发生的话不能改称见证后来证据的反应');
-    expect(controllerSource).toContain('沉默、询问或下一章计划升级为已执行结果');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('人物的实际知情必须由当时可见、可听或实际收到的消息来源支撑');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能在辅助字段虚构交付、完成或授权');
     expect(controllerSource).toContain('chapterDetailJsonExample(allowedMin, allowedMax, isFinalChapter, expectedChapter.title)');
     expect(chapterDetailSource).toContain('characterStates:[]');
     expect(controllerSource).not.toContain('"stateAfter":"本章后状态"');
-    expect(controllerSource).toContain('【本章事件与状态唯一来源】');
-    expect(controllerSource).toContain('同一时点不得同时在两个人手中或两个地点');
+    expect(controllerSource).not.toContain('【本章事件与状态唯一来源】');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('物件、凭证转交要有真正交接者、接收者与时点');
   });
 
   it('prevents cross-channel message contradictions and protects explicit action evidence during outline repair', () => {
@@ -296,7 +296,7 @@ describe('creation consistency architecture invariants', () => {
   });
 
   it('moves the same world completeness Gate before costly short outline generation without duplicating it', () => {
-    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT id, era, geography');
+    const shortWorldReadback = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT * FROM world_settings');
     const earlyGate = controllerSource.indexOf('this.assertProjectSourceCompleteness(projectId);', shortWorldReadback);
     const firstStoryCard = controllerSource.indexOf('const canonicalCardFromIdea', shortWorldReadback);
     const chapterPrompt = controllerSource.indexOf('const chapterPrompt =', shortWorldReadback);
@@ -311,7 +311,7 @@ describe('creation consistency architecture invariants', () => {
 
   it('has one creation-world authority and no legacy post-outline world regeneration', () => {
     const shortWorld = indexOrFail(controllerSource, 'const worldResult = await this.llmCallWithRetry<any>(\'世界观生成\', worldPrompt, {');
-    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT id, era, geography');
+    const savedWorld = indexOrFail(controllerSource, 'const savedWorld = db.prepare(`SELECT * FROM world_settings');
     const chapterOutlines = indexOrFail(controllerSource, 'const chapterPrompt =');
     const guard = indexOrFail(controllerSource, '创建期世界观主记录缺失或无效：前序世界观必须先通过审核并落库');
     const enrichment = indexOrFail(controllerSource, '// 任务C：组织/地点生成');
@@ -367,9 +367,10 @@ describe('creation consistency architecture invariants', () => {
     const outlinePrompt=indexOrFail(controllerSource,'const chapterPrompt =');
     const worldDone=indexOrFail(controllerSource,'世界观已完成，先生成角色再规划章纲');
     expect(roleCall).toBeGreaterThan(worldDone);expect(roleCall).toBeLessThan(outlinePrompt);
-    expect(controllerSource).toContain('const ideaNames = outlineCharacterSources.map');
+    expect(controllerSource).toContain('【已生成并保存的人物资料；不能覆盖已确认题材或世界规则】');
+    expect(controllerSource).toContain('JSON.stringify(outlineCharacterSources)');
     expect(controllerSource).toContain('const ideaSpan = `'+String.fromCharCode(36)+'{worldContinuityDirective}');
-    expect(controllerSource).toContain('不代表全书封闭名单');
+    expect(controllerSource).toContain('未定字段不得当作新权限或事实');
     expect(controllerSource).not.toContain('禁止新增任何不在列的人物或神秘角色');
     expect(controllerSource).not.toContain('任务A：角色生成（仅当 DB 中无角色时执行）');
     expect(controllerSource).not.toContain('confirmedStoryEvidence: Object.fromEntries');
