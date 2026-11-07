@@ -1,4 +1,4 @@
-import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,quarantineUnprovedCausalBridges,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions} from './causal-review';
+import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions} from './causal-review';
 import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
@@ -448,29 +448,20 @@ it('retains independently reviewed identical outcome aliases instead of aborting
   .toThrow('同一结果地址存在多条互斥审查');
 });
 
-it('does not reclassify missing supported bridge as a pass; it becomes a documented blocking causal gap after correction',()=>{
+it('keeps missing reviewer bridge citations as incomplete protocol, never manufactures a story gap',()=>{
  const body='申请已经提交。部门随后决定批准。';
- const evidence={actionEvidence:'申请已经提交。',resultEvidence:'部门随后决定批准。',
-  bridgeEvidence:'',basisSource:'body',status:'supported',
-  reason:'审查员声称申请已得到有权部门批准，但没有提供成立条件'};
- const audit={status:'evaluated',reason:'逐项审查行动与实际决定的条件',transitions:[evidence]};
- const errors=['第33项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）'];
- // The real 33rd slot is also mapped without changing any unrelated entries.
- const thirtyThree={...audit,transitions:Array.from({length:32},()=>({
-  ...evidence,status:'gap',reason:'原申请没有证明有权部门已经核准这一决定',
- })).concat(evidence)};
- const downgraded=quarantineUnprovedCausalBridges(thirtyThree,errors,body,{});
- expect(downgraded).not.toBe(thirtyThree);
- expect(downgraded.transitions.slice(0,32)).toEqual(thirtyThree.transitions.slice(0,32));
- expect(downgraded.transitions[32]).toMatchObject({status:'gap',bridgeEvidence:''});
- const validated=validateCausalAudit(downgraded,body,{});
- expect(validated.verified).toBe(true);
- expect(validated.issues).toHaveLength(33);
- expect(validated.issues[32].issueType).toBe('causality_gap');
- expect(quarantineUnprovedCausalBridges(thirtyThree,
-  [...errors,'结构化结果逐项核对未完整覆盖：body:v9'],body,{})).toBe(thirtyThree);
- expect(quarantineUnprovedCausalBridges({...audit,transitions:[{...evidence,actionEvidence:'不存在的申请。'}]},
-  ['第1项因果审查缺少可验证行动、结果或成立条件（supported缺少有效成立条件原文）'],body,{})).toEqual({...audit,transitions:[{...evidence,actionEvidence:'不存在的申请。'}]});
+ const audit={status:'evaluated',reason:'逐项审核真实因果执行状态',transitions:[{
+   actionEvidence:'申请已经提交。',resultEvidence:'部门随后决定批准。',
+   bridgeEvidence:'',basisSource:'body',status:'supported',
+   reason:'审核声称有权部门确实作出决定但未提供单独的依据',
+ }]};
+ const check=validateCausalAudit(audit,body,{});
+ expect(check.verified).toBe(false);
+ expect(check.issues).toEqual([]);
+ expect(check.errors.join('；')).toContain('supported缺少有效成立条件原文');
+ const repair=causalAuditRepairPrompt(audit,check.errors,body,{});
+ expect(repair.systemPrompt).toContain('supported必须填写有效的bridgeAnchorId');
+ expect(repair.prompt).toContain('本次仅纠正编号[0]');
 });
 
 it('recovers only a unique literal condition address without changing the independent supported verdict',()=>{
