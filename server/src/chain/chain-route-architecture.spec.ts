@@ -169,6 +169,10 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
     expect(OUTLINE_PROJECTION_POLICY).toContain('详细章纲先形成content的事件、人物、时间与结果');
     expect(OUTLINE_PROJECTION_POLICY).toContain('不能在辅助字段虚构交付、完成或授权');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('实际发令者、执行者、接收者、对象与当前完成状态');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('同一机构或组织的不同成员不得交换动作归属');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能把尚未完成的交付、核验或后续安排写成既成事实');
+    expect(source).not.toContain('【本章事件与状态唯一来源】');
     expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
     expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
   });
