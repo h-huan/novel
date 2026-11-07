@@ -1,6 +1,6 @@
 import { buildChapterResponsibilityAuditPrompt, chapterResponsibilityPlanningDirective, CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE } from '../../shared/src/chapter-responsibility-review';
 import {describe,expect,it} from 'vitest';
-import {chapterConditionReviewIssues,materializeChapterConditionSources,chapterConditionTaskAnchors,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
+import {chapterConditionReviewIssues,chapterConditionPlanningGapIssues,materializeChapterConditionSources,chapterConditionTaskAnchors,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 const plan=[{chapter:1,responsibility:'住户取出钥匙打开门',prerequisites:['住户持有旧钥匙'],timeline:'当夜',exitState:'主角已进入屋内'},{chapter:2,responsibility:'主角翻开抽屉取得文件',prerequisites:['主角已进入屋内'],timeline:'进入后',exitState:'主角持有文件'}];
 const audit=()=>({consistent:true,contradictions:[],conditionChecks:plan.map(row=>({chapter:row.chapter,taskEvidence:row.responsibility,status:'supported',bridgeSource:'body',bridgeEvidence:row.responsibility,reason:'本章写出实际取得条件和执行动作'}))});
 describe('source contract regression',()=>{
@@ -16,7 +16,23 @@ it('does not treat a requested prerequisite or timeline as proof that it was obt
 });
 it('rejects result self-proof, future action and world permission alone',()=>{for(const evidence of ['主角已进入屋内','主角翻开抽屉取得文件']){const value=audit();value.conditionChecks[0].bridgeEvidence=evidence;expect(chapterConditionReviewIssues(value,plan,'{}').length).toBeGreaterThan(0);}const value=audit();value.conditionChecks[0].bridgeSource='project_context';expect(chapterConditionReviewIssues(value,plan,JSON.stringify(plan)).length).toBeGreaterThan(0);});
 it('does not trust a model supplied server verification flag or an unknown verdict',()=>{const value=audit();Object.assign(value.conditionChecks[0],{bridgeAnchorIds:[],anchoredBridgeVerified:true});expect(chapterConditionReviewIssues(value,plan,'{}').length).toBeGreaterThan(0);value.conditionChecks[0].status='unknown';expect(chapterConditionReviewIssues(value,plan,'{}').length).toBeGreaterThan(0);});
-it('retains gaps and permits ordinary autonomous actions without inventing prerequisites',()=>{const value=audit();value.conditionChecks[0].status='gap';expect(chapterConditionReviewIssues(value,plan,'{}').length).toBeGreaterThan(0);(value.contradictions as any[]).push({chapter:1});expect(chapterConditionReviewIssues(value,plan,'{}')).toEqual([]);value.conditionChecks[0].status='not_required';expect(chapterConditionReviewIssues(value,plan,'{}')).toEqual([]);});
+it('keeps pure planning gaps blocking without manufacturing a CR violation',()=>{
+ const value=audit() as any;
+ value.consistent=false;
+ value.conditionChecks[0].status='gap';
+ value.conditionChecks[0].bridgeEvidence='';
+ value.conditionChecks[0].reason='未安排住户实际交出钥匙或在现场开门的动作';
+ const bound=materializeChapterConditionSources(value,plan);
+ expect(bound.contradictions).toEqual([]);
+ // A well-formed negative verdict is permitted, but is NOT project approval.
+ expect(chapterConditionReviewIssues(bound,plan,'{}',false,true)).toEqual([]);
+ expect(chapterConditionPlanningGapIssues(bound,plan)).toHaveLength(1);
+ expect(chapterConditionPlanningGapIssues(bound,plan)[0]).toContain('第1章条件取得缺口');
+ expect(chapterConditionPlanningGapIssues(bound,plan)[0]).toContain('预定出口');
+ value.conditionChecks[0].status='not_required';
+ expect(chapterConditionPlanningGapIssues(value,plan)).toEqual([]);
+ expect(chapterConditionReviewIssues(materializeChapterConditionSources(value,plan),plan,'{}',false,true)).toEqual([]);
+});
 
 });
 
@@ -103,6 +119,8 @@ it('uses the same real acquisition-action contract in planning and every-chapter
  const indexes=JSON.parse(prompt.split('【本次逐章审核身份目录】')[1].split('。conditionChecks必须')[0]);
  expect(indexes).toEqual([{chapter:1},{chapter:2},{chapter:3}]);
  expect(prompt).toContain('conditionChecks只返回chapter、status、bridgeEvidence、reason');
+ expect(prompt).toContain('仅有实际条件取得缺口、但无被违反的CR规则时返回');
+ expect(prompt).toContain('缺少则报告gap；仅当另有冻结来源证据证明违反CR规则时才报告contradictions');
  const anchorPrompt=buildChapterResponsibilityAuditPrompt({
   executionStandard:'既有规则',creativeBrief:'已确认故事',shortStoryCard:{},worldContinuityDirective:'已确认世界机制',
   plan:chapters,includeSharedPolicies:false,entryExitContract:true,evidenceMode:'anchors',
