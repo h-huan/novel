@@ -223,6 +223,9 @@ export function premiseCausalCatalog(item: Record<string, unknown>, prefix: stri
  * the model must select actual addresses from the frozen numbered source pool. */
 export function premiseCausalReferenceExample(){
  const placeholder=()=>({sourceRef:'<从本题材真实原池编号表复制>'});
- return [{action:placeholder(),conditions:[placeholder()],result:placeholder()}];
+ // Match the canonical staged causal schema without constraining a real story to two links.
+ return premiseCausalPlanExample().map(link=>({
+  action:placeholder(),conditions:link.conditions.map(()=>placeholder()),result:placeholder(),
+ }));
 }
 export const PREMISE_SOURCE_REFERENCE_DIRECTIVE='本次原池每句由服务器附带完整定位标记[真实ID:分节号:分句号]；单句sourceRef可直接复制完整方括号标记或其中的地址；多句连续区间用同ID、同分节的实际起止句号，只保留一次ID和分节号。仅引用确实出现在下方当前原池目录中的编号，禁止照抄模板占位地址或假设存在某个句号。历史兼容格式中的双端点只在两个端点严格同ID、同分节且原池确有该连续区间时由同一解析器接受；这只是传输容错，不是鼓励模型另造写法，更不得跨分节。不要自行猜测身份、编号或字段。优先仅返回原文中实际行动、条件与结果的sourceRef地址，field由服务器按同一固定映射确定，不重复推测字段名。确需分句内更短原文以分离行动与结果时，允许沿原有{field,quote}逐字引用，不能同时填写sourceRef和quote；field仍须使用服务器分节到字段映射中的实际字段。编号及方括号只属传输定位，服务器从未加编号的原池逐字取回连续原文并验证同一身份、分节、范围与字段。范围不得跨分节，不能引用其它题材或把结果断言当作行动、条件；所有原因果质量判断仍独立执行。';
