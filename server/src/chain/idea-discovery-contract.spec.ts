@@ -1,5 +1,5 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
-import { premiseSeedFactIssues, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices } from './idea-discovery-contract';
+import { premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices } from './idea-discovery-contract';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -791,6 +791,43 @@ describe('confirmed story persistence boundary', () => {
     expect(result.confirmedStory).toEqual({ title: '自定义题材' });
     expect(result.ideaDiscoveryAudit).toBeNull();
   });
+});
+
+describe('shared original/refill pool factual deduplication',()=>{
+ const sections=(action:string,condition:string,payoff:string)=>
+  '【处境触发】小城同一市场发生争议，普通职员收到一份需要核对的旧材料。'
+  +'【主动选择】'+action
+  +'【必要条件】'+condition
+  +'【反转兑现】'+payoff
+  +'【分类流派机制】普通人必须凭可以核查的真实决定争取结果，承担自己的实际代价。';
+ it('does not discard distinct causal choices under identical headings and genre language',()=>{
+  const bridge=sections(
+   '配送员拒绝签下不实的材料收货单，主动请求工地监理重新核对进场批次。',
+   '监理接受签收资料核验委托，材料单据的日期与批次可以现场对照。',
+   '核验后监理签发暂停验收通知，承包方按合同重新提供材料。');
+  const clinic=sections(
+   '护理员向家属主动展示连续的用药交接记录，请求主治医生核查剂量。',
+   '诊疗记录和交班签名齐全，医生有权复核处方并签署调整建议。',
+   '医生复核后改变用药方案，护理员仍须接受此前交班疏漏的调查。');
+  expect(premiseSeedNearDuplicate(bridge,clinic)).toBe(false);
+ });
+ it('rejects renamed and lightly extended copies only when choice, bridge and payoff recur',()=>{
+  const original=sections(
+   '送货员拒绝签下不实的材料收货单，主动请求工地监理重新核对进场批次。',
+   '监理接受签收资料核验委托，材料单据的日期与批次可以现场对照。',
+   '核验后监理签发暂停验收通知，承包方按合同重新提供材料。');
+  const renamed=original.replace('送货员','司机').replace('小城','县城');
+  expect(premiseSeedNearDuplicate(original,original)).toBe(true);
+  expect(premiseSeedNearDuplicate(original,renamed)).toBe(true);
+  expect(premiseSeedNearDuplicate(original,'缺少五节的摘要')).toBe(false);
+ });
+ it('preserves alternatives with same action but different established conditions or consequences',()=>{
+  const action='店员拒绝收下没有签名的退货单，并要求负责人当面清点库存记录。';
+  const prerequisite='负责人已授权当班核对库存，原始进货单和领用明细均可交叉查验。';
+  const first=sections(action,prerequisite,'库存查明后店铺向顾客退还押金，但店员仍需承担临时停业的损失。');
+  const second=sections(action,'负责人没有授权清点仓库，店员只能公开递交核查申请等待独立审批。','审批未完成，退款仍处于待定状态，店员必须先保护原始证据避免销毁。');
+  expect(premiseSeedNearDuplicate(first,second)).toBe(false);
+ });
 });
 
 describe('candidate seed structural evidence prevents downstream rescue',()=>{

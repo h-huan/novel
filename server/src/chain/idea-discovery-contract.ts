@@ -152,6 +152,38 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
   return issues;
 }
 
+/** Initial and refill candidate pools share this bounded factual deduplication.
+ * A common five-section format, genre or setting alone is NOT the same
+ * causal story. Compare only the written action, established prerequisites and
+ * realized outcome; the later independent semantic overlap Gate stays intact.
+ * Incomplete source text never earns a deduplication judgment here. */
+export function premiseSeedNearDuplicate(left:unknown,right:unknown):boolean{
+ const decode=(value:unknown)=>{
+   try{return new Map(premiseSourceSections({storyCore:String(value??'')})
+     .map(section=>[section.name,section.text] as const));}
+   catch{return null;}
+ };
+ const first=decode(left),second=decode(right);
+ if(!first||!second)return false;
+ const grams=(value:string)=>{
+   const text=value.toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu,'');
+   const tokens=new Set<string>();
+   for(let i=0;i<text.length-1;i++)tokens.add(text.slice(i,i+2));
+   return tokens;
+ };
+ const overlap=(name:string)=>{
+   const a=grams(first.get(name)||''),b=grams(second.get(name)||'');
+   if(!a.size||!b.size)return 0;
+   let shared=0;for(const token of a)if(b.has(token))shared++;
+   return shared/Math.min(a.size,b.size);
+ };
+ const scores=['主动选择','必要条件','反转兑现'].map(overlap);
+ // All three causal transitions must be substantially shared. A shared
+ // opening, section label or genre cannot evict a different decisive path.
+ return scores.every(score=>score>=0.65)
+   &&scores.reduce((total,score)=>total+score,0)/scores.length>=0.76;
+}
+
 /** Only literal authored sections become one canonical storyCore. Missing,
  * conflicting or malformed sections are rejected by the same structural Gate.
  * The transient JSON envelope is never saved or used as parallel story facts. */

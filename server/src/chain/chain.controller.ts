@@ -200,7 +200,7 @@ import {
 } from './adaptive-narrative';
 import { assessSemanticRepairProgress, decideProgressiveRepair } from './adaptive-repair';
 import { semanticProgressAuditPrompt, validateSemanticProgressAudit } from './semantic-progress-audit';
-import { latestIdeaFailureReasons, premiseSeedFactIssues, screenPremisePoolBatch, decodePremisePoolTransport, claimLockedPremiseSlot, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, capRankedPremiseSelections, selectedPremiseEvidenceForIdeaCard, presentationLockedPremiseView } from './idea-discovery-contract';
+import { latestIdeaFailureReasons, premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, decodePremisePoolTransport, claimLockedPremiseSlot, packIdeaReviewStandards, confirmedIdeaStoryCard, separateIdeaDiscoveryAudit, retainValidAutomaticPlotTags, bindStructuredIdeaCardToPremise, ideaCardStructuringDirective, ideaHookRequirement, ideaPremiseSelectionDirective, normalizePremiseSelectionPayload, capRankedPremiseSelections, selectedPremiseEvidenceForIdeaCard, presentationLockedPremiseView } from './idea-discovery-contract';
 import { CHAPTER_PROSE_SCOPE_POLICY, IDEA_PREMISE_POOL_BASE_BATCHES, STORY_ENTITY_MODELING_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { materializeContinuityNewInformationEvidence, continuityCitationRepairPrompt, applyContinuityCitationRepairs, validateSourceQualityReview, invalidSourceQualityCitations, applySourceQualityCitationRepairs, continuityClaimReviewPrompt, continuityClaimCatalog, continuityAuditFromClaims } from '../modules/writing-quality/source-quality-review';
 import { remapBodySourceBoundaryTargets, bodySourceBoundaryCatalog, bodySourceBoundaryReviewPrompt, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview, remapOutlineSourceBoundaryTargets, needsSourceBoundaryReview, validateSourceBoundaryReview, outlineSourceBoundaryCatalog, outlineSourceBoundaryReviewPrompt, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog } from '../modules/writing-quality/source-quality-review';
@@ -5360,13 +5360,7 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
             // pool of renamed clones reached selection and paid for repeated
             // independent overlap review and reselection.
             const nearDuplicate = candidatePool.some(existing =>
-              ideaSemanticSimilarity(
-                // The exact title key is already checked below. Comparing
-                // generic provisional titles here incorrectly eliminates
-                // distinct causal paths ("候选题材1", "候选题材2", etc.).
-                { description: storyCore },
-                { description: String(existing.storyCore || '') },
-              ) >= 0.42);
+              premiseSeedNearDuplicate(storyCore,String(existing.storyCore || '')));
             if (seenTitles.has(titleKey) || seenCores.has(coreKey) || nearDuplicate) {
               stats.duplicateCount += 1;
               poolFilterTotals.duplicateCount += 1;
@@ -6482,8 +6476,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
                     ||prohibitedFictionNames({workingTitle:title,storyCore:core}).length
                     ||existingKeys.has(titleKey)||existingKeys.has(coreKey)
                     ||[...premiseDiscovery.pool,...unusedSeeds].some(previous=>
-                      ideaSemanticSimilarity({description:core},
-                        {description:String(previous.storyCore||'')})>=0.42))continue;
+                      premiseSeedNearDuplicate(core,String(previous.storyCore||''))))continue;
                   // The initial and supplemental pools must enforce the SAME
                   // category identity and semantic deduplication before paid
                   // selection. A malformed category must not consume a refill.
