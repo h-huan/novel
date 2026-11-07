@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
 
+/** Creation fact reviews use outlineFactFailureKind, not a prose-Gate
+ * marker. Only proven story conflicts invalidate previously vetted source
+ * work; unavailable/incomplete reviewer output remains fail-closed but can
+ * resume from the same accepted stages. */
+export function hasProvenOutlineCheckpointConflict(error: unknown, repairWasRequired = false): boolean {
+  if(repairWasRequired)return true;
+  return !!error && typeof error==='object'
+    && (error as { outlineFactFailureKind?:unknown }).outlineFactFailureKind==='fact_conflict';
+}
+
 interface CheckpointDb {
   exec(sql: string): unknown;
   prepare(sql: string): { get(...args: any[]): any; run(...args: any[]): any };
