@@ -10,7 +10,7 @@ import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremiseText} from './premise-source-bindings';
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
-import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
+import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, neededFreshPremiseSeeds, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,cacheVerifiedSourceReview,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -6405,9 +6405,12 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           fulfillmentStopReason='bounded_refill_unavailable';
           if(desiredSupplement>=missingAfterFirstGate
             &&reselectionCompletionBudget.remaining>=1){
-            // Add fresh seed identities only if the already-paid original pool
-            // cannot provide the desired gap plus a small dynamic hedge.
-            const seedDeficit=Math.max(0,desiredSupplement-unusedSeeds.length);
+            // The original pool is first choice. A surplus hedge is NOT a
+            // shortage: do not generate new candidates while unused originals
+            // can cover the actual mandatory shortfall. Every selected original
+            // still undergoes the unchanged independent source/causal/appeal Gates.
+            const seedDeficit=neededFreshPremiseSeeds(
+              missingAfterFirstGate,unusedSeeds.length,desiredSupplement);
             if(seedDeficit>0 && reselectionCompletionBudget.remaining>=2){
               const batchCount=Math.min(IDEA_PREMISE_POOL_BASE_BATCHES,seedDeficit,
                 reselectionCompletionBudget.remaining-1);

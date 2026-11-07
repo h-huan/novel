@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {IDEA_DISCOVERY_MAX_WALL_MS} from '../../shared/src/执行标准';
-import {provenFullCardDeficit,missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle} from './discovery-fulfillment';
+import {provenFullCardDeficit,missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle,neededFreshPremiseSeeds} from './discovery-fulfillment';
 
 it('only proves an early full-card shortfall from settled, not pending, cards',()=>{
  expect(provenFullCardDeficit(5,6,1,4)).toBe(2);
@@ -203,4 +203,19 @@ it('does not turn spare review credits into repeated source partitions when the 
  }
  expect(fundedSourceReviewGroups(6,3,1,6,0)).toBe(0);
  expect(fundedSourceReviewGroups(5,2,9,2,0)).toBe(fundedSourceReviewGroups(5,2,9,8,0));
+});
+
+it('reuses scored unused original premises before generating any new seed merely to satisfy a hedge',()=>{
+ expect(neededFreshPremiseSeeds(0,0,3)).toBe(0);
+ expect(neededFreshPremiseSeeds(2,2,5)).toBe(0); // old code bought three fresh hedges
+ expect(neededFreshPremiseSeeds(2,4,5)).toBe(0);
+ expect(neededFreshPremiseSeeds(2,1,4)).toBe(3); // true delivery shortage permits bounded top-up
+ expect(neededFreshPremiseSeeds(5,0,7)).toBe(7);
+ for(const requested of [1,2,3,5,8,12])for(let unused=0;unused<=requested+2;unused++){
+   const desired=requested+Math.ceil(requested/2);
+   const needed=neededFreshPremiseSeeds(requested,unused,desired);
+   expect(needed).toBe(unused>=requested?0:desired-unused);
+ }
+ expect(()=>neededFreshPremiseSeeds(3,1,2)).toThrow('原池优先补位');
+ expect(()=>neededFreshPremiseSeeds(-1,1,4)).toThrow('原池优先补位');
 });

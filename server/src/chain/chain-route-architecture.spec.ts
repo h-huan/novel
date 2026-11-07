@@ -203,6 +203,8 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain("await accept(supplementaryStructured,'repair')");
     expect(source).toContain('affordableFullCardRefillCount(');
     expect(source).toContain('desiredSupplement>=missingAfterFirstGate');
+    expect(source).toContain('neededFreshPremiseSeeds(');
+    expect(source).not.toContain('Math.max(0,desiredSupplement-unusedSeeds.length)');
     expect(source).toContain('affordableReviewedPremiseCount(');
     expect(source).toContain('sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,');
     expect(source).toContain('discoveryBudget.reviewGroupingMode,missingAfterFirstGate');

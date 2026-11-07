@@ -50,6 +50,20 @@ export function reserveFinalRefillReviewCapacity(
  * reviews are pending. Preserve enough optional source capacity for their
  * possible failures; only the later actual gap controls full-card dispatch.
  * This is a count request, never a new call allowance or a quality verdict. */
+/** Spend the already-generated unused pool before buying ANY new seeds.
+ * Optional screening surplus may only use already available originals;
+ * it cannot force speculative model generation ahead of the actual delivery
+ * gap. Once originals cannot cover the mandatory gap, the existing bounded
+ * refill call may generate up to its already affordable reviewed capacity.
+ * This decides seed GENERATION only, never candidate qualification. */
+export function neededFreshPremiseSeeds(mandatoryGap:number,unusedOriginalCount:number,reviewedCapacity:number):number{
+ if(![mandatoryGap,unusedOriginalCount,reviewedCapacity].every(Number.isSafeInteger)
+   ||mandatoryGap<0||unusedOriginalCount<0||reviewedCapacity<mandatoryGap)
+   throw Error('原池优先补位的实际缺额或可审核容量无效');
+ if(!mandatoryGap||unusedOriginalCount>=mandatoryGap)return 0;
+ return Math.max(0,reviewedCapacity-unusedOriginalCount);
+}
+
 export function plannedFullCardRefillCount(knownMissing:number,requested:number,accepted:number,preparing=false):number{
  if(![knownMissing,requested,accepted].every(Number.isInteger)||requested<1||knownMissing<0
   ||accepted<0||accepted>requested||knownMissing>requested-accepted)throw Error('补位准备的已知缺额或请求数量无效');
