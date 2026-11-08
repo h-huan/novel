@@ -21,7 +21,7 @@ function fixture() {
     CREATE TABLE generation_runs(
       id TEXT PRIMARY KEY,project_id TEXT,stage TEXT,scenario TEXT,status TEXT,
       constitution_revision INTEGER,context_version TEXT,prompt_version TEXT,
-      chapter_index INTEGER,output_text TEXT,model TEXT,finished_at TEXT
+      chapter_index INTEGER,output_text TEXT,model TEXT,finished_at TEXT,standards_snapshot TEXT
     );
   `);
   const constitution = {
@@ -88,9 +88,9 @@ function seedCachedRun(
   const project = db.prepare('SELECT * FROM projects WHERE id=?').get('p') as any;
   const runtimeConstitution = readConstitution(project);
   const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
-  db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     runId, 'p', stage, scenario, 'success', runtimeConstitution.revision ?? null, contextVersion, promptVersion,
-    chapterIndex, output, 'test-model', finishedAt,
+    chapterIndex, output, 'test-model', finishedAt, JSON.stringify(standards),
   );
 }
 
@@ -159,9 +159,12 @@ describe('IdempotentRealLLMService', () => {
       latency: 12,
     });
     try {
-      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'run-fresh','p','chapter','writing','success',1,'ctx','prompt',1,
+      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'run-fresh','p','chapter','writing','success',1,
+        compileContext(db, { projectId: 'p', stage: qualityStage('writing') }).version,
+        'prompt',1,
         '{"chapter":"fresh"}','test-model','2026-09-27T00:00:01.000Z',
+        JSON.stringify(standardDirectiveCache.snapshot('writing', true, null)),
       );
       const service = serviceFor(db);
 

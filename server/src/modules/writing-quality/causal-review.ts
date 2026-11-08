@@ -88,8 +88,12 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
   // Otherwise the reviewer sees explicit outcome text but only opaque action
   // addresses, which encourages result-only bridge citations. This transport
   // change never supplies a verdict, invents a condition or relaxes validation.
+  // Keep action-derived clause addresses too (body:v20:c1:s2): the model must
+  // be able to see what each real action sub-clause says, otherwise it guesses
+  // non-existent suffixes such as body:v26:c2:s1 instead of citing the actual
+  // authored action segment.
   const isPlanningActionText=(anchor:{id:string;source:string;path?:string})=>
-    anchor.source==='body'&&/^body:v\d+$/.test(anchor.id)
+    anchor.source==='body'&&/^body:v\d+(?::c\d+)?(?::s\d+)?$/.test(anchor.id)
     &&/^\d+\.(?:characterActions\.\d+\.action|scenes\.\d+\.(?:action|event)|content)$/.test(anchor.path||'');
   const promptAnchors=compactPlanningProof
     ?proofSourceCatalog.map(anchor=>
@@ -369,23 +373,25 @@ export function causalPlanningProofPromptCatalog(
 }
 
 /** Partition a large planning proof by actual chapter-result workload,
- * not by an arbitrary chapter count. The original audit was allowed an
- * initial call and one correction. Two *single-pass* independent shards
- * use at most that same two-call envelope, while each reviewer still sees
- * full scenes, states, actions and every mandatory result in its chapters.
+ * not by an arbitrary chapter count. Sharding bounds only the FIRST-PASS
+ * output. Each shard still keeps the normal initial+correction path, so one
+ * citation slip does not fail the whole outline without the correction the
+ * execution standard already grants. Each reviewer still sees full scenes,
+ * states, actions and every mandatory result in its chapters.
  *
  * Distinct result assertions are never dropped or merged to hit a quota.
  * A chapter remains indivisible: cross-field/cross-scene chronology is
  * required for its individual result proof.
  */
 /** If chapter-complete splitting still leaves one overloaded audit, split the
- * SERVER-OWNED result inventory across the same two physical first-pass calls.
+ * SERVER-OWNED result inventory across two first-pass calls.
  * Both reviewers receive every original chapter and its complete prior state;
  * only result obligations are disjoint. No result or quality judgment is
  * sampled, inferred or dropped. Totals beyond twice the nominal per-call count
  * must not fall back to one oversized response: that previously exhausted the
- * review model's 32768-token output cap. Two independent first-pass calls still
- * fit the original initial-plus-correction allowance. */
+ * review model's 32768-token output cap. Result sharding does NOT spend the
+ * correction allowance: each shard re-enters with allowSharding=false and
+ * keeps its own bounded initial+correction calls. */
 export function causalPlanningProofResultPartitions(
  chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
 ):string[][] {
@@ -626,6 +632,42 @@ export function preserveCausalCountercheckAnchors(original: any, value: any, con
 }
 
 /** Validate the reviewer's action/result ledger, not the truth of its literary judgement. */
+export const CAUSAL_PROTOCOL_WARNING_PREFIX = '独立审查未提供成立的成立条件原文';
+export function causalIssueIsProtocolOnly(issue:any):boolean {
+  return String(issue?.summary||'').startsWith(CAUSAL_PROTOCOL_WARNING_PREFIX);
+}
+
+/** A supported verdict without an independently verified bridge is unproven,
+ * not a pass and not a reason to deadlock the whole chapter review. Downgrade
+ * only those rows to real gaps; the existing chapter repair and all gates still
+ * run. Invalid action/result addresses remain protocol errors. A bridge that
+ * merely restates the result (its own paragraph) and does not contain the cited
+ * action is ALSO downgraded to a real gap: measured production runs showed the
+ * reviewer repeatedly citing that self-proof, so "review incomplete" never
+ * resolved and the chapter was re-reviewed until the model's time ran out
+ * instead of being repaired. It is a genuine missing condition, so the existing
+ * bounded chapter repair — not a deadlock — is the correct route. */
+export function coerceUnprovenSupportedCausalRows(value:any, content:string, sources:Record<string,string>, allowSelfProof=false):any {
+  if(!value||!Array.isArray(value.transitions))return value;
+  let changed=false;
+  const transitions=value.transitions.map((row:any)=>{
+    if(row?.status!=='supported')return row;
+    const source=row?.basisSource==='body'?content:sources[row?.basisSource];
+    const bridge=resolveQualityEvidence(source||'',row?.bridgeEvidence);
+    const action=resolveQualityEvidence(content,row?.actionEvidence);
+    const result=resolveQualityEvidence(content,row?.resultEvidence);
+    const selfProof=allowSelfProof&&typeof row.resultAnchorId==='string'&&typeof row.bridgeAnchorId==='string'
+      &&(row.resultAnchorId===row.bridgeAnchorId||row.resultAnchorId.startsWith(row.bridgeAnchorId+':')
+        ||(bridge.verified&&result.verified&&bridge.quote.includes(result.quote)))
+      &&action.verified&&!bridge.quote.includes(action.quote)&&!action.quote.includes(bridge.quote);
+    if(bridge.verified&&!selfProof)return row;
+    changed=true;
+    return {...row,status:'gap',bridgeAnchorId:'',bridgeEvidence:'',
+      reason:CAUSAL_PROTOCOL_WARNING_PREFIX+'；按未证明缺口处理：'+(typeof row.reason==='string'?row.reason:'')};
+  });
+  return changed?{...value,transitions}:value;
+}
+
 export function validateCausalAudit(value: any, content: string, sources: Record<string, string>) {
   const errors: string[] = [];
   const issues: any[] = [];
@@ -638,17 +680,6 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     return { verified: errors.length === 0, errors, issues };
   }
   if (!value.transitions.length) errors.push('已评因果结论缺少关键行动与结果证据');
-  // The same assertion may be projected into several result fields with
-  // different addresses. Resolve the exact text too, then invalidate uses of
-  // that same result-only bridge until the existing citation correction has
-  // located actual conditions. Do not mistake different field IDs for proof.
-  const resultOnlyBridges=new Set<string>();
-  for(const row of value.transitions){
-    if(row?.status!=='supported'||row.basisSource!=='body'||typeof row.bridgeAnchorId!=='string')continue;
-    const action=resolveQualityEvidence(content,row.actionEvidence),result=resolveQualityEvidence(content,row.resultEvidence);
-    const bridge=resolveQualityEvidence(content,row.bridgeEvidence);
-    if(action.verified&&result.verified&&bridge.verified&&bridge.quote.includes(result.quote)&&!bridge.quote.includes(action.quote))resultOnlyBridges.add(row.bridgeAnchorId);
-  }
   value.transitions.forEach((row: any, index: number) => {
     const action = resolveQualityEvidence(content, row?.actionEvidence);
     const result = resolveQualityEvidence(content, row?.resultEvidence);
@@ -671,10 +702,23 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     // paragraph does not even contain the cited action, it cannot serve as
     // an independent bridge. Ask the existing citation correction to locate
     // actual conditions; this is NOT an automatically invented story defect.
-    if(row.status==='supported'&&row.basisSource==='body'
-      &&typeof row.bridgeAnchorId==='string'&&typeof row.resultAnchorId==='string'
-      &&(resultOnlyBridges.has(row.bridgeAnchorId)||row.resultAnchorId===row.bridgeAnchorId||row.resultAnchorId.startsWith(row.bridgeAnchorId+':'))
-      &&!bridge.quote.includes(action.quote)){
+    //
+    // Judge each row independently. The previous implementation collected
+    // result-only bridge IDs in a cross-row Set, so one row's self-proof
+    // invalidated a sibling row that legitimately cited the same address as
+    // an actual action clause. Accept a bridge that either contains the
+    // cited action paragraph or is itself a sub-clause of that action; the
+    // standard explicitly allows a direct result to cite the same paragraph
+    // that contains its actual action.
+    const bridgeIsResultSelfProof = row.status === 'supported'
+      && row.basisSource === 'body'
+      && typeof row.bridgeAnchorId === 'string' && typeof row.resultAnchorId === 'string'
+      && (row.resultAnchorId === row.bridgeAnchorId
+        || row.resultAnchorId.startsWith(row.bridgeAnchorId + ':')
+        || bridge.quote.includes(result.quote))
+      && !bridge.quote.includes(action.quote)
+      && !action.quote.includes(bridge.quote);
+    if (bridgeIsResultSelfProof) {
       errors.push(`第${index + 1}项因果审查以结果自身或其上层段落自证，须定位独立成立条件；直接结果可引用含实际行动的同段`);
       return;
     }

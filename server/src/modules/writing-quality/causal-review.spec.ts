@@ -1,4 +1,4 @@
-import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions} from './causal-review';
+import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions,coerceUnprovenSupportedCausalRows} from './causal-review';
 import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
@@ -143,6 +143,20 @@ it('段落编号修复保留准确原文，拒绝伪造编号与非正文行动�
 it('有行动与结果仍不能用伪造的命令证据证明因果完整', () => {
   expect(validateCausalAudit(audit({ status: 'supported', actionEvidence: '她把公开通知改成暂缓处置。',
     resultEvidence: '他获救了。', basisSource: 'body', bridgeEvidence: '法院判他无罪。', reason: '命令撤回所以停止处置' }), content, {}).verified).toBe(false);
+});
+it('把“引用结果自身段落”的自证降为真实缺口，而不是让评审永远未完成', () => {
+  const body='她发出了通知。\n\n“撤回命令。”他说，“先复核。”\n\n他暂缓执行。';
+  // The reviewer cites the result's own paragraph as the bridge; it does not
+  // contain the cited action, so it is self-proof, not an independent condition.
+  const row={status:'supported',reason:'执行人收到命令才暂缓执行',
+    actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p3'};
+  const raw=materializeCausalAuditAnchors(audit(row),body,{});
+  expect(validateCausalAudit(raw,body,{}).verified).toBe(false);
+  const coerced=coerceUnprovenSupportedCausalRows(raw,body,{},true);
+  expect(coerced.transitions[0].status).toBe('gap');
+  expect(validateCausalAudit(coerced,body,{}).verified).toBe(true);
+  // Before the last attempt the citation is left for the correction pass.
+  expect(coerceUnprovenSupportedCausalRows(raw,body,{}).transitions[0].status).toBe('supported');
 });
 it('漏掉账目不能以高分或空问题宣称完成审查', () => {
   expect(validateCausalAudit(undefined, content, {}).verified).toBe(false);
@@ -342,6 +356,42 @@ it('only sends failed causal rows to the existing repair call and keeps all pres
  expect(patched.transitions).toHaveLength(41);
  expect(patched.transitions.slice(0,40)).toEqual(original.transitions.slice(0,40));
 });
+
+it('judges result self-proof per row and accepts a real action clause shared by a sibling row',()=>{
+ const body='他把凭证放上桌，问明来源。\n\n问明来源。\n\n翻看凭证。\n\n对方承认。';
+ const rows=[
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'body:p2',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'问明来源。',bridgeEvidence:'问明来源。',
+   reason:'问明来源是同一实际行动的直接结果'},
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p2',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'翻看凭证。',bridgeEvidence:'问明来源。',
+   reason:'问明来源是翻看凭证前已经发生的实际行动'},
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p4',bridgeAnchorId:'body:p4',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'对方承认。',bridgeEvidence:'对方承认。',
+   reason:'对方承认不能由结果自身证明'},
+ ];
+ const checked=validateCausalAudit({status:'evaluated',reason:'逐项核对实际行动与必要条件',transitions:rows},body,{});
+ expect(checked.verified).toBe(false);
+ expect(checked.errors).toHaveLength(1);
+ // Row 2 shares row 1's bridge address but its own result is a different
+ // action clause; a cross-row Set must not invalidate it. Row 3 remains a
+ // genuine result-self citation and is the only error.
+ expect(checked.errors[0]).toContain('第3项因果审查以结果自身');
+});
+
+it('exposes real action clause text and its server address in the compact causal catalog',()=>{
+ const chapter={chapterNumber:1,chapterFunction:'climax',content:'他把凭证放上桌，问明来源。',
+  scenes:[{outcome:'对方承认。'}]};
+ const body=JSON.stringify([chapter]);
+ const anchor=causalEvidenceAnchors(body,{})
+  .find(item=>item.source==='body'&&item.path==='0.content'&&item.text==='问明来源。'&&/:s\d+$/.test(item.id));
+ expect(anchor?.id).toBeDefined();
+ expect(anchor!.id).toMatch(/:s\d+$/);
+ const prompt=causalAuditRepairPrompt(null,[],body,{},true,false,true);
+ expect(prompt.prompt).toContain(anchor!.id);
+ expect(prompt.prompt).toContain('"text":"问明来源。"');
+});
+
 
 it('server-owned chapter catalog binds all address roles consistently and blocks same-text cross-chapter IDs',()=>{
  const chapters=[
@@ -600,8 +650,9 @@ it('splits a hundred independent final-scene claims into two complete-chapter au
  expect(causalPlanningProofGroups(chapters.slice(0,1))).toEqual([chapters.slice(0,1)]);
  expect(causalPlanningProofGroups(chapters.slice(0,2),1000)).toEqual([chapters.slice(0,2)]);
  // If one chapter alone carries too many distinct assertions, partitioning
- // by whole chapter cannot make either single-pass reviewer reliable. Preserve
- // the prior correction opportunity rather than falsely advertising a fix.
+ // by whole chapter cannot make either reviewer reliable. Keep the chapter
+ // whole here; the caller next partitions its server-owned result IDs, and
+ // each result shard still keeps the normal initial+correction path.
  const dominated=[{
    chapterNumber:10,scenes:Array.from({length:85},(_,i)=>({outcome:`第十章独立结果${i}已经成立。`}))
   },{chapterNumber:11,scenes:[{outcome:'另一章完成登记。'}]},
@@ -718,15 +769,16 @@ it('partitions a dominant chapter by server-owned result identities without omit
 });
 
 
-it('shards more than 144 independent results without adding model calls or losing claims',()=>{
+it('shards more than 144 independent results without losing claims or the normal correction path',()=>{
  const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'主角实际递交材料，对方是否接受仍需分别核对。',
    scenes:Array.from({length:200},(_,index)=>({outcome:'独立结果第'+(index+1)+'项需要逐个反证成立条件。'}))}];
  const body=JSON.stringify(chapters);
  const catalog=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,{})).entries;
  const all=catalog.flatMap(entry=>entry.resultAnchorIds);
  expect(all.length).toBeGreaterThan(144);
- // One huge call previously exceeded the provider output cap. Spend the
- // same initial + correction budget on two disjoint first passes.
+ // One huge call previously exceeded the provider output cap. Sharding bounds
+ // only each first pass; every shard still keeps its own initial+correction
+ // path, and no independent result claim is dropped.
  const parts=causalPlanningProofResultPartitions(chapters);
  expect(parts).toHaveLength(2);
  expect(parts.flat()).toEqual(all);
@@ -828,4 +880,18 @@ it('decodes only lossless negative-proof transport and retains full causal and c
    proofRows:[['1','body:invented',null,'gap','本章没有合法批准行动的证据']]},expected);
  const forgedBound=materializeCausalAuditAnchors(forged,body,{});
  expect(validateCausalAudit(forgedBound,body,{}).verified).toBe(false);
+});
+
+it('downgrades an unproven supported row to a real gap instead of deadlocking the chapter review',()=>{
+ const content='甲把钥匙放在桌上。乙看见钥匙。';
+ const audit={status:'evaluated',reason:'逐项核对行动与结果',transitions:[{
+  actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'',status:'supported',
+  basisSource:'body',actionEvidence:'甲把钥匙放在桌上',resultEvidence:'乙看见钥匙',
+  bridgeEvidence:'',reason:'声称钥匙已交付但未给出成立条件原文',
+ }]};
+ expect(validateCausalAudit(audit,content,{}).verified).toBe(false);
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('gap');
+ expect(validateCausalAudit(coerced,content,{}).verified).toBe(true);
+ expect(validateCausalAudit(coerced,content,{}).issues).toHaveLength(1);
 });

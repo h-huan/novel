@@ -6,9 +6,13 @@ export class GenerationCancelledError extends Error {
 }
 export class GenerationDeadlineExceededError extends GenerationCancelledError {
   readonly code = 'GENERATION_DEADLINE_EXCEEDED';
-  constructor(readonly scope: string) {
+  constructor(readonly scope: string, readonly deadlineBudgetMs?: number) {
     super(); this.name = 'GenerationDeadlineExceededError';
-    this.message = (scope === 'discovery' ? '灵感发现' : '生成任务') + '超过整次请求总时限，已停止在途调用并保留已验收结果；本次未完成';
+    const minutes = deadlineBudgetMs != null && Number.isFinite(deadlineBudgetMs) && deadlineBudgetMs >= 60000
+      ? Math.round(deadlineBudgetMs / 60000)
+      : null;
+    const label = scope === 'discovery' ? '灵感发现' : scope === 'creation' ? '项目创建' : '生成任务';
+    this.message = `${label}超过整次请求总时限${minutes != null ? `（${minutes} 分钟，判定为不合格）` : ''}，已停止在途调用并保留已验收结果；本次未完成`;
   }
 }
 const context = new AsyncLocalStorage<{signal:AbortSignal;checkDeadline?:()=>void}>();
@@ -47,8 +51,11 @@ export class GenerationTasks {
     const key = this.key(scope, projectId, chapterId);
     if (this.active.has(key)) throw new ConflictException('该任务仍在执行或停止中，请稍后再试');
     if(options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt))throw new RangeError('生成任务截止时间无效');
+    const deadlineBudgetMs = options.deadlineAt !== undefined && Number.isFinite(options.deadlineAt)
+      ? options.deadlineAt - Date.now()
+      : undefined;
     const controller = new AbortController();
-    const expire = () => controller.abort(new GenerationDeadlineExceededError(scope));
+    const expire = () => controller.abort(new GenerationDeadlineExceededError(scope, deadlineBudgetMs));
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     if(options.deadlineAt !== undefined){
       const remaining = options.deadlineAt - Date.now();

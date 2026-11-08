@@ -165,6 +165,17 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('retained.selection.selected.length>=requestedCount&&retainedReview.passed');
   });
 
+  it('counts plan-index correctable premises toward delivery and never reopens the whole repair list', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('const sameIdentityFixSlots=repairPlan.repairSlots.filter');
+    expect(source).toContain('const deliveryEligible=initiallyRetained.selection.selected.length+sameIdentityFixSlots.length');
+    expect(source).toContain('let recoverySlots=[...sameIdentityFixSlots');
+    expect(source).toContain('const correctOrReplaceSlots=repairPlan.repairSlots.filter');
+    expect(source).toContain('const replacementSlots=repairPlan.repairSlots.filter');
+    expect(source).not.toContain('let recoverySlots=deliveryCount<requestedCount');
+    expect(source).toContain('已证明仅计划索引错绑的位置必须保留原身份');
+  });
+
   it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
     const source = read('chain.controller.ts');
     expect(source).toContain('口头要求、自愿配合和合法实际控制不可混同');
@@ -308,13 +319,25 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length)');
   });
 
-  it('retains full model reasoning for evidence-bearing causal selection, not only the downstream review',()=>{
+  it('retains full model reasoning for pool generation and evidence-bearing causal selection',()=>{
     const real=read('real-llm.service.ts');
-    const steps=real.split('const preliminarySteps=[')[1]?.split('];')[0]||'';
-    expect(steps).toContain('idea_premise_pool_generation');
-    expect(steps).not.toContain('idea_premise_selection');
-    expect(steps).not.toContain('idea_premise_pool_reselection');
-    expect(real).toContain("if(scenario==='idea_generate'&&stepKey&&preliminarySteps.includes(stepKey))return 'low'");
+    expect(real).not.toContain('preliminarySteps');
+    expect(real).not.toContain("idea_premise_pool_generation','idea_premise_pool_refill'");
+    expect(real).toContain("process.env.LLM_REASONING_EFFORT");
+  });
+
+  it('front-loads confirmed calendar anchors and quality self-checks into generation prompts',()=>{
+    const controller=read('chain.controller.ts');
+    expect(controller).toContain('【已确认日期/跨度锚点');
+    expect(controller).toContain('【入池前逐项自检');
+    expect(controller).toContain('【causalPlan 直接因果索引自检');
+    expect(controller).toContain('【选优前 causalPlan 直接因果自检');
+    expect(controller).toContain('只能直接产生它实际改变的结果');
+    expect(controller).toContain('仅仅尚未决定、尚未执行或尚未生效的状态不是改变');
+    const contract=read('idea-discovery-contract.ts');
+    expect(contract).toContain('【结构化前逐项自检');
+    expect(contract).toContain('【causalPlan 直接因果索引自检');
+    expect(contract).toContain('每个独立结果必须有实际决定者');
   });
 
   it('presents saved world rule arrays directly to short outline generation before incidental scenes',()=>{

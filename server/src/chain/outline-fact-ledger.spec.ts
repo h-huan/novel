@@ -362,7 +362,7 @@ it('locates all original clock and duration assertions for the existing first-pa
    characterActions:[{action:'把鱼放回冷柜',result:'六点一刻出锅'}]};
  const original=structuredClone(chapter);
  const prompt=buildOutlineFactReviewPrompt({canonicalBrief:'不改确认事实',world:{},previousLedger:[],chapters:[chapter]});
- const marker='【原文时刻与时长定位】';
+ const marker='【原文时刻、时长与日期跨度定位】';
  expect(prompt).toContain(marker);
  const rows=JSON.parse(prompt.split(marker)[1].split('\n')[0]);
  const content=rows.find((row:any)=>row.path==='本批·条目1.content');
@@ -372,4 +372,19 @@ it('locates all original clock and duration assertions for the existing first-pa
  expect(rows.some((row:any)=>row.path==='本批·条目1.characterActions[0].result')).toBe(true);
  expect(chapter).toEqual(original);
  expect(prompt).toContain('consistent');expect(prompt).toContain('contradictions');
+});
+
+it('locates confirmed calendar spans and the same-archive arithmetic rule',()=>{
+ const prompt=buildOutlineFactReviewPrompt({
+   canonicalBrief:'她在渝州老灶五年，攒下每天的日志和每批进货单。',
+   world:{},previousLedger:[],sourceChapters:[],
+   chapters:[{content:'最早那张进货单比公证书早一年零两个月，从公证书往前推十四个月；公证书是上个月办的。'}],
+ });
+ const marker='【原文时刻、时长与日期跨度定位】';
+ expect(prompt).toContain(marker);
+ const rows=JSON.parse(prompt.split(marker)[1].split('\n')[0]);
+ const spans=rows.flatMap((row:any)=>row.calendarSpans.map((span:any)=>span.original));
+ expect(spans).toEqual(expect.arrayContaining(['五年','一年','十四个月','上个月']));
+ expect(spans.some((span:string)=>span.includes('两个月'))).toBe(true);
+ expect(prompt).toContain('同一档案或期间的覆盖年限');
 });

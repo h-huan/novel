@@ -12,7 +12,7 @@ import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, coerceUnprovenSupportedCausalRows, causalIssueIsProtocolOnly, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -55,6 +55,9 @@ type ModelUsage = {
   completionTokens?: number;
   totalTokens?: number;
   reasoningTokens?: number;
+  /** Upstream prefix-cache accounting (DeepSeek context caching). */
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
 };
 
 type ModelCallResult = {
@@ -726,7 +729,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     }
   }
 
-  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState', singlePass = false, requiredResultIds?: readonly string[]): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
+  private async auditPlanningActions(run: NonNullable<ReturnType<GenerationMetricsService['beginRun']>>, request: LLMRequest, content: string, resultField?: 'exitState', singlePass = false, requiredResultIds?: readonly string[], allowSharding = true): Promise<{ verified: boolean; errors: string[]; issues: Array<{ severity: any; summary: string; evidence: string; chapterNumber?: number }>; audit: any }> {
     request=bindModelRequestClock(request);
     let chapters: any[] = [];
     try { chapters = JSON.parse(content).volumes.flatMap((volume: any) => volume.chapters || [])
@@ -751,16 +754,19 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // A three-chapter review can contain over a hundred separately asserted
     // results. A single huge answer was repeatedly dropping its final few
     // IDs and spending the existing correction call on protocol recovery.
-    // Reallocate those SAME two physical calls into two parallel, smaller
-    // chapter-complete proofs. No extra retries, output skips, or budgets.
+    // Sharding now bounds only the FIRST-PASS output. Each shard re-enters
+    // with allowSharding=false and keeps the normal initial+correction path;
+    // a citation slip therefore still gets the correction the execution
+    // standard requires, without re-splitting the same chapter recursively.
     // Exit-state counterchecks require independent second judgment; they
     // continue through the original two-attempt path unchanged.
-    if (!resultField && !singlePass) {
+    // A requiredResultIds call is already a shard and must never split again.
+    if (!resultField && !singlePass && allowSharding && !requiredResultIds) {
       const balanced=causalPlanningProofGroups(chapters);
       if (balanced.length>1) {
         const split=await boundedDiscoveryMap(balanced,
           adaptiveDiscoveryConcurrency(balanced.length),
-          group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),undefined,true));
+          group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),undefined,false,undefined,false));
         const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
         if(failure)throw failure.reason;
         const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
@@ -770,7 +776,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const partitions=causalPlanningProofResultPartitions(chapters);
       if(partitions.length>1){
         const split=await boundedDiscoveryMap(partitions,adaptiveDiscoveryConcurrency(partitions.length),
-          resultIds=>this.auditPlanningActions(run,request,content,undefined,true,resultIds));
+          resultIds=>this.auditPlanningActions(run,request,content,undefined,false,resultIds,false));
         const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
         if(failure)throw failure.reason;
         const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
@@ -845,6 +851,17 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           !resultField?normalizeReviewedCausalResultAliases(boundVerdict,resultAliasesByReview,evidenceAnchors):boundVerdict,
           body,sources);
         checked = validateCausalAudit(audit, body, sources);
+        if(!checked.verified){
+          // Give the normal citation correction its one chance first; only
+          // downgrade a still-unfixable result self-proof on the LAST attempt,
+          // so a correctable citation keeps the correction instead of being
+          // turned into a gap and skipping the fix.
+          const coerced=coerceUnprovenSupportedCausalRows(audit,body,sources,attempt===(singlePass?1:2)-1);
+          if(coerced!==audit){
+            const coercedCheck=validateCausalAudit(coerced,body,sources);
+            if(coercedCheck.verified){audit=coerced;checked=coercedCheck;}
+          }
+        }
         const addressErrors=causalChapterEvidenceAddressIssues(audit,chapterEvidenceCatalog,resultField);
         if(addressErrors.length){checked.verified=false;checked.errors.push(...addressErrors);}
         if (resultField && Array.isArray(audit?.transitions)) audit.transitions.forEach((row:any,index:number)=>{
@@ -899,7 +916,13 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // After the existing correction call, keep all real gap/planned verdicts
     // and fail as review_incomplete if any required supported citation is still
     // missing. Do not manufacture a gap or trigger unrelated chapter rewrites.
-    return { ...checked, issues: checked.issues.map(issue => ({ ...issue,
+    // A reviewer's own citation omission is a protocol warning, not a story
+    // defect; real gaps remain blocking and all independent Gates still run.
+    const retainedIssues=checked.issues.filter(issue=>!causalIssueIsProtocolOnly(issue));
+    if(retainedIssues.length!==checked.issues.length){
+      this.logger.warn('因果审查存在仅证据协议未完成的成立项，按警告保留；不阻断主线章节，真实因果缺口仍阻断');
+    }
+    return { ...checked, issues: retainedIssues.map(issue => ({ ...issue,
       chapterNumber: audit?.transitions?.find((row: any) => row.status === 'gap' && row.reason === issue.summary)?.chapterNumber })), audit };
   }
 
@@ -1020,6 +1043,8 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           completionTokens: result.usage?.completionTokens ?? null,
           reasoningTokens: result.usage?.reasoningTokens ?? null,
           totalTokens: result.usage?.totalTokens ?? null,
+          cacheHitTokens: result.usage?.cacheHitTokens ?? null,
+          cacheMissTokens: result.usage?.cacheMissTokens ?? null,
           finishReason: result.finishReason ?? null,
           reasoningDisabled: args[8] === true || process.env.LLM_DISABLE_THINKING === '1',
         }));
@@ -1432,12 +1457,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     // Gate. Sending these provenance-critical decisions through the low
     // reasoning route produced wrong action/result links and expensive
     // re-selection after 8 candidates had already been paid for.
-    // Preserve the configured model's FULL normal reasoning for causalPlan
-    // producers; only raw pool generation stays at the low-cost tier.
-    const preliminarySteps=[
-      'idea_premise_pool_generation','idea_premise_pool_refill',
-    ];
-    if(scenario==='idea_generate'&&stepKey&&preliminarySteps.includes(stepKey))return 'low';
+    // The same applies to the raw pool/refill generation: it authors the
+    // working title, responsibility evidence, causalPlan and payoff basis that
+    // every later Gate must accept. Do NOT downgrade that creative step to
+    // low reasoning; use the model's normal full reasoning unless the operator
+    // explicitly overrides LLM_REASONING_EFFORT.
     if (scenario === 'idea_generate' && stepKey === 'idea_presentation_review') {
       const reviewOverride = process.env.LLM_IDEA_REVIEW_REASONING_EFFORT;
       if (reviewOverride) return reviewOverride === 'low' || reviewOverride === 'medium' || reviewOverride === 'high' ? reviewOverride : undefined;
@@ -1582,7 +1606,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         if (delta) content += delta;
         const fr = chunk.choices?.[0]?.finish_reason;
         if (fr) finishReason = fr;
-        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }).usage;
+        const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }).usage;
         if (chunkUsage) {
           usage = {
             promptTokens: typeof chunkUsage.prompt_tokens === 'number' ? chunkUsage.prompt_tokens : usage?.promptTokens,
@@ -1590,6 +1614,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
             totalTokens: typeof chunkUsage.total_tokens === 'number' ? chunkUsage.total_tokens : usage?.totalTokens,
             reasoningTokens: typeof chunkUsage.completion_tokens_details?.reasoning_tokens === 'number'
               ? chunkUsage.completion_tokens_details.reasoning_tokens : usage?.reasoningTokens,
+            cacheHitTokens: typeof chunkUsage.prompt_cache_hit_tokens === 'number'
+              ? chunkUsage.prompt_cache_hit_tokens : usage?.cacheHitTokens,
+            cacheMissTokens: typeof chunkUsage.prompt_cache_miss_tokens === 'number'
+              ? chunkUsage.prompt_cache_miss_tokens : usage?.cacheMissTokens,
           };
         }
       }

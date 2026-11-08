@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { normalizeIdeaDiscoveryAudit, discoveryAuditIsHistorical, redactDiagnosticText, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryAuditIsHistorical, redactDiagnosticText, summarizeIdeaActivityEvidence, summarizeProjectRunFailures } from './verify-local-diagnostics.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const reportPath = path.join(root, 'verification', 'latest.json');
@@ -54,10 +54,13 @@ function triageThreeIssues(report) {
   const projectMap = runtime.projects && typeof runtime.projects === 'object' ? runtime.projects : {};
   const projects = Object.entries(projectMap).map(([key, item]) => {
     const runs = Array.isArray(item?.runTimeline) ? item.runTimeline : [];
-    const failed = runs.filter(run => String(run?.status || '').toLowerCase() === 'failed');
+    const failures = summarizeProjectRunFailures(runs);
+    const failed = runs.filter(run => String(run?.status || '').toLowerCase() === 'failed' && !run?.stageFailureRecord);
     return {
       key, projectId: item?.project?.id ?? null, status: item?.project?.status ?? null,
-      observedRunCount: runs.length, failedRunCount: failed.length,
+      observedRunCount: runs.length, failedRunCount: failures.failedModelRunCount,
+      stageFailureRecordCount: failures.stageFailureRecordCount,
+      latestFailureStage: failures.latestFailureStage,
       recentFailedRuns: failed.slice(0, 15).map(compactRun),
       consistencyIssues: item?.integrityAudit?.consistencyIssues ?? null,
       creationStalled: item?.cockpit?.diagnostics?.creationStalled ?? null,
@@ -179,9 +182,10 @@ function threeIssueMarkdown(triage) {
       + '；该审计早于当前后端：' + show(latency.completedAuditHistorical)
       + '；完成审计调用指标：' + (latency.callMetricsAvailable ? '已采集' : '未采集（不能记为0）'),
     '- ② 题材数量：' + count.evidenceStatus + '；**上次完成审计**请求：' + show(count.requested)
-      + '；合格返回：' + show(count.returned) + '；缺额：' + show(count.shortfall)
+      + '；完整交付返回：' + show(count.returned) + '；独立合格：' + show(count.qualified)
+      + '；缺额：' + show(count.shortfall)
       + '；停止原因：' + show(count.stopReason)
-      + '。未完成请求数量未知，不能沿用旧值。',
+      + '。返回为0只表示未足额交付，不等于没有独立合格题材；桌面端可用合格候选继续补齐。未完成请求数量未知，不能沿用旧值。',
     '### 未完成/已取消的灵感模型调用（最新完成审计之外）',
     '- 记录状态：' + latency.activityAfterCompletedAudit.status
       + '；归属：'+show(latency.activityAfterCompletedAudit.association)+'（旧记录缺ID时仍按时间邻近）；总记录：'+show(latency.activityAfterCompletedAudit.totalRecent)
@@ -195,7 +199,8 @@ function threeIssueMarkdown(triage) {
     '- '+latency.activityAfterCompletedAudit.limitation,
     '',
     '- ③ 创建一致性：' + creation.evidenceStatus + '；采集项目：' + creation.projects.length
-      + '；失败运行数：' + (creation.projects.length ? creation.projects.reduce((n,p)=>n+p.failedRunCount,0) : '未知（未取得）'),
+      + '；失败运行数：' + (creation.projects.length ? creation.projects.reduce((n,p)=>n+p.failedRunCount,0) : '未知（未取得）')
+      + (creation.projects.length ? '（阶段失败记录 ' + creation.projects.reduce((n,p)=>n+(p.stageFailureRecordCount||0),0) + '）' : ''),
     '',
     ...(triage.prerequisite.localRecovery ? [
       '',

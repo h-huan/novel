@@ -149,7 +149,7 @@ const premisePayoffLinkExample=(ref:string)=>({ref,status:'supported|gap|unknown
  reason:'逐项说明该环节的行动和必要条件是否足以导致结果，至少8字'});
 export function premisePayoffReviewDirective(selection:PremiseSelectionResult){
   const firstUnmapped=premiseUnmappedOutcomeClaims(selection).filter(item=>item.ref.startsWith('S1.'));
-  return '\n【保持逐项实审，压缩重复输出】对supported的payoffChecks、links、decisionCheck和unmappedChecks各项reason，通常用8—40个汉字分别说明已发生的行动、必要条件与实际结果如何连接；复杂支持结论允许更长，不得遗漏真实条件。gap或unknown仍完整说明实际缺口、证据和修复路由，不限制必要字数。不要在任何reason中复写整段原池、审核目录、JSON结构或不相关的推导，证据由现有引用字段承载；此处仅约束表述冗余，不减少逐项审查和独立质量门。\n整体及本环节status均为supported时，links项必须返回decisionCheck:{status:"supported|gap|unknown|not_required",deciderQuote:"实际有权决定者的既有原文，supported必填",basisQuote:"已存在、能够真实支撑本次决定的动机或约束原文，supported必填",reason:"按已注入候选条件判据核对，不在评审理由中新增事实"}。not_required说明该结果为何是普通直接后果、不依赖他人改变决定；gap或unknown不能配link.status=supported。deciderQuote/basisQuote必须来自同题材实际字段中独立于结果的原文。已判gap或unknown的阻断项保留原结论，不为补齐决定依据字段增加调用。\n按已注入GEN-002的缺口路由合同，每个status=gap项必须明确返回gapRepair=restore_source_conditions|replace_from_pool；只有status=gap时才可出现gapRepair。status=supported或unknown必须完全省略gapRepair与sourceConditionQuote字段（不要返回null或空串）；不能因为问题讨论过缺口就让已判supported的项附带修复指令。缺省不是自动要求换题。若原池storyCore和入选展开已经写出后来实际发生的物证核验、权限、传递及决定，仅causalPlan把终局错误地绑定到较早环节，则返回restore_source_conditions，并用sourceConditionQuote逐字引用原池已存在的关键事件或条件：优先保留同ID原题材，局部纠正因果引用，经过独立来源/兑现/同构复核后方能通过。restore_source_conditions必须加sourceConditionQuote，逐字引用同ID原池已建立的相关关键条件；若原池确实缺少决定性条件或找不到原始引用，则返回replace_from_pool，不得通过改引用伪造条件。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
+  return '\n【传播潜力前置判断：只筛弱传播，不替代成卡终审】每个payoffChecks行还必须返回sharingCheck:{status:"strong|weak|unknown",reason:"该胚子的代价、关系变化或胜负是否天然可复述、可供读者争论；至少8字"}。strong=已写出可供争论的两难或真实关系冲击；weak=传播潜力明显不足（只有查明事实、自证清白或孤立能力展示，缺少可供争论的两难或关系代价），该卡会在成卡前被替换；unknown=无法判断。只按该胚子已写出的代价与关系判定，不要求额外事实；题材普通本身不算weak。\n【保持逐项实审，压缩重复输出】对supported的payoffChecks、links、decisionCheck和unmappedChecks各项reason，通常用8—40个汉字分别说明已发生的行动、必要条件与实际结果如何连接；复杂支持结论允许更长，不得遗漏真实条件。gap或unknown仍完整说明实际缺口、证据和修复路由，不限制必要字数。不要在任何reason中复写整段原池、审核目录、JSON结构或不相关的推导，证据由现有引用字段承载；此处仅约束表述冗余，不减少逐项审查和独立质量门。\n整体及本环节status均为supported时，links项必须返回decisionCheck:{status:"supported|gap|unknown|not_required",deciderQuote:"实际有权决定者的既有原文，supported必填",basisQuote:"已存在、能够真实支撑本次决定的动机或约束原文，supported必填",reason:"按已注入候选条件判据核对，不在评审理由中新增事实"}。not_required说明该结果为何是普通直接后果、不依赖他人改变决定；gap或unknown不能配link.status=supported。deciderQuote/basisQuote必须来自同题材实际字段中独立于结果的原文。已判gap或unknown的阻断项保留原结论，不为补齐决定依据字段增加调用。\n按已注入GEN-002的缺口路由合同，每个status=gap项必须明确返回gapRepair=restore_source_conditions|replace_from_pool；只有status=gap时才可出现gapRepair。status=supported或unknown必须完全省略gapRepair与sourceConditionQuote字段（不要返回null或空串）；不能因为问题讨论过缺口就让已判supported的项附带修复指令。缺省不是自动要求换题。若原池storyCore和入选展开已经写出后来实际发生的物证核验、权限、传递及决定，仅causalPlan把终局错误地绑定到较早环节，则返回restore_source_conditions，并用sourceConditionQuote逐字引用原池已存在的关键事件或条件：优先保留同ID原题材，局部纠正因果引用，经过独立来源/兑现/同构复核后方能通过。restore_source_conditions必须加sourceConditionQuote，逐字引用同ID原池已建立的相关关键条件；若原池确实缺少决定性条件或找不到原始引用，则返回replace_from_pool，不得通过改引用伪造条件。若reason称“原池已写/按原池补正索引/计划索引错绑”，gapRepair必须为restore_source_conditions并提供sourceConditionQuote，不能同时返回replace_from_pool；无法逐字引用同ID原池条件时，必须把reason改写为真实的原池缺条件并保留replace_from_pool，不能伪造来源。\n按已注入GEN-002的兑现必要条件合同独立检查，不把结局声称当成立条件。\n【必返payoffChecks目录】'+JSON.stringify(premisePayoffCatalog(selection))
     +'\n【逐环节因果计划目录；行动与条件原文见待锁定胚子的causalPlan，不重复发送】'+JSON.stringify(selection.selected.flatMap((item,index)=>premiseCausalCatalog(item,`S${index+1}.`).map(({ref})=>({ref}))))
     +'\n先核对每个causalPlan环节：action只能直接改变什么、conditions是否实际建立并足以导致result。涉及机构登记、处罚、公开决定或限制他人现有权益时，还要核对发起者当下具有的实际权利或权限、有权机构的受理及生效动作；仅有未来可能获得的资格、提出申请或当事人意愿，不能当作已完成的决定或对抗他人的有效限制。另须核对reversalEffect中每项已经发生的关键反转结果，不能只审payoff段的结局和代价。对每个题材返回reversalCheck={status,actionEvidenceRef,reason}：supported引用本题材此前实际行动或升级；优先引用本题材openingEvent、activeChoice或escalation里真实发生、能够支撑反转的在先行动。若必须引用reversalEffect中的独立操作，只有causalPlan已分别逐字锚定本段独立行动及本段结果时才可直接复用action；否则必须另返actionEvidenceQuote逐字定位与结果断言不重叠的真实操作。只给S序号.reversalEffect字段名却没有独立操作的逐字锚点属于证据协议不完整，不能判supported；说明所有决定性反转结果的必要条件如何真实成立；gap须将本项整体status标为gap并按同一gapRepair处理，unknown令整体unknown。causalPlan把反转里的结果误填作action时，该结果不构成自身成立的证据。逐个核对结局声称改变的对象、数量和时间跨度是否落在前述行动实际影响的范围内；每项决定性结果必须由已经写出的行动、真实必要条件和人物动机支持。对手已明示的反制、现有权利约束及直接阻碍须有实际克服路径；但不得凭故事外任意假设、未出现的拒绝可能或无关行政程序否决普通直接结果。若确实缺少决定性条件，整体或对应links必须判gap；原池确实漏条件时replace_from_pool，仅原池已有条件、causalPlan错引时restore_source_conditions。昨天入库与今天报失并不天然矛盾，发现故障并不表示备件已修复装机，挪位协议不等于经营许可或主管机关已撤销资格。暂停受理、中止办理、进入调查等程序状态不能直接推出最终撤销、继承计划永久落空、处罚生效或款项已经退还；必须检查作出最终决定的主体、依据、期限与执行。对手已有警觉、拒绝或逃避的动机时，不能把请求开门、交付材料、改口配合视为必然成功；核对当时在场者实际掌握什么信息、为什么会行动，是否已有真实诱因改变其利害。尤其当主角仅令一项融资、合作或资源暂时受阻，却宣称对方因此放弃另一项合同、财产权或关系决定时，须同时核对：该具体让步究竟怎样缓解对方遭受的阻碍，原池有无对方愿意这样让步的实际理由和触发；只有“受阻”“怕损失”而无利益关联，不能支持该独立让步，整体payoffChecks应判gap；普通人自主合理妥协不额外强加必须无法拒绝。过去的投诉录音、旧账与历史档案只能证明其中真实记载的事件，不能被当作以后另一份雇佣约定、当事人自认或授权的证据。影响起始时间晚于声称的追溯期，或中止某机制却声称既有损失已恢复时，须指出缺少的历史来源、核算、决定或执行条件，不能替故事补出未写的补救行动。这只是必要因果核查，不要求所有故事出现账目或手续。每个payoffChecks新增links数组，逐一返回本题材目录的全部环节，字段形状以末尾完整JSON示例为准，不得漏项、重复、跨题材或靠一条总体认可代替。conditions为空不自动通过，遇到实际必要条件未写仍须gap；原池与展开一起漏写的条件同样为gap。计划遗漏的关键中间结果也须在本题材整体payoffChecks中报告gap，不能仅核对作者自行列出的环节。若关键照片、录音、原始母带、样本、账本等证据受公司、对手或他人保管控制，而结局要求主角提交给警方、机构或有决定权者，必须分别核对产生证据、实际取得或获准复制、保全不被撤销、移交接收这几步在原池与展开中是否真实发生；能录到内容不等于取得受他人控制的原件，不能从录音间存在母带直接推定主角能带出或提交。证据只在主角或熟人手中时同样核对谁实际交付、谁接收、接收者知情且有权怎样处理；仅有报案或口头建议不等于证据进入处理流程。原池和展开都漏掉这道决定性桥接时整体应为gap，不可因终局已经写出就标supported。整体status须与links一致：任一unknown则unknown，其次任一gap则gap，其余才supported；发现计划外缺口可整体gap但保留links的真实结论。'
     +'\n【因果计划未逐字覆盖的已有结果句（仅定位，非新增质量门）】'+JSON.stringify(premiseUnmappedOutcomeClaims(selection))+'。这只是对原有反转/兑现字段的遗漏引用提醒，逐句判断其是否为决定性结果、是否由故事已写的实际行动及必要条件支持；若关键结果存在独立审批、证据保全、取得或归责缺口，整体必须gap；若是普通后果且因果完整，不因未单列计划就误判。不得只审causalPlan已有的result，更不得把结局当作成立条件。'
@@ -169,6 +169,11 @@ export function premisePayoffReviewIssues(value:any,selection:PremiseSelectionRe
     const candidate=selection.selected.find(candidate=>candidate.premiseId===item.premiseId)!;
     if(row.status==='gap'&&!['restore_source_conditions','replace_from_pool'].includes(row.gapRepair))errors.push(row.ref+'缺少可执行的真实缺口路由gapRepair；不得默认把仅有索引问题的成熟题材强制换选');
     if(row.status!=='gap'&&row.gapRepair!==undefined)errors.push(row.ref+'非gap项不得无故要求补救');
+    // A plan-index-only replace route is normalized deterministically by
+    // normalizePremisePayoffGapRoutes when a real same-ID source condition can
+    // be found. Do NOT turn a contradictory reason into a hard review abort:
+    // an unrepairable route stays conservative replace() and the unchanged
+    // independent review still decides the candidate.
     if(row.gapRepair==='restore_source_conditions'){
       const source=selection.pool.find(seed=>seed.premiseId===item.premiseId);
       if(row.status!=='gap'||typeof row.sourceConditionQuote!=='string'||row.sourceConditionQuote.trim().length<8
@@ -274,8 +279,30 @@ export function quarantineUnprovenReversalEvidence(value:any,selection:PremiseSe
  * not an additional reason to spend a model call or discard its semantic verdict.
  * Conservatively replace unless an explicit source quote is truly in the
  * immutable same-ID pool. Never invent a condition or promote gap to supported. */
+/** A plan-index-only negative finding may be routed to the same identity when
+ * a real same-ID source condition is already in the immutable pool. This is
+ * address normalization, not a new semantic verdict: the existing reselection
+ * and payoff recheck still decide whether the corrected plan is sufficient. */
+function planSourceConditionQuote(row:any,candidate:Record<string,any>,seed:Record<string,unknown>):string|undefined {
+ const refs=[row?.ref,...(Array.isArray(row?.links)?row.links.filter((link:any)=>link?.status==='gap').map((link:any)=>link.ref):[])];
+ const plan=Array.isArray(candidate?.causalPlan)?candidate.causalPlan:[];
+ for(const ref of refs){
+  const match=/causalPlan\[(\d+)\]$/.exec(String(ref));
+  if(!match)continue;
+  const link=plan[Number(match[1])];
+  if(!link)continue;
+  const quotes=[
+   ...(Array.isArray(link.conditions)?link.conditions.map((condition:any)=>condition?.quote):[]),
+   link.action?.quote,
+  ].filter((quote:any):quote is string=>typeof quote==='string'&&quote.trim().length>=8&&String(seed?.storyCore||'').includes(quote));
+  if(quotes.length)return quotes[0];
+ }
+ return undefined;
+}
 export function normalizePremisePayoffGapRoutes(value:any,selection:PremiseSelectionResult):any {
  if(!Array.isArray(value?.payoffChecks))return value;
+ const restoreClaim=/(?:原池已写|按原池补正索引|计划索引|索引倒置|仅\s*causalPlan|causalPlan.{0,12}错引|按\s*restore)/;
+ const genuineLack=/(?:原池.{0,8}缺|缺少.{0,12}(?:条件|依据|证据|中间|决定)|未建立|未写|无法逐字|找不到原始)/;
  let changed=false;
  const rows=value.payoffChecks.map((initial:any)=>{
    let row=initial;
@@ -286,29 +313,54 @@ export function normalizePremisePayoffGapRoutes(value:any,selection:PremiseSelec
      if(statuses.includes('gap')){row={...row,status:'gap',reason:String(row.reason||'')+'；计划外独立结果存在明确因果缺口'};changed=true;}
      else if(statuses.includes('unknown')){row={...row,status:'unknown',reason:String(row.reason||'')+'；计划外独立结果缺少确认'};changed=true;}
    }
-   if(!row||row.status!=='gap'||row.gapRepair!==undefined)return row;
+   if(!row||row.status!=='gap')return row;
    const position=Number(/^S(\d+)\.payoff$/.exec(String(row.ref))?.[1])-1;
    const candidate=selection.selected[position],seed=selection.pool.find(item=>item.premiseId===candidate?.premiseId);
    if(!candidate||!seed)return row;
+   const planIndexOnly=row.gapRepair==='replace_from_pool'
+     &&restoreClaim.test(String(row.reason||''))&&!genuineLack.test(String(row.reason||''));
+   if(row.gapRepair!==undefined&&!planIndexOnly)return row;
    const quote=row.sourceConditionQuote;
    if(quote!==undefined && (typeof quote!=='string'||quote.trim().length<8||!String(seed.storyCore||'').includes(quote)))
      return row; // Invalid citations stay blocked; never guess or fabricate them.
+   const planQuote=quote===undefined&&planIndexOnly?planSourceConditionQuote(row,candidate,seed):undefined;
+   if(quote===undefined&&!planQuote){
+     if(row.gapRepair!==undefined)return row;
+     changed=true;
+     return {...row,gapRepair:'replace_from_pool'};
+   }
    changed=true;
-   return {...row,gapRepair:quote===undefined?'replace_from_pool':'restore_source_conditions'};
+   return {...row,gapRepair:'restore_source_conditions',sourceConditionQuote:quote??planQuote};
  });
  return changed?{...value,payoffChecks:rows}:value;
 }
 
 export function materializePremisePayoffReview(value:any,selection:PremiseSelectionResult,requireUnmappedCoverage=false):PremiseSelectionReview['issues']{
   const errors=premisePayoffReviewIssues(value,selection,requireUnmappedCoverage);if(errors.length)throw Error(errors.join('；'));
-  // Preserve unknown as a per-premise negative verdict: it is not approval,
-  // and it cannot poison already verified peers in the same source batch.
-  return value.payoffChecks.filter((row:PremisePayoffCheck)=>row.status!=='supported').map((row:PremisePayoffCheck)=>{
+  const issues:PremiseSelectionReview['issues']=[];
+  for(const row of value.payoffChecks as Array<PremisePayoffCheck&{sharingCheck?:{status?:string;reason?:string}}>){
     const item=premisePayoffCatalog(selection).find(item=>item.ref===row.ref)!;
-    return {kind:'selection_fit' as const,premiseId:item.premiseId,referencePremiseId:item.premiseId,
-      ...(row.status==='unknown'||row.gapRepair!=='restore_source_conditions'?{repairMode:'replace_from_pool' as const}:{}),
-      ...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
-      quote:String(selection.selected.find(p=>p.premiseId===item.premiseId)![row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
-      referenceQuote:String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore),reason:[...(row.status==='unknown'?['兑现必要条件未确认，不得锁定']:[]),row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')};
-  });
+    const selected=selection.selected.find(p=>p.premiseId===item.premiseId)!;
+    const sourceCore=String(selection.pool.find(p=>p.premiseId===item.premiseId)!.storyCore);
+    if(row.status!=='supported'){
+      // Preserve unknown as a per-premise negative verdict: it is not approval,
+      // and it cannot poison already verified peers in the same source batch.
+      issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,
+        ...(row.status==='unknown'||row.gapRepair!=='restore_source_conditions'?{repairMode:'replace_from_pool' as const}:{}),
+        ...(row.protocolIncomplete ? {protocolIncomplete:true} : {}),
+        ...(row.gapRepair==='restore_source_conditions' ? {planIndexOnly:true} : {}),
+        quote:String(selected[row.reversalCheck?.status==='gap'?'reversalEffect':'payoff']),
+        referenceQuote:sourceCore,reason:[...(row.status==='unknown'?['兑现必要条件未确认，不得锁定']:[]),row.reason,...(row.reversalCheck?.status==='gap'?['反转阶段：'+row.reversalCheck.reason]:[]),...(row.links||[]).filter(link=>link.status==='gap').map(link=>link.ref+'：'+link.reason)].join('；')});
+      continue;
+    }
+    // A payoff-complete premise can still predict a weak card. When the review
+    // judges its cost/relationship change not repeatable or arguable, replace it
+    // BEFORE card generation instead of paying for a card that fails sharing.
+    if(row.sharingCheck?.status==='weak'){
+      issues.push({kind:'selection_fit',premiseId:item.premiseId,referencePremiseId:item.premiseId,repairMode:'replace_from_pool',
+        quote:String(selected.payoff),referenceQuote:sourceCore,
+        reason:'传播潜力不足，成卡前替换：'+(row.sharingCheck.reason||'')});
+    }
+  }
+  return issues;
 }

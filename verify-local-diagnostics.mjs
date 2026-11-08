@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
-/** The performance acceptance target follows the canonical rule, but never
- * terminates a production request. No eval and no independent runtime timer. */
+/** The hard wall-clock deadline follows the canonical rule. This helper only
+ * measures a completed request for reporting; it never terminates a production request. */
 export function discoveryWallBudgetMs() {
   try {
     const source=fs.readFileSync(new URL('./server/shared/src/执行标准.ts',import.meta.url),'utf8');
@@ -298,6 +298,21 @@ export function summarizeRecentIdeaActivity(rows,completedAuditFinishedAt,backen
   cancelled:runs.filter(x=>x.status==='cancelled').length,
   finished:runs.filter(x=>x.status==='success'||x.status==='failed').length,
   runs,truncated:sorted.length>runs.length};
+}
+
+export function summarizeProjectRunFailures(runs) {
+  const rows = Array.isArray(runs) ? runs : [];
+  const failed = rows.filter(row => String(row?.status || '').toLowerCase() === 'failed');
+  const stageFailures = failed.filter(row => row?.stageFailureRecord === true);
+  const modelFailures = failed.filter(row => row?.stageFailureRecord !== true);
+  const latestStageFailure = stageFailures[0];
+  const latestModelFailure = modelFailures[0];
+  return {
+    failedModelRunCount: modelFailures.length,
+    stageFailureRecordCount: stageFailures.length,
+    latestFailureStage: latestStageFailure?.creationStageFailureStep
+      || latestStageFailure?.stage || latestModelFailure?.stage || null,
+  };
 }
 
 /** Translate live model-call activity into a diagnostic-only, evidence-scoped

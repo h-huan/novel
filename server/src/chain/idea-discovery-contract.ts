@@ -3,7 +3,7 @@ import { projectedPremisePromptView, compactRepeatedPremiseText, projectPremiseS
 import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
 import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE,premiseSourceSections} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, normalizeCausalPlanFieldNames, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
 import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
@@ -152,6 +152,41 @@ export function premiseSeedFactIssues(storyCore: unknown): string[] {
   return issues;
 }
 
+/** Structural payoff bridge check. When a pool item supplies `payoffBridge`,
+ * its decisiveResult/decider/basis must each be VERBATIM text of THIS premise's
+ * storyCore and must not be the same quote. A fabricated bridge (quotes that do
+ * not exist, or a result standing in for its own cause) is rejected
+ * deterministically before paid selection. A missing bridge stays with the
+ * existing independent payoff Gate, so older pools without the field do not
+ * fail closed. This never judges whether the bridge is causally sufficient. */
+export function premisePayoffBridgeIssues(raw: Record<string, unknown>, storyCore: string): string[] {
+  const bridge = raw.payoffBridge;
+  if (bridge === undefined || bridge === null) return [];
+  if (typeof bridge !== 'object' || Array.isArray(bridge)) return ['兑现桥接结构无效'];
+  const row = bridge as Record<string, unknown>;
+  const values = ['decisiveResult', 'decider', 'basis']
+    .map(field => typeof row[field] === 'string' ? String(row[field]).trim() : '');
+  if (values.some(value => value.length < 2)) return ['兑现桥接缺少结果、决定者或依据原文'];
+  if (new Set(values).size !== values.length) return ['兑现桥接的结果、决定者与依据不能是同一句'];
+  if (values.some(value => !storyCore.includes(value))) return ['兑现桥接引文不在本题材原文中'];
+  // Deterministic section placement: the decisive result must be stated in the
+  // reversal/payoff section, and the decider/basis must sit in the necessary
+  // conditions or the reversal section — not merely in the trigger or choice
+  // sections. This is a machine-checkable placement rule, never a semantic
+  // sufficiency judgment. A premise that fails only this placement check is
+  // still rejected before paid selection.
+  let sections: ReturnType<typeof premiseSourceSections>;
+  try { sections = premiseSourceSections({ storyCore }); } catch { return []; }
+  const byName = new Map(sections.map(section => [section.name, section.text] as const));
+  const reversal = byName.get('反转兑现') || '';
+  const necessary = byName.get('必要条件') || '';
+  if (!reversal.includes(values[0])) return ['兑现桥接的决定性结果必须出自反转兑现阶段'];
+  const inNecessaryOrReversal = (quote: string) => necessary.includes(quote) || reversal.includes(quote);
+  if (!inNecessaryOrReversal(values[1])) return ['兑现桥接的决定者必须出自必要条件或反转兑现阶段'];
+  if (!inNecessaryOrReversal(values[2])) return ['兑现桥接的采纳依据必须出自必要条件或反转兑现阶段'];
+  return [];
+}
+
 /** Initial and refill candidate pools share this bounded factual deduplication.
  * A common five-section format, genre or setting alone is NOT the same
  * causal story. Compare only the written action, established prerequisites and
@@ -203,12 +238,74 @@ export function materializePremiseSeedSections(raw:Record<string,unknown>):Recor
  return {...candidate,storyCore};
 }
 
+/** Restore ONLY the missing array wrapper around a closed `conditions` value.
+ * Some pool batches emit every causal step after the first as:
+ *   "conditions":{"field":...}],"result":{"field":...}
+ * instead of:
+ *   "conditions":[{"field":...}],"result":{"field":...}
+ * The missing `[` is the only structural difference. Story text, quotes,
+ * field names and verdicts are untouched; anything else remains invalid.
+ * This is transport recovery, not a generated candidate. */
+function restoreClosedConditionsArray(raw:string):string {
+ let out='', index=0;
+ const key='"conditions"';
+ while(index<raw.length){
+  const at=raw.indexOf(key,index);
+  if(at<0){out+=raw.slice(index);break;}
+  out+=raw.slice(index,at+key.length);
+  let cursor=at+key.length;
+  const copySpaces=()=>{while(cursor<raw.length&&/\s/.test(raw[cursor])){out+=raw[cursor];cursor+=1;}};
+  copySpaces();
+  if(raw[cursor]!==':'){out+=raw[cursor]??'';index=cursor+1;continue;}
+  out+=':';cursor+=1;copySpaces();
+  if(raw[cursor]!=='{'){out+=raw[cursor]??'';index=cursor+1;continue;}
+  let depth=0,inString=false,escaped=false,close=-1;
+  for(let probe=cursor;probe<raw.length;probe+=1){
+   const char=raw[probe];
+   if(inString){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')inString=false;continue;}
+   if(char==='"'){inString=true;continue;}
+   if(char==='{')depth+=1;
+   else if(char==='}'){depth-=1;if(depth===0){close=probe;break;}}
+  }
+  if(close<0){out+=raw.slice(cursor);break;}
+  let after=close+1;
+  while(after<raw.length&&/\s/.test(raw[after]))after+=1;
+  if(raw[after]===']'){
+   let comma=after+1;
+   while(comma<raw.length&&/\s/.test(raw[comma]))comma+=1;
+   if(raw[comma]===','){
+    let result=comma+1;
+    while(result<raw.length&&/\s/.test(raw[result]))result+=1;
+    if(raw.startsWith('"result"',result)){
+     out+='['+raw.slice(cursor,close+1)+']';
+     index=after+1; // Consume the misplaced closing bracket.
+     continue;
+    }
+   }
+  }
+  out+=raw.slice(cursor,close+1);
+  index=close+1;
+ }
+ return out;
+}
+function parseRecoveredPoolObject(raw:string):Record<string,unknown>|null {
+ try{
+  const value=JSON.parse(raw);
+  return value&&typeof value==='object'&&!Array.isArray(value)?value:null;
+ }catch{}
+ try{
+  const value=JSON.parse(restoreClosedConditionsArray(raw));
+  return value&&typeof value==='object'&&!Array.isArray(value)?value:null;
+ }catch{return null;}
+}
 /** Recover only complete JSON objects already closed inside a truncated
  * pool array. A JSON syntax/truncation failure must not erase seven genuinely
- * generated candidates because the eighth object was cut off. Never invent
- * missing array entries, autoclose an unfinished candidate, or substitute
- * recovered content for the unchanged structural and semantic quality Gates.
- * The caller reports the partial transport separately in its batch audit. */
+ * generated candidates because the eighth object was cut off. Never invent a
+ * missing candidate entry or autoclose an unfinished candidate; the only
+ * structural repair is restoring a known array wrapper around an already
+ * closed, authored value. Recovered content still passes the unchanged
+ * structural and semantic quality Gates. The caller reports the partial
+ * transport separately in its batch audit. */
 export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unknown>[] {
  if(typeof raw!=='string'||!raw.trim())return [];
  const header=/"pool"\s*:\s*\[/.exec(raw);
@@ -235,10 +332,11 @@ export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unkno
   else if(char==='}'){
    depth--;
    if(depth===0){
-    let value:any;
-    try{value=JSON.parse(raw.slice(start,i+1));}catch{return result;}
-    if(!value||typeof value!=='object'||Array.isArray(value))return result;
-    result.push(value);
+    // A malformed sibling must not discard later independently closed
+    // candidates. Only this object is skipped; the next object boundary is
+    // still scanned with the same brace/string state machine.
+    const value=parseRecoveredPoolObject(raw.slice(start,i+1));
+    if(value)result.push(value);
     start=-1;
    }
   }
@@ -283,8 +381,12 @@ export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
  const reject=(reason:string)=>{invalidFields++;invalidFieldReasons[reason]=(invalidFieldReasons[reason]||0)+1;};
  for(const raw of rawCandidates){
   if(!raw||typeof raw!=='object'||Array.isArray(raw)){invalidShape++;continue;}
-  const item=materializePremiseSeedSections(raw as Record<string,unknown>);
-  if(!item){reject('五节原文不完整或与另一版本冲突');continue;}
+  const materialized=materializePremiseSeedSections(raw as Record<string,unknown>);
+  if(!materialized){reject('五节原文不完整或与另一版本冲突');continue;}
+  // Lossless transport: map Chinese section names to the English narrative
+  // fields the causal-plan schema requires, so the deterministic selection and
+  // the payoff review never reject a correct plan purely for field-name language.
+  const item=normalizeCausalPlanFieldNames(materialized);
   const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
   const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
   // Share the SAME visible-title envelope as the final card Gate. Before
@@ -297,6 +399,8 @@ export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
   }
   const issues=premiseSeedFactIssues(core);
   if(issues.length){reject(issues[0]);continue;}
+  const bridgeIssues=premisePayoffBridgeIssues(raw as Record<string,unknown>,core);
+  if(bridgeIssues.length){reject(bridgeIssues[0]);continue;}
   if(prohibitedFictionNames({workingTitle:title,storyCore:core}).length){invalidNaming++;continue;}
   candidates.push(item);
  }
@@ -596,6 +700,9 @@ ${includePreselectionPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002�
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
 - 创作标签仅规定该卡已选择的类型期待，不是新增事件的许可证；同样标签可产生不同关系、策略、代价和阅读体验。先找本卡真实可复述的选择与局面改变，再决定标题和首屏怎样表达，不能为了标签而加不曾在原池出现的胜利、背叛、笑点或悲剧。标题竞争力和真实因果要分别成立，不得以其一代替另一项。
 - 先分别检查title与每个alternateTitles是否能被没看过本卡的目标平台普通读者独立理解：只凭标题须能知道发生了何种反常关系、涉及谁的具体利益或面临何种迫切风险，从而产生可复述的下一步追问。备选标题同样必须有点击理由，不能把空泛、需读概要才懂或只会凑长度的词句当成不合格主标题的备用品。孤立的专业物品名称、器物动作、职业行话和需要读完概要才懂的隐喻，即使与原文真实吻合，也没有完成标题点击承诺。请从本卡已确认的对手、风险、选择及局势变化中提炼明确表达，不能靠暂名、空泛反转或新增事实。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
+- protagonist 字段若已确认题材明确给出姓名，必须以“姓名：”开头；未具名只保留角色描述，不得新增姓名、姓氏或外号。
+- 【结构化前逐项自检，不留给终审】①每个独立结果必须有实际决定者、采纳依据、执行/生效动作；只有物件被改、系统显示异常或一方声称，不能直接证明具体责任人。②指认具体责任人必须有能区分其与其他可能责任人的实际经手、授权或行为证据；写不出就改成不指认具体人的结果。③标题必须让普通读者只看标题就知道谁遇到什么具体损失、反常关系或未解问题，不能只写动作、道具、职业或需读hook才懂的意象。④ending每个独立结果先列出决策者、采纳依据、执行动作；缺一项就在本次结构化内重写该段，不留给终审。
+- 【causalPlan 直接因果索引自检】每个环节的 action 只能直接产生它实际改变的结果；若它只是让下一步成为可能，就必须把下一步作为该环结果并接续行动—条件—结果，不能跳绑后续终局。conditions 必须是该环 result 实际成立所需、且已在同 ID 原池原文写出的条件，不能用结果断言、后续行动或评审新造条件。逐环自问：删掉这个 action，result 还会发生吗？不会才是直接因果；若 action 只改变下一步条件，另建一环。
 - hook、description、setting、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；ending与noveltyProof.readerQuestion由服务器从同一已审来源继承，不需再次生成。能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
 - 重要原始证据的可用状态必须跨字段保持一致。若原池后续靠原册、日志、监控、存根或留样做决定性核验，就不能在description或scopeBreakdown新增这些证据已被完全泡毁、烧毁、遗失或无法辨识，然后仍依赖同一份原件核对成功；只有原池明确建立了可用副本、补救动作及对应权限，才可继续写该核验。其他物件、人员、时间和权限同样遵守已建立的可用条件，不允许为了情绪冲突新增会使后续因果不成立的破坏事件。
 - 最终 Gate 独立验收，失败须如实拒绝；不合格卡不得直接放行。服务器保留已合格卡，并可在原有共享预算内对真实缺额启动一次有界轻量候选补足、候选独立复核和完整卡终审；模型此轮只能忠实结构化当前已锁定身份，不得自行补生、换身份或改写其它题材。

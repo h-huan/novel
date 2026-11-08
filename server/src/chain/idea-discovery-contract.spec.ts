@@ -1,6 +1,7 @@
 import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
 import { readyOriginalPoolReselectionPayload, normalizeTargetedPremiseReselection } from './premise-selection-review';
-import { premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices } from './idea-discovery-contract';
+import { premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices, premisePayoffBridgeIssues } from './idea-discovery-contract';
+import { premiseCausalPlanIssues, normalizeCausalPlanFieldNames } from './premise-causal-plan';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
@@ -1117,6 +1118,29 @@ describe('bounded pool JSON partial transport recovery never invents weak candid
   const row={...card('B1-P1'),extra:{quote:'她说"不行"，接着行动',facts:['拥有凭证','看见拒绝']}};
   expect(recoverClosedPremisePoolObjects('{"pool":['+JSON.stringify(row)+',{"premiseId":"B1-P2"')).toEqual([row]);
  });
+ it('recovers every complete sibling when only the known conditions array wrapper is missing',()=>{
+  const withPlan=(id:string)=>({...card(id),causalPlan:[{
+   action:{field:'主动选择',quote:section('主动选择')},
+   conditions:[{field:'处境触发',quote:section('处境触发')}],
+   result:{field:'反转兑现',quote:section('反转兑现')},
+  }]});
+  const valid=JSON.stringify(withPlan('B1-P1'));
+  // Reproduce the captured transport defect exactly: the `[` before the
+  // conditions object is missing, so the valid array's closing `]` sits
+  // between conditions and result. Story text is untouched.
+  const malformed=Array.from({length:7},(_,i)=>
+   JSON.stringify(withPlan('B1-P'+(i+2))).replace('"conditions":[{','"conditions":{'));
+  const recovered=recoverClosedPremisePoolObjects('{"pool":['+[valid,...malformed].join(',')+']}');
+  expect(recovered.map(row=>row.premiseId)).toEqual(Array.from({length:8},(_,i)=>'B1-P'+(i+1)));
+  expect((recovered[1] as any).causalPlan[0].conditions).toHaveLength(1);
+  expect(screenPremisePoolBatch(recovered).candidates).toHaveLength(8);
+ });
+ it('keeps later complete objects after an unrelated malformed sibling without fabricating the first',()=>{
+  const later=card('B1-P2');
+  const recovered=recoverClosedPremisePoolObjects(
+   '{"pool":[{"premiseId":,"workingTitle":"x"},'+JSON.stringify(later)+']}');
+  expect(recovered.map(row=>row.premiseId)).toEqual(['B1-P2']);
+ });
 });
 
 describe('shared premise transport and preallocated slot validation',()=>{
@@ -1189,4 +1213,51 @@ it('transports the complete pre-vetted premise to final review without duplicati
  expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(before);
  // The packed prompt is not the server's canonical evidence and cannot add a new fact.
  expect(JSON.stringify(card)).not.toContain('fromSourceSections');
+});
+
+it('requires a structural payoff bridge to quote its own premise and keeps older pools compatible',()=>{
+ const core='【处境触发】家属签字时老人睁着眼。\n【主动选择】我摊开两周的记录本。\n【必要条件】主治医生有权复测，依据是三次按约眨眼。\n【反转兑现】主治复测后评估单改为存在意识，放弃签字作废。\n【分类流派机制】他们把我当只会擦身子的护工。';
+ // Three verbatim, distinct quotes pass.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toEqual([]);
+ // A fabricated quote, a result standing in for its own cause, or a
+ // missing field must be rejected before paid selection.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'不存在的结论',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'评估单改为存在意识',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{decisiveResult:'评估单改为存在意识'}},core)).toHaveLength(1);
+ // Section placement: a decider quoted only from the trigger section, or a
+ // decisive result quoted from the choice section, is rejected deterministically.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'家属签字时老人睁着眼',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'我摊开两周的记录本',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ // Older pools that never authored the field stay with the independent payoff Gate.
+ expect(premisePayoffBridgeIssues({},core)).toEqual([]);
+});
+
+it('losslessly maps Chinese section names in causalPlan fields to English narrative fields',()=>{
+ const item={premiseId:'P1',
+   openingEvent:'触发事件原文足够长',activeChoice:'主角主动行动原文足够长',
+   escalation:'必要条件与反转原文足够长',reversalEffect:'反转结果原文足够长',payoff:'兑现结果原文足够长',
+   causalPlan:[
+     {action:{field:'主动选择',quote:'主角主动行动原文足够长'},
+      conditions:[{field:'处境触发',quote:'触发事件原文足够长'}],
+      result:{field:'必要条件',quote:'必要条件与反转原文足够长'}},
+     {action:{field:'反转兑现',quote:'反转结果原文足够长'},
+      conditions:[{field:'必要条件',quote:'必要条件与反转原文足够长'}],
+      result:{field:'反转兑现',quote:'兑现结果原文足够长'}},
+   ]};
+ // Before: Chinese section names fail the causal-plan validator.
+ expect(premiseCausalPlanIssues(item).length).toBeGreaterThan(0);
+ const normalized=normalizeCausalPlanFieldNames(item);
+ // After: English fields, final result = payoff, plan is valid, story text untouched.
+ expect(premiseCausalPlanIssues(normalized)).toEqual([]);
+ expect(normalized.causalPlan[0].action).toEqual({field:'activeChoice',quote:'主角主动行动原文足够长'});
+ expect(normalized.causalPlan[1].result).toEqual({field:'payoff',quote:'兑现结果原文足够长'});
+ expect(normalized.openingEvent).toBe(item.openingEvent);
+ // Already-English fields are untouched.
+ expect(normalizeCausalPlanFieldNames({causalPlan:[{action:{field:'activeChoice',quote:'x'}}]})).toEqual(
+   {causalPlan:[{action:{field:'activeChoice',quote:'x'},conditions:undefined,result:undefined}]});
 });

@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict } from './creation-outline-checkpoint';
+import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict, outlineConflictChapterOrders } from './creation-outline-checkpoint';
 import { classifyGateFailure, GateRejectionError } from '../modules/writing-quality/gate-failure';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
@@ -109,6 +109,17 @@ describe('creation outline checkpoints (noncanonical)', () => {
     work.invalidateChapters('p1');
     expect(work.load('p1','chapter_draft_1',source)).toBeNull();
     expect(work.load('p1','chapter_0',source)).toBeNull();
+  });
+
+  it('extracts only explicitly named conflict chapters and never guesses', () => {
+    expect(outlineConflictChapterOrders([
+      { location1: '本批·第4章.content', location2: '确认故事.json.confirmedStory.setting' },
+      { location1: '第2章.content', location2: '第2章.scenes' },
+      '第5章.content 与 第1章.setting 无法同时成立',
+    ])).toEqual([0, 1, 3, 4]);
+    expect(outlineConflictChapterOrders([])).toEqual([]);
+    expect(outlineConflictChapterOrders([{ location1: '确认故事', location2: '世界规则' }])).toEqual([]);
+    expect(outlineConflictChapterOrders([{ location1: '本批·条目0.content' }])).toEqual([]);
   });
 
   it('does not keep orphaned checkpoints after project removal', () => {

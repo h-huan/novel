@@ -32,11 +32,15 @@ export function extractOutlineFactPatch(value:unknown):Record<string,unknown> {
    const mapped:Record<string,unknown>={};
    for(const row of rows){
      const item=record(row);
-     if(!item||Object.keys(item).some(key=>!['field','value'].includes(key))
+     if(!item||Object.keys(item).some(key=>!['field','value','find','replace'].includes(key))
        ||typeof item.field!=='string'||!item.field.trim()
-       ||!Object.hasOwn(item,'value')||Object.hasOwn(mapped,item.field))
-       throw Error('事实局部修复必须返回唯一且完整的field/value补丁，不能猜测片段或重复路径');
-     mapped[item.field]=item.value;
+       ||Object.hasOwn(mapped,item.field)
+       ||(Object.hasOwn(item,'value')&&(Object.hasOwn(item,'find')||Object.hasOwn(item,'replace'))))
+       throw Error('事实局部修复必须返回唯一且完整的field/value或field/find/replace补丁，不能猜测片段或重复路径');
+     if(Object.hasOwn(item,'value'))mapped[item.field]=item.value;
+     else if(typeof item.find==='string'&&typeof item.replace==='string'
+       &&item.find.trim()&&item.find!==item.replace)mapped[item.field]={find:item.find,replace:item.replace};
+     else throw Error('事实局部修复的find/replace必须是不同的非空字符串');
    }
    patch=mapped;
  }
@@ -84,9 +88,20 @@ export function applyOutlineFactPatch(chapter:Record<string,any>,patch:unknown):
         ||Array.isArray(prior)&&!/^(0|[1-9]\d*)$/.test(part))throw Error('局部事实修复路径不存在：'+key);
       prior=prior[part];
     }
-    if(typeof value!==typeof prior||(value===null)!==(prior===null)||Array.isArray(value)!==Array.isArray(prior))
+    let nextValue=value;
+    if(typeof prior==='string'&&value&&typeof value==='object'&&!Array.isArray(value)){
+      const span=value as Record<string,unknown>;
+      if(Object.keys(span).length!==2||typeof span.find!=='string'||typeof span.replace!=='string')
+        throw Error('局部事实修复的字段片段补丁只能包含find/replace：'+key);
+      const find=span.find,replace=span.replace;
+      if(!find.trim()||find===replace)throw Error('局部事实修复的find/replace必须是不同的非空片段：'+key);
+      if(prior.split(find).length-1!==1)
+        throw Error('局部事实修复的find必须在当前字段中唯一逐字存在：'+key);
+      nextValue=prior.split(find).join(replace);
+    }
+    if(typeof nextValue!==typeof prior||(nextValue===null)!==(prior===null)||Array.isArray(nextValue)!==Array.isArray(prior))
       throw Error('局部事实修复不能改变字段类型：'+key);
-    return {parts,normalized,value};
+    return {parts,normalized,value:nextValue};
   });
   for(let i=0;i<changes.length;i++)for(let j=0;j<i;j++){
     const a=changes[i].normalized,b=changes[j].normalized;
@@ -299,7 +314,7 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   const primaryConflict=conflict.split(/[；;]/,1)[0];
   const primaryFragments=conflictFragments(primaryConflict)
    .filter(fragment=>evidenceFragments.includes(fragment)&&[...old.values()].some(value=>value.includes(fragment)));
-  const targetFragments=(primaryFragments.length?primaryFragments:evidenceFragments)
+  const targetFragments=[...new Set([...primaryFragments,...evidenceFragments])]
    .filter(fragment=>[...old.values()].some(value=>value.includes(fragment)));
   // A full-field quotation can change when an unrelated sentence changes. Require
   // the patch's actual diff to touch a quoted assertion from the conflict itself.

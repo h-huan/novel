@@ -69,6 +69,21 @@ it('从原因果账目定位具体结果字段和全部结果索引，不猜测�
   expect(result.resultFields).toEqual(expect.arrayContaining(['characterActions.0.result', 'characterStates.0.stateAfter', 'foreshadowingRecover.0.method']));
   expect(candidate.characterActions[0].result).toBe('纠纷已解除');
 });
+it('flattens server result shards instead of losing every gap path to an array audit', () => {
+  const candidate = { content: '主角提出调解，被对方明确拒绝。', characterActions: [{ action: '提出调解', result: '纠纷已解除' }] };
+  const anchors = causalEvidenceAnchorOptions(JSON.stringify([candidate]), {});
+  const actionId = anchors.find(a => a.path === '0.characterActions.0.action')!.id;
+  const resultId = anchors.find(a => a.path === '0.characterActions.0.result')!.id;
+  const failure = Object.assign(actionGap(), { planningActionAudit: [
+    { transitions: [{ status: 'supported', actionAnchorId: actionId, resultAnchorId: resultId, reason: '另一分片已通过' }] },
+    { transitions: [{ status: 'gap', actionAnchorId: actionId, resultAnchorId: resultId,
+      actionEvidence: '提出调解', resultEvidence: '纠纷已解除', reason: '提出不等于对方接受' }] },
+  ] });
+  expect(chapterActionRepairEvidence(candidate, failure).gaps).toEqual([
+    expect.objectContaining({ actionPath: 'characterActions.0.action', resultPath: 'characterActions.0.result',
+      reason: '提出不等于对方接受' }),
+  ]);
+});
 it('事实通过不能盖过行动缺口：完整拒绝作为同一章局部修复依据', async () => {
   const facts = vi.fn().mockResolvedValue(factPass);
   const actions = vi.fn().mockRejectedValue(actionGap());

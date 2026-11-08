@@ -28,7 +28,7 @@ export interface PremiseSelectionReview {
   passed: boolean;
   sourceReviewReuse?: { reused: number; reviewed: number };
   issues: Array<{ kind: 'overlap' | 'source_drift' | 'selection_fit'; premiseId: string; referencePremiseId: string;
-    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool'; protocolIncomplete?: boolean }>;
+    quote: string; referenceQuote: string; reason: string; field?: string; repairMode?: 'replace_from_pool'; protocolIncomplete?: boolean; planIndexOnly?: boolean }>;
   sourceChecks?: PremiseSourceCheck[];
   payoffChecks?: PremisePayoffCheck[];
   genreChecks?: Array<{ref:string;status:string;field?:string;quote?:string;evidenceRef?:string;reason:string}>;
@@ -291,11 +291,12 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
     if (slot.mode === 'replace_from_pool' && row.premiseId === slotId) throw new Error('已证实同构或原池缺少兑现条件的题材必须从原池换选，不能保留原身份补造条件或只换表述');
     if (!plan.availableCandidates.some(item => item.premiseId === row.premiseId)) throw new Error('定向重选须选择可用原池身份，不能复制正常项、已淘汰同构项或补生题材');
     // An independently evidenced citation-only defect must not regenerate ten
-    // already-expanded story fields. Only selection-fit (not source-drift or
-    // overlap) may preserve the original identity with a plan-only payload.
+    // already-expanded story fields. Only a plan-index-only selection-fit
+    // finding may preserve the original identity with a plan-only payload;
+    // category/source drift still needs its actual corrected story fields.
     // The plan is still anchored and independently reviewed after normalization.
     const planOnly = row.premiseId === slotId && slot.mode === 'correct_or_replace_from_pool'
-      && slot.issues.length > 0 && slot.issues.every(issue => issue.kind === 'selection_fit')
+      && slot.issues.length > 0 && slot.issues.every(issue => issue.kind === 'selection_fit' && issue.planIndexOnly === true)
       && Object.keys(row).every(key => key === 'premiseId' || key === 'causalPlan')
       && Array.isArray(row.causalPlan);
     if (planOnly) {
@@ -310,6 +311,9 @@ export function normalizeTargetedPremiseReselection(value: unknown, original: Pr
 
 /** Isolate evidenced failures after completed reviews, without rewriting retained premises.
  * Protocol errors and incomplete reviews must never be treated as a partial pass.
+ * A correct_or_replace_from_pool slot is a same-identity correction: this
+ * retention view excludes it from the verified count, but the caller must add
+ * it to the delivery floor and repair it before spending fresh pool identities.
  */
 export function retainReviewedPremises(selection: PremiseSelectionResult, review: PremiseSelectionReview,
   protectedIds: readonly string[] = []) {

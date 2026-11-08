@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {IDEA_DISCOVERY_MAX_WALL_MS} from '../../shared/src/执行标准';
-import {provenFullCardDeficit,missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle,neededFreshPremiseSeeds} from './discovery-fulfillment';
+import {provenFullCardDeficit,missingRequestedIdeaSlots,affordableFullCardRefillCount,affordableReviewedPremiseCount,premiseReviewCallFloor,reserveFinalRefillReviewCapacity,preselectionRecoveryTarget,minimumReselectionReviewCalls,plannedPreselectionCount,fundedSourceReviewGroups,retainValidStructuredIdeaTitle,neededFreshPremiseSeeds,affordableReselectionSlotCount} from './discovery-fulfillment';
 
 it('only proves an early full-card shortfall from settled, not pending, cards',()=>{
  expect(provenFullCardDeficit(5,6,1,4)).toBe(2);
@@ -35,6 +35,30 @@ it('keeps final-card refill review credits without cloning or overspending the o
  expect(()=>idle.refundReservedCalls(1)).toThrow('超过已使用额度');
  expect(empty.remaining).toBe(4);
  expect(()=>reserveFinalRefillReviewCapacity({remaining:-1},1,2)).toThrow();
+ // releaseReserve hands the held-back refill credits to a delivery-gap
+ // reselection without cloning them: the view returns to the REAL remaining.
+ const released={remaining:12};
+ const held=reserveFinalRefillReviewCapacity(released,4,2);
+ expect(held.reserved).toBe(2);
+ expect(held.remaining).toBe(10);
+ held.remaining-=9;expect(released.remaining).toBe(3);expect(held.remaining).toBe(1);
+ held.releaseReserve();
+ expect(held.reserved).toBe(0);
+ expect(held.remaining).toBe(3);
+ expect(released.remaining).toBe(3);
+});
+
+it('keeps a partial delivery-gap reselection only when the real source budget can vet it',()=>{
+ // sourceBatchSize=2, selectedCount=8 => floor(count) = ceil(count/2)+1
+ expect(affordableReselectionSlotCount(5,8,6,2,0)).toBe(5);
+ expect(affordableReselectionSlotCount(5,8,4,2,0)).toBe(5);
+ expect(affordableReselectionSlotCount(5,8,3,2,0)).toBe(4);
+ expect(affordableReselectionSlotCount(5,8,2,2,0)).toBe(2);
+ expect(affordableReselectionSlotCount(5,8,1,2,0)).toBe(0);
+ expect(affordableReselectionSlotCount(3,8,3,2,0)).toBe(3);
+ expect(affordableReselectionSlotCount(0,8,9,2,0)).toBe(0);
+ expect(()=>affordableReselectionSlotCount(-1,8,3,2,0)).toThrow();
+ expect(()=>affordableReselectionSlotCount(3,0,3,2,0)).toThrow();
 });
 
 it('reserves independent quality-review calls for each affordable refill batch',()=>{
@@ -192,8 +216,8 @@ it('does not freeze a prepared refill at a deficit that can still grow before th
  expect(()=>plannedFullCardRefillCount(3,2,0,true)).toThrow();
 });
 
-it('uses eight minutes only as the discovery performance acceptance target',()=>{
- expect(IDEA_DISCOVERY_MAX_WALL_MS).toBe(8*60*1000);
+it('uses twelve minutes as the hard idea-discovery wall-clock deadline',()=>{
+ expect(IDEA_DISCOVERY_MAX_WALL_MS).toBe(12*60*1000);
 });
 
 it('does not turn spare review credits into repeated source partitions when the batch already fits',()=>{

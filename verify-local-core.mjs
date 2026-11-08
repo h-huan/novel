@@ -253,12 +253,24 @@ function chapterSummary(chapter) {
 
 function runSummary(run) {
   if (!run) return null;
-  return pick(run, [
+  const summary = pick(run, [
     'id', 'stage', 'scenario', 'step_key', 'stepKey', 'status', 'gate_status', 'gateStatus',
     'chapter_index', 'chapterIndex', 'model', 'provider', 'error', 'created_at', 'createdAt', 'finished_at', 'finishedAt',
     'started_at', 'startedAt', 'duration_ms', 'durationMs', 'prompt_version', 'promptVersion',
     'context_version', 'contextVersion', 'standard_version', 'standardVersion',
   ]);
+  // A creation-stage failure record is a diagnostic row for an earlier real
+  // failure, not a second model call. Surface its real step and let callers
+  // exclude it from model-failure counts.
+  const raw = String(run.output_text || '');
+  if (/"kind"\s*:\s*"creation_stage_failure"/.test(raw)) {
+    summary.stageFailureRecord = true;
+    try {
+      const payload = JSON.parse(raw);
+      if (typeof payload?.step === 'string' && payload.step.trim()) summary.creationStageFailureStep = payload.step;
+    } catch {}
+  }
+  return summary;
 }
 
 
@@ -783,7 +795,7 @@ function latestRunLine(result) {
   if (!run) return '未找到 generation run';
   const bits = [
     `status=${run.status ?? 'unknown'}`,
-    `stage=${run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown'}`,
+    `stage=${run.creationStageFailureStep ?? run.stage ?? run.scenario ?? run.step_key ?? run.stepKey ?? 'unknown'}`,
   ];
   if (run.error) bits.push(`error=${String(run.error).replace(/\s+/g, ' ').trim()}`);
   return bits.join(' · ');

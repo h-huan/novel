@@ -1,5 +1,5 @@
 import {bindModelRequestClock,remainingModelRequestTime} from './model-request-clock';
-import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict } from './creation-outline-checkpoint';
+import { CreationOutlineCheckpoint, hasProvenOutlineCheckpointConflict, outlineConflictChapterOrders } from './creation-outline-checkpoint';
 import {creationChapterContracts,creationResponsibilityPlan,type CreationChapterContract} from './creation-chapter-contract';
 import {chapterConditionReviewIssues, chapterConditionPlanningGapIssues, materializeChapterConditionSources, chapterConditionTaskAnchors, chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import {CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE,describeChapterResponsibilityPlan} from '../../shared/src/chapter-responsibility-review';
@@ -11,7 +11,7 @@ import { validateRollingEntityProposals } from './rolling-entity-proposals';
 import {SOURCE_BINDING_EXAMPLE,projectPremiseSourceChoices,compactRepeatedPremiseText} from './premise-source-bindings';
 import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import {plannedPreselectionCount,fundedSourceReviewGroups} from './discovery-fulfillment';
-import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, neededFreshPremiseSeeds, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls } from './discovery-fulfillment';
+import { provenFullCardDeficit, missingRequestedIdeaSlots, plannedFullCardRefillCount, neededFreshPremiseSeeds, affordableFullCardRefillCount, affordableReviewedPremiseCount, premiseReviewCallFloor, reserveFinalRefillReviewCapacity, preselectionRecoveryTarget, minimumReselectionReviewCalls, affordableReselectionSlotCount } from './discovery-fulfillment';
 import { assertPremiseCausalPlans, bindPremiseCausalPlan, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, premiseCausalPlanExample, premiseCausalPlanRepairInput, premiseCausalPlanIssues, applyPremiseCausalPlanRepairs } from './premise-causal-plan';
 import { recordCreationStageFailure, type CreationFailureOrigin } from './creation-stage-failure';
 import {reviewChangedPremiseSources,cacheVerifiedSourceReview,type PremiseSourceReceipts} from './premise-source-reuse';
@@ -32,6 +32,7 @@ import { isReviewOutputCapacityError, splitReviewMaterial } from './review-group
 import { premiseCategoryFitIssues, materializePremiseCategoryFit, premiseCategoryReviewDirective, scopePremiseReviewCategoryStandards, scopePremiseSelectionCategoryStandards, corePremiseReviewStandard } from './premise-category-fit';
 import { bindPremiseCategory, premiseCategoryIdentityDirective } from './premise-category-identity';
 import {OUTLINE_QUANTITY_SCOPE_POLICY} from '../../shared/src/system-workflow-rules.registry';
+import { IDEA_DISCOVERY_MAX_WALL_MS } from '../../shared/src/执行标准';
 import { reviewChapterDependencies, chapterActionRepairEvidence, planningChapterForCausalReview } from './chapter-dependency-review';
 import { SOURCE_EVIDENCE_REFERENCE_POLICY, OUTLINE_FACT_PATCH_ADDRESS_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyOutlineFactPatch, outlineFactPatchSynchronizationIssues, outlineFactRepairTargetPaths, alignOutlineFactCountProjections, OUTLINE_FACT_REPAIR_FIELDS , extractOutlineFactPatch } from './outline-fact-patch';
@@ -54,7 +55,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { discoveryRequestAsyncStorage } from '../common/creation-context';
 import { chapterObligationEvidencePrompt, materializeChapterObligationEvidence, chapterMissingItemTexts, chapterObligationWritingContext, chapterObligationRepairTargets, mergeChapterObligationRepairs, chapterObligationCatalog, chapterObligationReviewDirective, validateChapterObligationReview, parseChapterAlignmentReview, mergeChapterReviewContractCorrection, chapterAlignmentReviewContract, chapterReviewContractCorrectionDirective } from './chapter-alignment-contract';
 import { upstreamRepairTrigger, upstreamDiagnosisInput, validateUpstreamDiagnosis } from './upstream-repair-routing';
-import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs } from './temporal-review-coverage';
+import { temporalReviewBatches, mergeTemporalReviewBatch, temporalReviewCatalog, validateTemporalReview, temporalReviewPrompt, temporalReviewRepairTargets, temporalReviewRepairPrompt, applyTemporalReviewRepairs, temporalNumbers } from './temporal-review-coverage';
 import { ideaReviewEvidenceCatalog, resolveIdeaReviewEvidence, ideaReviewEvidenceReferenceIssues, ideaPayoffBridgeIssues } from './idea-review-evidence';
 import { applyOutlineCandidateFactPatches, outlineCandidateFactRepairTargetIssues, OUTLINE_FACT_REPAIR_LIMITS } from './outline-candidate-fact-repair';
 import { sourceReviewSelectionView, materializePremiseSourceReview, premiseSourceComparisonCatalog, premiseSourceReviewIssues, premiseSelectionFailureReasons, premiseRefillFailureReasons, retainReviewedPremises, retainPremiseReviewEvidence, normalizeTargetedPremiseReselection, readyOriginalPoolReselectionPayload, premiseReselectionPlan, premiseSelectionReviewIssues, overlapReviewSelectionView, premiseReselectionPromptSelection, retainUnchangedOverlapIssues, type PremiseSelectionReview } from './premise-selection-review';
@@ -128,7 +129,7 @@ import {
 import { detectForbiddenTells, isLanguageHardline, normalizeProseLayout, type HardlineFinding, type HardlineProfile } from './hardline-scanner';
 import { assessHardlineRepairProgress } from './hardline-repair-progress';
 import { detectSourceCountdownRisk } from './source-countdown-consistency';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
+import { confirmedStoryCharacterNames, confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
 import { buildWorldSourceReviewPrompt, describeWorldSourceReview, materializeWorldSourceReview, applyUncommittedWorldPatch, worldSourceAnchors, worldCreationAuthority, worldReviewFailureOrigin, type WorldSourceReview } from './world-source-review';
 import { STORY_FACT_PRIORITY } from '../modules/module-standards/module-standards.seed';
 import { buildStoryFoundation } from '../modules/canon/canon-policy';
@@ -4889,8 +4890,8 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       return active.task;
     }
     const discoveryRequestStartedAt = new Date(requestReceivedAt).toISOString();
-    // The ten-minute target belongs to verification only. Production keeps
-    // user cancellation, per-provider timeouts, quality gates and call budgets.
+    // Hard wall-clock deadline: exceeding the idea-discovery budget aborts
+    // in-flight work and marks the request incomplete instead of running on.
     const task = generationTasks.run('discovery', discoveryRequestId, '', () =>
       discoveryRequestAsyncStorage.run({ discoveryRequestId }, async () => {
       try {
@@ -4911,7 +4912,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         });
         throw error;
       }
-    }));
+    }), { deadlineAt: Date.now() + IDEA_DISCOVERY_MAX_WALL_MS });
     this.ideaDiscoveryInFlight.set(requestKey, {
       task, canonicalRequestId: discoveryRequestId, requestIds: new Set([discoveryRequestId]),
     });
@@ -4967,6 +4968,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         reviewGroupingMode:discoveryBudget.reviewGroupingMode,
         sourceBatchSize:discoveryBudget.sourceBatchSize,
         presentationBatchSize:discoveryBudget.presentationBatchSize,
+        poolBatchSize:discoveryBudget.poolBatchSize,
         sourceMaxPhysicalCalls:discoveryBudget.sourceMaxPhysicalCalls,
         presentationMaxPhysicalCalls:discoveryBudget.presentationMaxPhysicalCalls,
         premiseReselectionMaxCalls:discoveryBudget.premiseReselectionMaxCalls,
@@ -5075,7 +5077,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
       const exampleWords = configuredTargetWords ?? (dto.storyType === 'short_story' ? 20_000 : 300_000);
       const exampleChapters = dto.storyType === 'short_story' ? 4 : 90;
       const hookRequirement = ideaHookRequirement(dto.storyType);
-      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"主角身份、欲望和弱点","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务","outcome":"此阶段完成后发生的具体状态变化"}],"scopeReason":"篇幅核算理由","ending":"核心冲突的具体解决、人物最终选择与代价；只展开已选胚子的兑现方向","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
+      const outputSchema = `{"ideas":[{"title":"4-16字标题","alternateTitles":["备选1","备选2"],"storyType":"${dto.storyType}","angle":"切入角度","hook":"${hookRequirement}","description":"140-240字具体事件链","setting":"时代与必要世界背景","protagonist":"若故事明确给出主角姓名，以‘姓名：X；’开头并保留身份、欲望和弱点；未具名只写角色描述，不得新增姓名","characters":["主要角色"],"styleTags":["补充标签"],"storyTone":${JSON.stringify(dto.storyTone)},"writingStyle":${JSON.stringify(dto.writingStyle)},"webNovelGenre":${JSON.stringify(dto.webNovelGenre)},"pov":${JSON.stringify(dto.pov)},"targetPlatform":"${dto.platform}","tone":"平台与读者适配说明","estimatedWords":${exampleWords},"plannedChapters":${exampleChapters},"scopeBreakdown":[{"arc":"阶段","chapters":${exampleChapters},"reason":"事件和人物任务","outcome":"此阶段完成后发生的具体状态变化"}],"scopeReason":"篇幅核算理由","ending":"核心冲突的具体解决、人物最终选择与代价；只展开已选胚子的兑现方向","coreConflict":"双方可主动行动的核心冲突","uniquePoint":"第一章即可感知的独特卖点","mainReversal":"改变目标、关系或胜负条件的反转","noveltyProof":{"familiarShell":"读者一眼能懂的类型外壳","uncommonCombination":"本题材独有的职业/关系/机制组合","avoidedPatterns":"相对历史题材主动避开的机制与反转","irreplaceableWhy":"去掉这个职业/关系/机制任一项后故事为何不成立","secondOrderConsequence":"规则启动后的二阶后果：谁额外受益/受损、关系或目标如何被迫改变","readerQuestion":"读者看完首屏后必须追问的一个具体问题"}}]}`;
 
       const outputExample = JSON.parse(outputSchema);
       const exampleIdea = outputExample.ideas[0];
@@ -5177,6 +5179,12 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
             // one-step schema incorrectly taught direct opening-action->final-payoff
             // even when this story needs an intermediate executor/decision.
             causalPlan:premiseCausalPlanExample(),
+            // Structural payoff bridge: the model must quote the decisive
+            // result and its real decider/basis from the five sections. The
+            // server deterministically rejects a fabricated bridge (quotes not
+            // in this premise) and the existing independent payoff Gate stays
+            // authoritative for whether the bridge is causally sufficient.
+            payoffBridge:{decisiveResult:'反转/兑现中一个独立结果的逐字原文',decider:'真正决定该结果的人及权限的逐字原文',basis:'该人采纳的依据原文（与结果不同的原文）'},
             storyCategoryId: variedCategories ? '从服务器分类目录选择实际K编号' : 'K1',
             storySections: {
               '处境触发':'本分类的真实角色关系、各自欲望和迫使双方行动的事件。',
@@ -5204,8 +5212,11 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
           '【候选池并发生成】第 ' + (batchIndex + 1) + '/' + batchCount + ' 批。',
           '只生成恰好 ' + batchSize + ' 个轻量题材胚子；同次生成先按实际主动选择、因果可执行性、对手反制、阅读兑现与实质差异比较本批候选，弱方案在本次生成内重构；输出pool按premiseMaturityScore由高到低排序，不输出selectedPremises、评分分析或淘汰过程；排序不能替代后续独立审核。\n'+PREMISE_READER_VALUE_POLICY,
            'pool每项必须包含premiseId、workingTitle、storyCategoryId、storySections五个具名文本字段和premiseMaturityScore（0到100整数；按标题及首屏的真实点击动机、主动选择、因果可执行、兑现代价、平台分类及实质差异五项各20分合计；只按这五节已经写出的实际事件评分，缺乏可定位事实证据的维度计0分，不以自称创新、专业术语或将来能补写的桥梁给分；不得用分数补足缺失条件）以及需要自动确定的创作维度。只输出storySections，不输出storyCore；服务器五节原文无损拼接为唯一storyCore。workingTitle须为4-16字，按已注入的唯一读者竞争力规则从首节实际发生的事件提炼标题；单独看标题就能理解人物眼前的损失或反常后果。只写职业、隐藏能力、预知时间却不说具体危险、普通道具或谜语的标题，点击动机维度不能自评为高分；本次生成内改写既有事实的标题表达，不补造事件、不剧透终局。五节合计优先300—450汉字；首节第一句直接写人物眼前已经发生的具体反常事件、利益或关系损失，未读概要也能看懂风险与接下来必须做的选择，不能从人物职业介绍或背景设定开篇；后续必须有主角主动破局、对手可信反制与两次不同的局势变化，结尾兑现核心胜负和代价。删去重复背景、无关办事程序及为了凑爽点附加的无因果奖惩；决定性证据、执行者、必要权限和代价不能因压缩而缺失，必要时允许超出。故事事实不得附加向创作者或审稿者征求意见的元评论。生成前先为反转节每项已完成结果找齐真实执行者、依据与成立条件；主线真相查明、问题曝光或有人受到怀疑，只能支撑它本身，不能直接推出另一个独立的升职、撤职、退亲、归责或处罚。不为提高爽感机械追加升职、降职、处罚、赔偿等独立结果；若故事确实发生这些结果，仍须有可信的决定者、采纳理由、行动和实际生效。条件缺失就在本次生成中改为真实可兑现的有分量胜负或未完成的后果，不能把修故事留给付费审核。尤其倒查实测失败的四种源头：甲的行动是否真的把决定性信息传到乙、乙为何改变决定；证据究竟证明哪个人在何时做了什么，记录仅表明某人到场不能直接证明其身份及罪责；同一封信、样本或原始证据在各节的持有人、是否发出、毁损和可用性必须连续，已经发出或交付的原件不能仍留在主角手中作第二次证明，除非原池已写明实际取回或另有可核副本；能力触发的人、物、范围和时间在前后节必须一致。最终的处分、任命和转移财产还须分别落实有权决定者的实际采纳与生效条件，不能拿主线调查成功自动担保。这里发现不成立的结果，就在本次原池生成调用内改为仍然真实、有分量的兑现；不得把来源缺口交给后续选优、成卡或独立终审。',
-          '【随原池同步提供因果引用以免重复全池选优】每项readerQuestion只从已写首屏问题提炼具体追问，不编造条件。causalPlan应在同次原池生成中按真正状态变化填写一环或必要的多环，每环action、conditions、result使用{field,quote}逐字引用当前候选五节投影后的原文，最后必须指向实际payoff；不得摘取结果作行动或条件。引用字段和五节的服务器固定映射如下：'+JSON.stringify(SOURCE_BINDING_EXAMPLE)+'。原池自身故事不足以形成可信关键行动—条件—结果时不虚构引文，保持该候选可由后续独立筛选淘汰。原池已提供且通过全部引用协议的足量高分题材会由服务器直接按评分选优，再照常经过独立来源、因果兑现、分类、流派、同构及完整卡终审；不能因这条捷径把自评分当作合格判定。',
+          '【随原池同步提供因果引用以免重复全池选优】每项readerQuestion只从已写首屏问题提炼具体追问，不编造条件。causalPlan应在同次原池生成中按真正状态变化填写一环或必要的多环，每环action、conditions、result使用{field,quote}逐字引用当前候选五节投影后的原文；每一环必须是对象，conditions必须是数组（即使只有一项），result必须写在同一环对象内，不能提到causalPlan数组之外；最后必须指向实际payoff；不得摘取结果作行动或条件。引用字段和五节的服务器固定映射如下：'+JSON.stringify(SOURCE_BINDING_EXAMPLE)+'。原池自身故事不足以形成可信关键行动—条件—结果时不虚构引文，保持该候选可由后续独立筛选淘汰。原池已提供且通过全部引用协议的足量高分题材会由服务器直接按评分选优，再照常经过独立来源、因果兑现、分类、流派、同构及完整卡终审；不能因这条捷径把自评分当作合格判定。',
           '按已注入GEN-002完成分类、因果、事实一致与差异核对；每项先确定具体可兑现的结果，倒查执行者、信息实际传递、决定权限与对手真实反制；承担结果的人物选择与必要条件须已实际发生，尤其反问既有行动全部成立而所称结果仍可能不成立的缺口，再将必要事实写入前四节，不能仅在末节贴类型标签。同一流派可有共同的类型期待，但同批各项应具有不同的人物欲望、主动策略、对手响应、局势转向与实际代价；职业、年代、道具变化不能把同一取证翻案链伪装成新题材。仅有能力展示、众人改口而没有后续现实阻力或可信兑现的，就在本次生成调用内改构该槽位，不能把补造条件留到选优、成卡或终审。只输出最终故事事实，不输出检查过程，不增加调用。',
+          '【入池前逐项自检，不留给付费审核】①每个决定性结果必须有实际决定者、采纳依据、执行/生效动作；只有物件被改、系统显示异常或一方声称，不能直接证明具体责任人。②指认具体责任人必须有能区分其与其他可能责任人的实际经手、授权或行为证据；写不出就改成不指认具体人的结果。③标题必须让普通读者只看标题就知道谁遇到什么具体损失、反常关系或未解问题，不能只写动作、道具、职业或需读hook才懂的意象；hook第一句写迫近问题与人物选择。④ending每个独立结果先列出决策者、采纳依据、执行动作；缺一项就在本次生成内重写该槽位。⑤同一事实的专业术语（胎位、病名、器物、职业专名等）在前后节必须一致，写不出统一自洽的表述就改用一个能自洽的事实，不得前节写「横位」后节写「臀位回转」这类互相排斥的说法。⑥中段必须有一次主角主动推进或局势变化，不得连续多日只被动等待他人转达；若中段只是等待，就在本次生成内补一次主动行动或新障碍。',
+          '【causalPlan 直接因果索引自检】每个环节的 action 只能直接产生它实际改变的结果；若它只是让下一步成为可能，就必须把下一步作为该环结果并接续行动—条件—结果，不能跳绑后续终局。conditions 必须是该环 result 实际成立所需、且已在同 ID 原池原文写出的条件，不能用结果断言、后续行动或评审新造条件。逐环自问：删掉这个 action，result 还会发生吗？不会才是直接因果；若 action 只改变下一步条件，另建一环。',
+          '【兑现桥接结构化必填】每项必须在payoffBridge中逐字写出：decisiveResult（反转/兑现中一个独立结果的原文）、decider（真正决定该结果的人及其权限的原文）、basis（该人采纳的依据原文，必须与结果不是同一句）。三处引文都必须逐字出现在本题材五节原文中；写不出真实决定者与依据，就在本次生成内换一个能自洽的事实，不得把结果本身、事后调查或读者推测当作依据。服务器会确定性校验引文是否在本题材原文内，伪造或缺失即不入池。',
           '【生成前锁定的候选槽位】'+JSON.stringify(lockedPoolSearchPlan)+'\n逐项原样使用premiseId和storyCategoryId，每项兑现全部requiredGenres。先按本项分类的核心关系和作者流派确定双方欲望、选择、已成立条件与结果，再写骨架；槽位不预定翻盘策略、职业或道具。代价须来自实际选择，不要每篇都以失去工作收尾。尚无可信决定权限、物理条件或人物动机的结果，在生成前换成本分类内能够真实成立的机制，不留给后续补造。',
           candidatePool.length ? '本次为有界补足批次；必须避开下方已生成候选的标题、人物欲望、关系结构、核心机制、选择、反转与代价，不得换名或轻微改写。' : '',
           '保留用户指定的类型、平台、分类、流派与其它条件。每个storyCategoryId必须与该项人物关系、核心冲突、主动选择和兑现机制实质相符；类型只在结尾点缀或职业背景出现的胚子应重新构思，不能留给后续模型通过改标签或补写救活。只输出JSON对象，pool数组恰好' + batchSize + '项，不输出分析、评分表或淘汰过程。',
@@ -5214,7 +5225,7 @@ ${this.resolvePlatformToneDirective(dto.projectId)}
         const selectionDirective = ideaPremiseSelectionDirective(
           dto.storyType, options.targetCount ?? ideaPreselectionCapacity(requestedCount,candidatePool.length),
           candidatePool.length, false, options.minimumCount ?? minimumSelectedCount, true,
-        );
+        ) + '\n【选优前 causalPlan 直接因果自检】逐项核对每个环节的 action 是否直接产生该环 result；若一个 action 只让下一步成为可能却被跳绑到终局，或 conditions 是结果断言或后续行动，优先淘汰，不因成熟度高分保留。删除该 action 后 result 仍成立，说明绑定不是直接因果；应改绑下一步或另建一环。选优自检不替代独立来源、因果兑现与分类流派审核。';
         const maturityRanking=promptPhase==='selection'
           ?'\n【原池同次生成的成熟度评分（仅用于高分优先选优、原池备用排序，不是独立通过判定）】'
             +JSON.stringify(rankPremisePoolByMaturityScore(options.pool??[],premiseMaturityScores)
@@ -5260,7 +5271,13 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
 
       const discoverPremisePoolBeforeCards = async (onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>): Promise<ReturnType<typeof normalizePremiseSelectionPayload> & { selectionAudit: unknown }> => {
         const initialPlanningCallLimit=IDEA_INITIAL_PLANNING_MAX_CALLS;
-        const desiredBatches=IDEA_PREMISE_POOL_BASE_BATCHES;
+        // Optional per-batch premise cap (0 = keep the base batch count). When
+        // set, split the same total target into batches of at most
+        // `poolBatchSize`, so the stage wall-clock is the slowest SMALL batch
+        // rather than one large slow batch. Tests keep the default (0).
+        const desiredBatches=discoveryBudget.poolBatchSize>0
+          ? Math.ceil(premisePoolSize/discoveryBudget.poolBatchSize)
+          : IDEA_PREMISE_POOL_BASE_BATCHES;
         const poolBatchCount=Math.min(desiredBatches,adaptiveDiscoveryConcurrency(premisePoolSize),premisePoolSize);
         const baseBatchSize = Math.floor(premisePoolSize / poolBatchCount);
         const extraBatchCount = premisePoolSize % poolBatchCount;
@@ -5277,7 +5294,8 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
           batchIndex: number; requested: number; candidates: any[]; durationMs: number; rawReturned: number | null;
           parseFailed: boolean; error?: string; blocked?: any;
           screened?: ReturnType<typeof screenPremisePoolBatch>;
-        }> = await Promise.all(poolBatchSizes.map(async (batchSize, batchIndex) => {
+        }> = await (async () => {
+          const runPoolBatch = async (batchSize: number, batchIndex: number) => {
           const batchStartedAt = Date.now();
           let rawReturned: number | null = null;
           let parsed: any = null;
@@ -5307,7 +5325,9 @@ JSON 结构：${JSON.stringify(promptSchema)}`;
               error: error instanceof Error ? error.message : String(error),
             };
           }
-        }));
+          };
+          return this.runBatchesWithHedge(poolBatchSizes, runPoolBatch).then(rows => rows.map(row => row!));
+        })();
         const candidatePool: Array<Record<string, unknown>> = [];
         const seenTitles = new Set<string>();
         const seenCores = new Set<string>();
@@ -7027,7 +7047,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         timeout:LLM_TUNABLES.timeoutComplex(),physicalCallBudget,
         validate:value=>validate(value).length===0,
         describeValidation:value=>validate(value),
-        retryInstruction:'只补齐payoffChecks的真实因果引用或审查协议字段；不得改动当前题材或把仍缺少样本、权限、行动的gap改成supported。'},
+        retryInstruction:'只补齐payoffChecks的真实因果引用或审查协议字段；不得改动当前题材或把仍缺少样本、权限、行动的gap改成supported。若理由称原池已写/仅计划索引错绑，gapRepair必须为restore_source_conditions并给出sourceConditionQuote；不能同时要求换题；无法逐字引用时改写理由为真实缺条件并保留replace_from_pool。'},
     );
     if(!response.data)throw new Error('变更因果引用的独立兑现复核未完成：'+(response.validationIssues||response.warnings||[]).join('；'));
     const normalized=normalizePremisePayoffGapRoutes(response.data,selection);
@@ -7114,7 +7134,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         describeValidation: value => validateReview(value),
         retryInstruction: mode==='overlap'
           ? '只修正成对同构issues的实际身份、双方原文引用或协议错误，真实同构结论保留；不要输出因果、兑现或来源的重复审查，不得把真实同构改判通过。'
-          : '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks的gap必须返回真实路由与原池存在条件的引用，区分计划错绑和原池真实缺条件，不得默认强制换题；逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
+          : '只补齐缺失的核查编号或纠正审查JSON及引用；payoffChecks的gap必须返回真实路由与原池存在条件的引用，区分计划错绑和原池真实缺条件，不得默认强制换题；若理由称原池已写/仅计划索引错绑，gapRepair必须为restore_source_conditions并给出sourceConditionQuote，不能同时要求换题；无法逐字引用时改写理由为真实缺条件并保留replace_from_pool；逐题材保留真实gap/unknown，引用本题材已有行动与条件，不能用兑现结论自证；genreChecks已落实仅选择本卡已选展开证据目录的evidenceRef，不引用原池storyCore、不抄写引文；保留已完成的逐字段结论与真实drift/unknown；不得为纠正协议把冲突改成preserved，不重写题材或用虚构证据补齐。' }));
     if(!result.data)throw Error('锁定前题材复核协议未完成：'+(result.validationIssues||result.warnings||['缺少合法审核结果']).join('；'));
     const issues = validateReview(result.data);
     if (issues.length) throw new Error('锁定前题材复核协议错误，未完成请求交付：' + issues.join('；'));
@@ -7132,7 +7152,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
   }
 
   private async reconcilePremiseSelection(initial: ReturnType<typeof normalizePremiseSelectionPayload>, requestedCount: number,
-    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number};reselection:{remaining:number}}, deliveryCount=requestedCount,onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>,initialPreparation?:PremiseSourcePreparation,
+    poolTarget: number, categories: readonly string[], standard: string, requiredGenres:readonly string[]=[], shared?:{reviews:{remaining:number;releaseReserve?:()=>void};reselection:{remaining:number}}, deliveryCount=requestedCount,onApproved?:ApprovedPremiseObserver,pipelineLimiter?:ReturnType<typeof createReviewLimiter>,initialPreparation?:PremiseSourcePreparation,
     previouslyVettedCategories:readonly string[]=[],
     authoredScoredPool?:readonly Record<string,unknown>[],
     originalMaturityScores?:ReadonlyMap<string,number>) {
@@ -7305,7 +7325,29 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // actual delivery deficit is mandatory. A bounded surplus guards final
     // full-card rejection without serially repairing every failed hedge.
     const initiallyRetained=retainReviewedPremises(initial,initialReview,repairPlan.protectedItems.map(item=>String(item.premiseId)));
-    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,initiallyRetained.selection.selected.length,requestedCount);
+    // A plan-index-only payoff restore is a same-identity correction. Count it
+    // toward the delivery floor and repair it before spending any fresh pool
+    // identity; otherwise 4 clean + 2 correctable is misread as a delivery
+    // shortfall and opens an unnecessary serial reselection wave.
+    // A source-drift correction may also preserve the original identity, but it
+    // is still a real content defect: give it a bounded repair slot only while
+    // a delivery deficit remains, never to fill optional screening capacity.
+    const sameIdentityFixSlots=repairPlan.repairSlots.filter(slot=>
+      slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
+      &&slot.issues.every(issue=>issue.kind==='selection_fit'&&issue.planIndexOnly===true&&issue.protocolIncomplete!==true));
+    const sameIdentityFixIds=new Set(sameIdentityFixSlots.map(slot=>String(slot.replacesPremiseId)));
+    const correctOrReplaceSlots=repairPlan.repairSlots.filter(slot=>
+      !sameIdentityFixIds.has(String(slot.replacesPremiseId))
+      &&slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
+      &&slot.issues.every(issue=>issue.kind!=='overlap'&&issue.field!=='storyCategory'
+        &&issue.protocolIncomplete!==true
+        &&!(issue.kind==='selection_fit'&&issue.planIndexOnly===true)));
+    const correctOrReplaceIds=new Set(correctOrReplaceSlots.map(slot=>String(slot.replacesPremiseId)));
+    const replacementSlots=repairPlan.repairSlots.filter(slot=>
+      !sameIdentityFixIds.has(String(slot.replacesPremiseId))&&!correctOrReplaceIds.has(String(slot.replacesPremiseId)));
+    const deliveryEligible=initiallyRetained.selection.selected.length+sameIdentityFixSlots.length;
+    const missingDeliverySlots=Math.max(0,deliveryCount-deliveryEligible);
+    const recoveryTarget=preselectionRecoveryTarget(deliveryCount,deliveryEligible,requestedCount);
     const neededReplacementSlots=recoveryTarget.mandatory;
     // The repair planner includes failed *selected* identities as potential
     // self-corrections. They are NOT fresh pool choices. Count only genuinely
@@ -7314,30 +7356,48 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     const previouslyExpandedIds=new Set(initial.selected.map(row=>String(row.premiseId)));
     const freshPoolCount=repairPlan.availableCandidates.filter(item=>
       !previouslyExpandedIds.has(String(item.premiseId))).length;
-    const citationOnlySlots=repairPlan.repairSlots.filter(slot=>
-      slot.mode==='correct_or_replace_from_pool' &&slot.issues.length>0
-      &&slot.issues.every(issue=>issue.kind==='selection_fit')).length;
     // One recovered slot is not a reliable delivery when its independent
-    // review can still fail. Keep a small hedge INSIDE the existing single
-    // reselection response (no added model round, budget, or weaker Gate).
-    // The original pool and request-derived screening capacity bound the
-    // number of positions; only independently approved survivors proceed.
-    const recoveryHedgeCount=recoveryTarget.hedge;
-    let recoverySlots=deliveryCount<requestedCount
-      ?repairPlan.repairSlots.slice(0,Math.min(
-        neededReplacementSlots+recoveryHedgeCount,
-        freshPoolCount+citationOnlySlots,
-      ))
-      :repairPlan.repairSlots;
+    // review can still fail. Keep the existing bounded hedge ONLY when a real
+    // delivery deficit remains; optional screening capacity never opens a
+    // serial wave once same-identity corrections cover the delivery floor.
+    const recoveryHedgeCount=missingDeliverySlots>0?Math.min(1,recoveryTarget.hedge):0;
+    let recoverySlots=[...sameIdentityFixSlots];
+    if(deliveryCount<requestedCount){
+      // Historical partial-delivery screening: preserve the existing bounded
+      // slice over the repair plan. The full delivery request does not use it.
+      recoverySlots=repairPlan.repairSlots.slice(0,Math.min(
+        neededReplacementSlots+recoveryTarget.hedge,freshPoolCount+sameIdentityFixSlots.length));
+    } else if(missingDeliverySlots>0){
+      // Same-identity source-drift repairs cost no fresh identity and can cover
+      // the actual deficit before any original-pool replacement is attempted.
+      recoverySlots.push(...correctOrReplaceSlots);
+      if(missingDeliverySlots>correctOrReplaceSlots.length){
+        const replacementNeed=missingDeliverySlots-correctOrReplaceSlots.length;
+        recoverySlots.push(...replacementSlots.slice(0,
+          Math.min(replacementNeed+recoveryHedgeCount,freshPoolCount)));
+      }
+    }
     // Preserve the review floor needed for the actual delivery gap. Optional
     // hedges are trimmed first; if even the mandatory slots cannot be audited,
     // the preflight below must skip the futile paid reselection. Never shrink
     // the author's requested number merely to spend otherwise idle credits.
+    // A real delivery gap may use the refill reserve: release it so the
+    // preflights and the post-reselection review see the ACTUAL remaining
+    // source budget instead of the reserve-subtracted allowance (which can go
+    // negative once the initial review + its protocol corrections overrun).
+    shared?.reviews?.releaseReserve?.();
     const recoveryGrouping=readGenerationBudgets();
-    while(shared && recoverySlots.length>neededReplacementSlots
-      && minimumReselectionReviewCalls(initial.selected.length,true,recoverySlots.length,
-        recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode)>shared.reviews.remaining)
-      recoverySlots=recoverySlots.slice(0,-1);
+    // Trim optional hedges first, then keep a partial delivery-gap subset when
+    // even the mandatory slots exceed the REAL remaining budget. recoverySlots
+    // is ordered same-identity fixes -> mandatory replacements -> hedge, so
+    // trimming the tail preserves the most important positions. Uses the FULL
+    // reselection floor (source batches + the single overlap call); a genuine
+    // shortfall is still reported and no Gate is relaxed.
+    if(shared && initial.selected.length>=1){
+      const affordable=affordableReselectionSlotCount(recoverySlots.length,initial.selected.length,
+        shared.reviews.remaining,recoveryGrouping.sourceBatchSize,recoveryGrouping.reviewGroupingMode);
+      if(affordable<recoverySlots.length)recoverySlots=recoverySlots.slice(0,affordable);
+    }
     // A hedge is wasted when it attempts the same uncertain citation-only
     // repair as the primary recovery. If the fixed pool has a genuinely unused
     // identity after funding mandatory replacements, diversify ONE optional
@@ -7346,15 +7406,13 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     // The delivery floor and the larger preselection screening target differ.
     // A one-card delivery shortage must not be miscounted as four mandatory
     // repairs just because we intended to screen eight for five deliveries.
-    const missingDeliverySlots=Math.max(0,deliveryCount-initiallyRetained.selection.selected.length);
     const mandatoryPoolSlots=recoverySlots.slice(0,missingDeliverySlots)
       .filter(slot=>slot.mode==='replace_from_pool').length;
-    const poolHedgeId=deliveryCount<requestedCount && missingDeliverySlots>0
-      && freshPoolCount>mandatoryPoolSlots
+    const poolHedgeId=deliveryCount<requestedCount && missingDeliverySlots>0 && freshPoolCount>mandatoryPoolSlots
       ?recoverySlots.slice(missingDeliverySlots)
         .find(slot=>slot.mode==='correct_or_replace_from_pool')?.replacesPremiseId
       :undefined;
-    const surplusRejectedIds=repairPlan.repairSlots.slice(recoverySlots.length)
+    const surplusRejectedIds=repairPlan.repairSlots.filter(slot=>!recoverySlots.includes(slot))
       .map(item=>String(item.replacesPremiseId));
     // If enough independently reviewed premises remain, stop here instead of spending
     // more calls trying to fill every position. Full-card gates still run afterwards.
@@ -7453,7 +7511,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
         ({quote:_selectedQuote,referenceQuote:_sourceQuote,...issue})=>issue)};
       const protectedIds=selected.selected.filter(item=>!ids.has(String(item.premiseId))).map(item=>item.premiseId);
       const citationOnlyIds=new Set(scopedSlots.filter(slot=>slot.mode==='correct_or_replace_from_pool'
-        &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'))
+        &&slot.issues.length>0&&slot.issues.every(issue=>issue.kind==='selection_fit'&&issue.planIndexOnly===true))
         .map(slot=>String(slot.replacesPremiseId)));
       // Match the existing server normalizer: an independently evidenced
       // citation-only failure may return the corrected plan alone. The old
@@ -7489,7 +7547,10 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       // plan needs no second model call merely to be selected for replacement.
       // Normalize the replacement through the existing identity/contract gate;
       // ALL independent source, overlap and final-card review still runs below.
-      if(authoredScoredPool && originalMaturityScores){
+      // A plan-index-only correction still needs the authored causalPlan repair,
+      // so it must not take this identity-only shortcut or silently swap story.
+      const hasCitationOnlySlot=scopedSlots.some(slot=>citationOnlyIds.has(String(slot.replacesPremiseId)));
+      if(authoredScoredPool && originalMaturityScores && !hasCitationOnlySlot){
         const readyPayload=readyOriginalPoolReselectionPayload(
           selected,scopedSlots,availableIds.map(String),authoredScoredPool,
           originalMaturityScores,poolTarget,categories,previouslyVettedCategories);
@@ -7530,6 +7591,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
           const source=selected.selected.find(row=>String(row.premiseId)===id);
           const response=rows.find((row:any)=>String(row?.replacesPremiseId)===id);
           const candidateId=String(response?.premise?.premiseId||'');
+          if(citationOnlyIds.has(id)&&candidateId!==id)continue;
           if(!source||!candidateId||!availableIds.includes(candidateId)||duplicates.has(candidateId)
             ||slot.mode==='replace_from_pool'&&candidateId===id)continue;
           try {
@@ -7554,6 +7616,9 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
       const normalize=(value:unknown)=>{
         recordValidatedSlots(value);
         const rows=(value as any)?.replacements;
+        if(Array.isArray(rows)&&rows.some(row=>citationOnlyIds.has(String(row?.replacesPremiseId))
+          &&String(row?.premise?.premiseId)!==String(row.replacesPremiseId)))
+          throw Error('已证明仅计划索引错绑的位置必须保留原身份并只返回causalPlan，不能默认换题');
         if(Array.isArray(rows)&&rows.some(row=>!availableIds.includes(row?.premise?.premiseId)))throw Error('定向重选不能复制正常身份、已淘汰同构项或伪造原池身份');
         const candidate=normalizeTargetedPremiseReselection(value,selected,scopedReview,requestedCount,poolTarget,categories,Math.min(requestedCount,selected.selected.length),previouslyVettedCategories);
         return candidate;
@@ -7748,7 +7813,7 @@ JSON 结构（ideas 必须恰好 1 项）：${JSON.stringify(cardSchema)}`;
     } catch (recordError) {
       this.logger.warn('章纲事实 Gate 失败记录写入失败（保持阻断）：' + (recordError instanceof Error ? recordError.message : String(recordError)));
     }
-    return Object.assign(new Error(message), { outlineFactFailureKind: kind });
+    return Object.assign(new Error(message), { outlineFactFailureKind: kind, outlineFactEvidence: evidence });
   }
 
   /** Creation relay and activation batches share ledger validation and failure reporting. */
@@ -9387,6 +9452,31 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
         const ideaSpan = `${worldContinuityDirective}\n${outlineEnvironmentContext ? `已保存世界背景（只含未在规则块中传递的环境字段）:${outlineEnvironmentContext}\n` : ''}${shortStoryCard ? `短篇故事卡:${JSON.stringify(shortStoryCard)}\n` : ''}灵感素材:${JSON.stringify(dto.selectedIdea)}`;
         // 叙事节拍来自每章真实职责。章节位置只定义开篇/终章边界，不再按固定章数制造爽点弧。
         const chapterResponsibilityPlan = buildNarrativeBeatPlan(creationResponsibilityPlan(chapterTitles));
+        // Confirmed calendar anchors are read-only facts. Listing them once
+        // stops the chapter model from inventing a shorter archive span just
+        // to make a date comparison sound stronger. The independent fact
+        // review still checks every new date/span.
+        const calendarAnchors = outlineFactEvidenceAnchors({
+          canonicalBrief: canonicalCreativeBrief,
+          world: null,
+          sourceChapters: acceptedOutlineSources,
+          chapters: [],
+        }).filter(({ path, text }) => !(path === '确认故事' && /^[\s]*[\[{]/.test(text)))
+          .flatMap(({ id, path, text }) => {
+            const { calendarSpans } = temporalNumbers(text);
+            // Chapter generation only needs the long spans that can conflict
+            // with an archive/employment duration. Day-level words such as
+            // "今天" are already handled by the continuity context and would
+            // only bloat the prompt.
+            const longSpans = calendarSpans.filter(span => /年|月/.test(span.original));
+            return longSpans.length
+              ? [{ anchor: id, path, text, spans: longSpans.map(span => span.original) }]
+              : [];
+          })
+          .filter((anchor, index, rows) => rows.findIndex(row => row.path === anchor.path && row.text === anchor.text) === index);
+        const calendarAnchorBlock = calendarAnchors.length
+          ? '【已确认日期/跨度锚点，只能继承，不得为制造比较另造更短的档案跨度】' + JSON.stringify(calendarAnchors) + '\n'
+          : '';
 
         const unwrapChapter = (value: unknown, chapterNumber: number, frozenTitle: string): Record<string, any> | null => {
           const normalized = unwrapExpectedChapterEnvelope(value, chapterNumber, frozenTitle);
@@ -9413,13 +9503,13 @@ ${worldAtmosphereDirective}${worldContinuityDirective}${shortStoryCard ? `已确
           const chapterPrompt = `${chapterCreationParameters}
 ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || '', isShort ? 'short_story' : 'long_novel', constitution.customPlatformNote)}
 ${buildOutlineContinuityContext(acceptedOutlineSources, priorOutlineFactLedger, false)}
-【本章节】
+${calendarAnchorBlock}【本章节】
 第${order + 1}章"${expectedChapter.title}"（功能:${expectedChapter.func}）
 ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩子；兑现本段压力与行动，不提前泄露全篇终局】${String(dto.selectedIdea.hook)}`:''}
 【已通过前置审查的完整本章合同；条件须在实际事件中取得，不是结果自证】${JSON.stringify(creationResponsibilityPlan([expectedChapter]).map(row=>({...row,chapter:order+1}))[0])}
 章节唯一推进任务:${expectedChapter.brief || '依据完整故事卡推进尚未发生的下一个事件，不得重复前章揭示'}
 【章纲与正文的唯一层级】本次生成的是事件链章纲，targetWords只用于规划以后正文的字数，不用于扩写当前content。按事件先后清楚记录行动主体、客观成立条件、对手反制和实际结果，必要时包含短引语但不写长段场景对白、第一人称整场叙述或完整章节正文；scenes、characterActions等从同一事件链投影。长度随必要事件复杂度变化，不靠压缩省略因果。
-【本章职责的实际完成条件】先按已确认前章事实核对该任务是否已经完成。若前章已通过联名、决定、交付或对手改口实现目标，本章不能再把保管同一文件、重述既有决定写成第二次实现该目标；本章只展开仍未兑现的具体行动、代价、关系变化与独立结果。因上游章职能措辞重复而无法以新行动完成时，保留已确认结果并写出本章实际的后续推进，不伪造前章成果重新发生。content、scenes.outcome、characterActions.result、characterStates及伏笔回收须据同一当前章行动投影。
+【本章职责的实际完成条件】先按已确认前章事实核对该任务是否已经完成。若前章已通过联名、决定、交付或对手改口实现目标，本章不能再把保管同一文件、重述既有决定写成第二次实现该目标；本章只展开仍未兑现的具体行动、代价、关系变化与独立结果。因上游章职能措辞重复而无法以新行动完成时，保留已确认结果并写出本章实际的后续推进，不伪造前章成果重新发生。content、scenes.outcome、characterActions.result、characterStates及伏笔回收须据同一当前章行动投影。本章合同的每个必要行动/出口结果必须在content中有实际执行者、动作和结果；不能只有意图、旁白、计划或“承认动作缺失”。只有实际发生的决定与执行才能支持权限、职务、资格、关系或利益改变；仅仅尚未决定、尚未执行或尚未生效的状态不是改变，不能写成已经改变。
 【后续章节职责与节拍（本章禁止提前执行）】${JSON.stringify(futureChapterTasks)}
 当前章叙事节拍：${JSON.stringify(currentBeat?.beatLabel || '')}。节拍来自章节职责，不按固定章数强制爽点；本章只需完成与职责相符的推进价值。
 【正文展开尺度与场景边界】${CHAPTER_PROSE_SCOPE_POLICY}
@@ -9432,8 +9522,10 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
 【允许出现的地点】仅限已确认世界观中明确存在的地点；禁止新增拍卖行、码头仓库、工厂等未确认地点。
 【篇幅配置】项目目标总字数${dto.targetWords}；此前章节已规划${plannedChapterWords}字；本章之后还剩${remainingChapterCount}章。本章必须由实际事件量、场景复杂度、冲突强度和节奏在${allowedMin}-${allowedMax}字之间选择具体整数，并用wordCountReason说明场景与节奏依据；不要自行书写剩余章节字数算式，系统会在全部章纲完成后精确校正总和。
 【同源事件投影】${OUTLINE_PROJECTION_POLICY}
+【相对日/时间点跨字段一致】同一事件在content、scenes.outcome、characterActions.result及characterStates.trigger中的相对日（前天/昨天/昨夜/昨晚/今晚/今天/明天等）与具体钟点必须逐字一致，不得在content写「前天夜里」而在结果字段写「昨夜」，也不得把同一事件在正文与结果字段写成两个不同日期。已确认题材与前章已锁定的时间表述只能继承，不得改写。
 【数量、信息与证据连续性】同一对象的本章新增几笔与前章累计总数分别计量，所有字段使用同一时点和口径。涉及损失、死亡、证据或交易数量时，先在content按每步增量列出可核算的本章合计，再把这一个已核算数字投影到人物实际台词、scenes.outcome、characterActions.action/result及结尾状态；同一批次不能在正文写四条、对话写五条、行动字段再写五条。人物说谎或统计口径不同必须在本章明写原因与实际范围，不得靠读者猜测。关键消息写清实际发送者、接收者、渠道、内容和时间；本人直接听到的问话不得投影成第三人此前向其转述，推测他人知情不能投影成已有某人报信。仅记下身份不得推定具体证据已记录、被采信或已完成调查；没有明写的后续行动、持续状态和范围不可凭空补全。
 【通信渠道与同源事件约束】群消息、群回复、私聊、电话各自是独立事件；私聊回复不能被投影成群消息回复，群消息无人回复不能又在同一条下生成回复。签字、承认、交付、调取、核抄等决定性行动须在content实际发生并有必要条件，再投影到其余字段；核定金额、签署协议、办手续不等于款项实际发放或收到。询问某人不等于已经得到答复；没有实际回答、记录及内容时，scenes.outcome和characterActions.result只能保留为待查状态。每一个被标记为已完成的关键结果，须能从本章content找到动作主体、实际执行、对应对象以及真实状态变化：要求提交文件不等于对方已交出原件，旁人的目光转向某人不等于实际打断正在进行的发言。先按当前章真实行动确定结果，再把同一结果同步投影到scenes、characterActions及状态字段；如果正文没有实际完成，则这些字段只能记录已发生的程度，不能用结果字段反向补造正文。口头要求、自愿配合和合法实际控制不可混同；缺权限或执行动作时不得写成强制留置、限制行动或其他既成外部结果。已确认章节职责确需该结果，先以本书既定人物、规则和事件建立可实行的条件，不为通过审查虚构权限或重写确认故事。
+【否定状态与因果顺序·硬约束】本章不得断言“没人多问/没人反对/没有发生/未被发现/未再追问”等否定状态，除非正文写明了对应的可观察事实（具体对话、记录、画面或他人明说）；不得用“老周没多解释”推断“火化班没多问”，也不得用“没有记录”推断“没有发生”。同一事件链中，行动必须写在它所产生的直接结果之前，且结果只能引用确实先于它的实际行动；不能把“交耳机、交钥匙、回话”等行动写在结果之后，再用它支撑更早的“立案、暂缓、查人”，也不能让同一章的结果反过来证明其行动。跨章代价或状态只能延续前章已建立的因果，不能把前一章的代价（如试听代价的记忆消退）改写成由本章交证行动造成。每个被标记为已完成的关键结果，都必须在content里能指到一条独立、可逐字引用的实际行动；找不到就先补写该行动及其必要条件，或把结果降为未确定/待核，不能只写结果让评审无从引用。
 只生成本章，严格使用英文键：title,targetWords,wordCountReason,content,scenes,characterActions,conflicts,highlights,foreshadowing,foreshadowingRecover,characterStates,hook,emotionalTone。
 
 按以下文档结构生成。必要字段必须存在；允许按章节职责为空的数组会单独说明：
@@ -9619,9 +9711,10 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
 【必须逐项修复；引文按位置到前章及当前章原始资料核对，不重复传送全文引文】${JSON.stringify(outlineFactRepairPromptDefects(defects))}
 【既有行动审核的原始缺口与结果字段索引】${JSON.stringify(actionRepairEvidence)}
 【本章需要直接修改的有效原字段路径】${JSON.stringify(citedRepairPaths)}；只修改被点名的真实断言及同源投影，不得随意更改邻近无关句子。
-按已注入CTX-005、CTX-008、RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；本章的文件保管、后续行动或付出代价，不得重述为前章已完成的联名、机构决定或救援成功；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
+按已注入CTX-005、CTX-008、RPR-001和QLT-003先确定事件先后及实际成立程度，再同步上述结果字段；这些路径用于定位原有事实，不是新增事件要求。若某结果没有成立条件且并非锁定职责，按已有行动实际能证明的程度修正该断言；若结果声称权限、职务、资格、关系或利益已经改变，而正文只表明该事项尚未决定、尚未执行或尚未生效，必须把该结果降为未确定、待核或未处置，不能把“尚未确定”写成“已经改变”。本章的文件保管、后续行动或付出代价，不得重述为前章已完成的联名、机构决定或救援成功；职责确需此结果时，只能在已确认人物权限和事件边界内补条件，不能为保留强结论而擅自扩大权限。并列或复述不能把行动前的说法挪为触发后的反应。没有路径的缺口保留原始证据与理由，不猜字段或默认为已解决。
+【相对日/时间点对齐】若被点名的缺口是时间断言（如结果字段写「昨夜」而 content 或前章原文写「前天夜里」，或正文与结果字段的钟点/日期不一致），必须把该结果字段的时间表述改成与 content 或前章原文逐字一致，不得改事件本身、不得另造新日期；只对齐时间表述，其它行动与结果断言保持原样。
 
-【跨字段数量矛盾定向修复】若独立审查已按实际行动算出同一事件的数量（例如三条中两条早已死亡、第三条之后死亡，另一条随后死亡，合计四条），须保留有行动证据的数量并把冲突的台词、content与characterActions逐处统一；只改台词不改行动字段、或只改行动不改台词，都不算修复。绝不把已成立的计数改成错误数字以迁就其它字段。若角色故意虚报，必须有原故事支持，不能临时编造解释。\n【冲突原句优先】若独立审查已经逐字指明相互矛盾的原话、问答或行动结果，先在本章content、scenes、characterActions等实际原字段找到被点名的完整旧断言，再确定符合前章及世界规则的最小改法；补丁必须直接改变至少一处错误断言及其同源投影。只修改同一字段周围的其它文字，即使措辞更顺，也不能消除该冲突。若证据不足以判定哪一句错，禁止猜造，保留明确失败。\n【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段或其已存在子路径（如characterActions.7.action或characterActions[7].action）。允许的顶层字段=${JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)}。禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}`,
+【跨字段数量矛盾定向修复】若独立审查已按实际行动算出同一事件的数量（例如三条中两条早已死亡、第三条之后死亡，另一条随后死亡，合计四条），须保留有行动证据的数量并把冲突的台词、content与characterActions逐处统一；只改台词不改行动字段、或只改行动不改台词，都不算修复。绝不把已成立的计数改成错误数字以迁就其它字段。若角色故意虚报，必须有原故事支持，不能临时编造解释。\n【冲突原句优先】若独立审查已经逐字指明相互矛盾的原话、问答或行动结果，先在本章content、scenes、characterActions等实际原字段找到被点名的完整旧断言，再确定符合前章及世界规则的最小改法；补丁必须直接改变至少一处错误断言及其同源投影。只修改同一字段周围的其它文字，即使措辞更顺，也不能消除该冲突。对逐字点名的冲突原句，优先使用片段补丁：{"patch":{"content":{"find":"当前字段中唯一逐字存在的完整旧断言","replace":"修正后的完整断言"}}}；find必须在当前字段唯一存在，服务器只替换该片段并验证改动覆盖被点名断言，不得用片段覆盖整个字段或改写无关句子。若证据不足以判定哪一句错，禁止猜造，保留明确失败。\n【局部修复硬约束】禁止重新生成完整章纲。只输出 JSON 对象 {"patch":{...}}，patch 只包含确实需要修改的事实字段或其已存在子路径（如characterActions.7.action或characterActions[7].action）。允许的顶层字段=${JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)}。禁止输出 targetWords、wordCountReason、chapterFunction、goalArc 等结构/篇幅字段。${OUTLINE_FACT_PATCH_ADDRESS_POLICY}${OUTLINE_FACT_REPAIR_SYNC_POLICY}`,
               {
                 projectId, chapterIndex: order + 1, scenario: 'outline', stepKey:'creation_chapter_fact_repair', temperature: 0.2,
                 timeout: LLM_TUNABLES.timeoutContent(),
@@ -9667,7 +9760,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
                     +'\n【授权补丁路径】'+JSON.stringify(OUTLINE_FACT_REPAIR_FIELDS)
                     +OUTLINE_FACT_PATCH_ADDRESS_POLICY+OUTLINE_FACT_REPAIR_SYNC_POLICY
                     +'\n【本次需要直接修改的真实字段路径】'+JSON.stringify(citedRepairPaths)
-                    +'\n只能返回完整JSON对象 {"patch":{'+JSON.stringify(repairExamplePath)+':"该路径修正后的完整原类型字段值"}}；补丁必须使用实际存在且获授权的字段路径。其它同源投影也须一致，不得只改无关句子；不得发明事实、输出分析或整章纲，空补丁和无变化补丁一律失败。';
+                    +'\n只能返回完整JSON对象 {"patch":{'+JSON.stringify(repairExamplePath)+':"该路径修正后的完整原类型字段值"}}，或对逐字点名的冲突原句返回 {"patch":{'+JSON.stringify(repairExamplePath)+':{"find":"当前字段唯一逐字存在的完整旧断言","replace":"修正后的完整断言"}}}；补丁必须使用实际存在且获授权的字段路径，片段find必须在当前字段唯一存在。其它同源投影也须一致，不得只改无关句子；不得发明事实、输出分析或整章纲，空补丁和无变化补丁一律失败。';
                 },
               });
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
@@ -9829,6 +9922,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
         // Per-chapter verdicts do not substitute for reconciliation across the whole framework.
         const pendingOutlineFacts = preparedChapters.map(chapter => ({ order: chapter.order, title: chapter.title, content: chapter.content, scenes: chapter.scenes }));
         let aggregateHadProvenConflict=false;
+        const repairedOrders=new Set<number>();
         try{
         await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
           currentWorldForOutlineReview, pendingOutlineFacts, async (batch, review) => {
@@ -9839,6 +9933,7 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             const repair = await this.repairPendingOutlineFacts(projectId, canonicalCreativeBrief, executionStandardForReview,
               currentWorldForOutlineReview, pendingOutlineFacts, batch, review);
             for (const candidate of repair.candidates) {
+              repairedOrders.add(candidate.order);
               const pending = pendingOutlineFacts.find(c => c.order === candidate.order)!;
               const prepared = preparedChapters.find(c => c.order === candidate.order)!;
               pending.content = prepared.content = candidate.content;
@@ -9847,20 +9942,39 @@ ${chapterIndex===0&&dto.selectedIdea?.hook?`【首章已确认的原始吸睛钩
             if (repair.runId) shortOutlineSourceRunIds.add(String(repair.runId));
           });
           if(aggregateHadProvenConflict){
-            // The accepted final candidate now differs from the per-chapter
-            // draft. Keep the source-bound chapter responsibility plan, but
-            // never replay stale chapter outcome or fact-ledger receipts.
-            try{outlineWork.invalidateChapters(projectId);}
+            // Only the chapters actually changed by the aggregate repair have
+            // stale projections. Keep independently vetted earlier chapters
+            // and the source-bound chapter responsibility plan; never replay a
+            // repaired chapter's old outcome/fact-ledger receipts.
+            try{
+              if(repairedOrders.size){
+                for(const order of repairedOrders){
+                  outlineWork.discard(projectId,'chapter_'+order);
+                  outlineWork.discard(projectId,'chapter_draft_'+order);
+                }
+              }else outlineWork.invalidateChapters(projectId);
+            }
             catch(cleanError){this.logger.warn('合并修复后旧章纲检查点清理失败：'+String(cleanError));}
           }
         }catch(error){
           // outlineFactGateError uses outlineFactFailureKind, not the prose
-          // quality Gate's isGateRejection flag. The previous predicate
-          // silently left proven conflicting chapter checkpoints reusable.
-          // A transport/contract failure does not invalidate valid chapters.
+          // quality Gate's isGateRejection flag. A transport/contract failure
+          // does not invalidate valid chapters. When the proven contradiction
+          // names its chapter(s), discard only those checkpoints; otherwise
+          // fail closed by clearing all.
           const confirmedConflict=hasProvenOutlineCheckpointConflict(error,aggregateHadProvenConflict);
           if(confirmedConflict){
-            try{outlineWork.clear(projectId);}
+            try{
+              const evidence=(error as any)?.outlineFactEvidence;
+              const conflictOrders=outlineConflictChapterOrders(evidence?.review?.contradictions);
+              if(conflictOrders.length){
+                for(const order of conflictOrders){
+                  outlineWork.discard(projectId,'chapter_'+order);
+                  outlineWork.discard(projectId,'chapter_draft_'+order);
+                }
+                this.logger.warn('章纲事实冲突已定位到章节，仅清理冲突章检查点：'+conflictOrders.map(order=>'第'+(order+1)+'章').join('、'));
+              }else outlineWork.clear(projectId);
+            }
             catch(cleanError){this.logger.warn('有证据冲突的章纲检查点清理失败：'+String(cleanError));}
           }
           throw error;
@@ -10337,7 +10451,7 @@ ${STORY_ENTITY_MODELING_POLICY}
     const db=this.db.getDb(),now=()=>new Date().toISOString();
     const {v4:uuid}=require('uuid');
     const savedCharacters=db.prepare('SELECT id,name,identity,is_pov_character FROM characters WHERE project_id=?').all(projectId) as any[];
-    const confirmedProtagonistName=confirmedWorldProtagonistName(dto.selectedIdea?.protagonist);
+    const confirmedProtagonistName=confirmedWorldProtagonistName(dto.selectedIdea?.protagonist,dto.selectedIdea?.characters);
     const groundedCreativeContext=JSON.stringify({canonicalBrief:JSON.parse(input.canonicalCreativeBrief),world:input.world});
     const taskWarnings: string[] = [];
     if(savedCharacters.length){
@@ -10346,8 +10460,7 @@ ${STORY_ENTITY_MODELING_POLICY}
       // the existing explicit failed-creation recovery owns cleanup.
       const savedNames=savedCharacters.map(row=>String(row.name||'').trim());
       const confirmedNames=[confirmedProtagonistName,
-        ...(Array.isArray(dto.selectedIdea?.characters)?dto.selectedIdea.characters:[])
-          .map((row:any)=>confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
+        ...confirmedStoryCharacterNames(dto.selectedIdea?.characters),
       ].filter(Boolean);
       const profiles=db.prepare('SELECT character_id FROM character_extended_profiles WHERE project_id=?').all(projectId) as any[];
       const profileIds=new Set(profiles.map(row=>String(row.character_id)));
@@ -10388,7 +10501,7 @@ ${styleInstruction}${buildPlatformStyleDirective(constitution.targetPlatform || 
 
 人物数量由确认故事中的实际行动者和冲突需要决定；保留确认题材中的姓名、身份、关系、目标和结局方向，不得替换主角或反派。只收录对情节有实际作用的人物。
 年龄、就学经历、亲属关系、口头禅和说话归属若在唯一创作上下文的原文中没有明确证据，填写"unavailable"或留空；不得根据姓名、职业、目录命中或常识推测。口头禅必须能在原文中找到同一角色说出的原句，不能挪用其他角色台词。
-${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}
+${dto.selectedIdea?.protagonist ? `【必须包含的主角（不可省略或改名）】${dto.selectedIdea.protagonist}\n` : ''}${Array.isArray(dto.selectedIdea?.characters) && dto.selectedIdea.characters.length > 0 ? `【确认题材中的其他核心人物（如有必须保留）】${dto.selectedIdea.characters.map((c: any) => typeof c === 'string' ? c : (c?.name || '')).join('、')}\n` : ''}主角必须作为 characters 数组第一项；未具名第一人称主角只能用“我”或已确认角色职责指称，不得自行新增姓名、姓氏或外号。
 
 角色名单以已确认题材及来源定位目录中的实际行动者为准：必须保留确认主角与已有关键角色，按真实剧情需要建立人物档案，不为凑固定人数添加女主角、反派、导师或同盟；别名不另建重复人物。每个真实人物的字段必须严格按以下结构：
 【读者代入信息】readerEmpathyPoint按已注入角色设计执行标准填写。
@@ -12737,11 +12850,17 @@ ${summarizeOutlineConsistency(pending)}`,
     const ensureConfirmedLongProtagonist=(skeleton:any):void=>{
       // Deterministic source identity belongs to the existing producing
       // boundary. Semantic source review remains in the existing final Gate.
+      // The long skeleton is a structured schema field (not a free-text story
+      // description), so its first authored token is the protagonist identity.
       const withoutRoleLabel=(value:unknown)=>typeof value==='string'
         ?value.replace(/^(?:主角|男主角|女主角)[：:]\s*/u,''):value;
-      const confirmed=confirmedWorldProtagonistName(withoutRoleLabel(input.confirmedProtagonist));
+      const structuredName=(value:unknown)=>{
+        const text=typeof withoutRoleLabel(value)==='string'?String(withoutRoleLabel(value)).trim():'';
+        return text ? text.split(/[，,、；;\s（(]/u)[0].trim() : '';
+      };
+      const confirmed=structuredName(input.confirmedProtagonist);
       if(!confirmed)return; // anonymous first-person must stay anonymous
-      const generated=confirmedWorldProtagonistName(withoutRoleLabel(skeleton?.coreSetting?.protagonist));
+      const generated=structuredName(skeleton?.coreSetting?.protagonist);
       if(generated!==confirmed)throw new Error('长篇骨架主角与已确认题材身份不符，禁止继续生成世界、人物或细纲');
     };
     const foundationProgress = (_nodeIndex: number, nodeId: string, status: 'started' | 'completed' | 'failed', result?: any) => {
@@ -13609,6 +13728,61 @@ ${storySoFar || '（开篇首批，尚无已写正文）'}
     }
 
     return { chapterTitles, issues };
+  }
+
+  /** Fire independent batches concurrently. The pool generation is the largest
+   * tail-latency source: equal batches measured 38s/193s/370s, and the stage
+   * wall-clock is whichever batch is slowest. Hedge ONLY an extreme outlier:
+   * once all but one batch has settled, the last one must keep running for at
+   * least twice the slowest settled batch (plus a grace window) before a single
+   * duplicate is fired. Ordinary variance never spends an extra call, because a
+   * fresh call costs about the median and would finish after the original
+   * anyway. Prompts, identities and every quality Gate stay unchanged. */
+  private async runBatchesWithHedge<T>(
+    sizes: readonly number[],
+    run: (size: number, index: number) => Promise<T>,
+    graceMs = 30_000,
+  ): Promise<Array<T | undefined>> {
+    if (!sizes.length) return [];
+    const startedAt = Date.now();
+    const results = new Array<T | undefined>(sizes.length);
+    const settled = new Array<boolean>(sizes.length).fill(false);
+    const elapsed = new Array<number | undefined>(sizes.length);
+    const deferred = sizes.map(() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>(r => { resolve = r; });
+      return { promise, resolve };
+    });
+    const settle = (index: number, value: T | undefined) => {
+      if (settled[index]) return;
+      results[index] = value;
+      settled[index] = true;
+      elapsed[index] = Date.now() - startedAt;
+      deferred[index].resolve();
+    };
+    for (let index = 0; index < sizes.length; index++) {
+      void (async () => {
+        try { settle(index, await run(sizes[index], index)); }
+        catch { settle(index, undefined); }
+      })();
+    }
+    void (async () => {
+      const done = () => settled.reduce((total, value) => total + (value ? 1 : 0), 0);
+      while (done() < sizes.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
+      if (done() !== sizes.length - 1) return;
+      const lastIndex = settled.findIndex(value => !value);
+      if (lastIndex < 0) return;
+      const settledElapsed = elapsed.filter((value, index) => settled[index] && typeof value === 'number') as number[];
+      const slowestSettled = settledElapsed.length ? Math.max(...settledElapsed) : 0;
+      const threshold = Math.max(slowestSettled * 2, slowestSettled + graceMs);
+      while (!settled[lastIndex] && Date.now() - startedAt < threshold)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (settled[lastIndex]) return;
+      try { settle(lastIndex, await run(sizes[lastIndex], lastIndex)); }
+      catch { /* keep the original in-flight result as the fallback */ }
+    })();
+    await Promise.all(deferred.map(item => item.promise));
+    return results;
   }
 
   /**

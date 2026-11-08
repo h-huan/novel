@@ -10,15 +10,20 @@ export function provenFullCardDeficit(requested:number,selected:number,accepted:
 /** Lend initial preselection only its share of the EXISTING review calls.
  * Keep enough credits for a potential final-card deficit. Both stages still
  * use independent semantic/source/overlap Gates; credits are never cloned.
- * A live getter ensures nested partition reservations/refunds hit the parent. */
+ * A live getter ensures nested partition reservations/refunds hit the parent.
+ * releaseReserve exposes the held-back refill credits to a DELIVERY-gap
+ * reselection: the preselection shortfall is audited first and is cheaper than
+ * a post-card refill, so the same real remaining calls (never more) may fund
+ * it. The reserve is not cloned or increased; once released the final refill
+ * sees only what the reselection did not spend. */
 export function reserveFinalRefillReviewCapacity(
  parent:{remaining:number},initialReviewFloor:number,requiredRefillFloor:number,
-):{remaining:number; refundReservedCalls:(amount:number)=>void} {
+):{remaining:number; refundReservedCalls:(amount:number)=>void; releaseReserve:()=>void; reserved:number} {
  if(!Number.isInteger(parent.remaining)||parent.remaining<0
    ||![initialReviewFloor,requiredRefillFloor].every(Number.isInteger)
    ||initialReviewFloor<0||requiredRefillFloor<0)
   throw Error('预选与补足审核额度无效');
- const reserve=parent.remaining>=initialReviewFloor+requiredRefillFloor
+ let reserve=parent.remaining>=initialReviewFloor+requiredRefillFloor
    ?requiredRefillFloor:0;
  let debited=0;
  return {
@@ -37,6 +42,8 @@ export function reserveFinalRefillReviewCapacity(
    parent.remaining+=amount;
    debited-=amount;
   },
+  releaseReserve(){reserve=0;},
+  get reserved(){return reserve;},
  };
 }
 
@@ -146,6 +153,24 @@ export function minimumReselectionReviewCalls(
  const sourceCalls=premiseReviewCallFloor(changedCount,sourceBatchSize,groupingMode)
    -(changedCount>1?1:0);
  return sourceCalls+(forcesNewIdentity&&selectedCount>1?1:0);
+}
+
+/** Largest number of replacement slots the REAL remaining source budget can
+ * independently vet (source batches + the single overlap call). Used to keep a
+ * partial delivery-gap reselection instead of abandoning the whole gap when
+ * only some positions are affordable. Returns 0 when even one slot is not
+ * affordable; the caller must then report the shortfall honestly. */
+export function affordableReselectionSlotCount(
+ slotCount:number,selectedCount:number,remaining:number,sourceBatchSize:number,groupingMode=0,
+):number {
+ if(!Number.isInteger(slotCount)||slotCount<0
+   ||!Number.isInteger(selectedCount)||selectedCount<1
+   ||!Number.isInteger(remaining)||remaining<0
+   ||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1||![0,1].includes(groupingMode))
+  throw Error('原池补位可负担数量参数无效');
+ let count=Math.min(slotCount,selectedCount);
+ while(count>0&&minimumReselectionReviewCalls(selectedCount,true,count,sourceBatchSize,groupingMode)>remaining)count--;
+ return count;
 }
 
 /** Replenish the already-funded screened shortlist before slow full cards.

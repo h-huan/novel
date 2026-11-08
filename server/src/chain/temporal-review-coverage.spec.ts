@@ -216,3 +216,13 @@ it.each([['下午六点一刻',1095],['下午六点三刻',1125],['六点一刻'
  const clock=temporalNumbers(text).clocks[0];
  expect(clock.original).toBe(text.replace(/^下午/,''));expect(clock.minutes).toBe(minutes);
 });
+
+it('locates year/month/day spans for outline fact review without changing body clock arithmetic',()=>{
+ const spans=temporalNumbers('那五年攒下的底单，最早一张比公证书早一年零两个月；公证书是上个月办的。').calendarSpans.map(span=>span.original);
+ expect(spans).toEqual(expect.arrayContaining(['五年','一年','上个月']));
+ expect(spans.some(span=>span.includes('两个月'))).toBe(true);
+ const catalog=temporalReviewCatalog('倒计时23:59:58。');
+ expect(catalog).toHaveLength(1);
+ expect((catalog[0] as any).calendarSpans).toBeUndefined();
+ expect(catalog[0].countdowns[0].seconds).toBe(86398);
+});

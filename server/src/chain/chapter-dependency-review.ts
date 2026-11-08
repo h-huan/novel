@@ -1,11 +1,15 @@
 /** A complete, evidenced rejection may enter the existing single chapter patch.
  * Transport errors and incomplete reviews must never become story defects. */
 export interface ChapterFactVerdict { consistent: boolean; contradictions: string[]; }
+type ChapterActionAuditRow = { status?: string; actionAnchorId?: string; resultAnchorId?: string;
+  actionEvidence?: string; resultEvidence?: string; reason?: string };
 export interface ChapterActionRejection extends Error {
   gateRejection: true;
   report: { status: number; topic: string; sections: string[] };
-  planningActionAudit?: { transitions?: Array<{ status?: string; actionAnchorId?: string; resultAnchorId?: string;
-    actionEvidence?: string; resultEvidence?: string; reason?: string }> };
+  /** A large chapter audit is split into several server-owned result shards;
+   *  the rejection carries the completed shard audits as an array. Never look
+   *  only at `.transitions`, or a sharded 422 loses every real gap path. */
+  planningActionAudit?: { transitions?: ChapterActionAuditRow[] } | Array<{ transitions?: ChapterActionAuditRow[] }>;
 }
 
 /** Give the repairer the original evidenced defects and all result field paths.
@@ -22,8 +26,12 @@ export function chapterActionRepairEvidence(chapter: unknown, failure: ChapterAc
   const anchors = causalEvidenceAnchorOptions(JSON.stringify([chapter]), {});
   const address = (id?: string) => anchors.find(anchor => anchor.id === id && anchor.source === 'body');
   const path = (id?: string) => address(id)?.path?.replace(/^0\./, '') || null;
+  const audits = failure?.planningActionAudit === undefined
+    ? []
+    : Array.isArray(failure.planningActionAudit) ? failure.planningActionAudit : [failure.planningActionAudit];
+  const transitions = audits.flatMap(audit => Array.isArray(audit?.transitions) ? audit.transitions : []);
   return {
-    gaps: (failure?.planningActionAudit?.transitions || []).filter(row => row.status === 'gap').map(row => ({
+    gaps: transitions.filter(row => row.status === 'gap').map(row => ({
       actionPath: path(row.actionAnchorId), resultPath: path(row.resultAnchorId),
       actionEvidence: row.actionEvidence, resultEvidence: row.resultEvidence, reason: row.reason,
     })),

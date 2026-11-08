@@ -4,7 +4,7 @@ import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import { readConstitution } from '../modules/project/creative-constitution';
 import { generationTasks } from '../common/generation-cancellation';
-import { confirmedWorldProtagonistName } from './source-rule-consistency';
+import { confirmedStoryCharacterNames, confirmedWorldProtagonistName } from './source-rule-consistency';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -273,11 +273,10 @@ export class GenerationRecoveryService {
     let confirmedLead='';
     try{
       const story=JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory;
-      confirmedLead=confirmedWorldProtagonistName(story?.protagonist);
+      confirmedLead=confirmedWorldProtagonistName(story?.protagonist,story?.characters);
       confirmedNames=[
         confirmedLead,
-        ...(Array.isArray(story?.characters)?story.characters:[]).map((row:any)=>
-          confirmedWorldProtagonistName(typeof row==='string'?row:row?.name)),
+        ...confirmedStoryCharacterNames(story?.characters),
       ].filter(Boolean);
     }catch{
       // A malformed source cannot authorize keeping old roles. The saved world

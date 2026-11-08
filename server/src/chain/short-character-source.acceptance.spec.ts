@@ -4,7 +4,7 @@ import {Migrator} from '../database/migrator';
 import {seedAcceptanceProject} from '../acceptance/test-project-fixture';
 import {ChainController} from './chain.controller';
 let db:DatabaseSync,controller:any;
-const input=()=>({projectId:'p',dto:{selectedIdea:{protagonist:'林青',storyCore:'林青使用维修记录核对承包商的账目。'}},constitution:{targetPlatform:'fanqie'},styleInstruction:'',isShort:true,canonicalCreativeBrief:JSON.stringify({confirmedStory:'林青使用维修记录核对承包商的账目。'}),world:{rules:['维修工可以查阅自己的维修记录']},emit:vi.fn()});
+const input=()=>({projectId:'p',dto:{selectedIdea:{protagonist:'姓名：林青',storyCore:'林青使用维修记录核对承包商的账目。'}},constitution:{targetPlatform:'fanqie'},styleInstruction:'',isShort:true,canonicalCreativeBrief:JSON.stringify({confirmedStory:'林青使用维修记录核对承包商的账目。'}),world:{rules:['维修工可以查阅自己的维修记录']},emit:vi.fn()});
 beforeEach(async()=>{db=new DatabaseSync(':memory:');await new Migrator(db).runMigrations();seedAcceptanceProject(db,{id:'p',type:'short_story'});controller=Object.create(ChainController.prototype);controller.db={getDb:()=>db};controller.logger={warn:vi.fn(),error:vi.fn()};controller.generatedCanonGuard={assertStructuredCanCommit:vi.fn()};controller.llmCallWithRetry=vi.fn();});
 afterEach(()=>db.close());
 describe('short character source before outline',()=>{

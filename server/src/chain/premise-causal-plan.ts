@@ -164,9 +164,52 @@ export function premiseCausalPlanIssues(item: Record<string, unknown>): string[]
   return errors;
 }
 
+/** The pool model sometimes writes the CHINESE story-section name in a
+ * causalPlan anchor's `field` ('主动选择'/'必要条件'/'反转兑现') instead of the
+ * English narrative field the schema requires (activeChoice/escalation/
+ * payoff). The quote itself is already verbatim, so this is a LOSSLESS
+ * transport fix: map the section name to the narrative field that actually
+ * contains that section's text, and map a final reversal result to `payoff` so
+ * the payoff-coverage rule still holds. It never edits any story text and
+ * never judges causality; a genuinely misplaced quote still fails the existing
+ * validator. Without this, a correct pool fell back to a paid model reselection
+ * and to spurious payoff rejections purely because of the field-name language. */
+const SECTION_TO_FIELD: Record<string, string> = {
+  处境触发: 'openingEvent',
+  主动选择: 'activeChoice',
+  必要条件: 'escalation',
+  反转兑现: 'reversalEffect',
+  分类流派机制: 'irreplaceableCarrier',
+};
+export function normalizeCausalPlanFieldNames<T extends Record<string, unknown>>(item: T): T {
+  if (!Array.isArray(item.causalPlan)) return item;
+  const plan = item.causalPlan as unknown[];
+  const normalizeAnchor = (anchor: unknown, finalResult = false): unknown => {
+    if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return anchor;
+    const field = typeof (anchor as { field?: unknown }).field === 'string'
+      ? String((anchor as { field: unknown }).field) : '';
+    const mapped = SECTION_TO_FIELD[field];
+    if (!mapped) return anchor;
+    const next = finalResult && field === '反转兑现' ? 'payoff' : mapped;
+    return { ...(anchor as Record<string, unknown>), field: next };
+  };
+  const normalized = plan.map((link, index) => {
+    if (!link || typeof link !== 'object' || Array.isArray(link)) return link;
+    const row = link as Record<string, unknown>;
+    return {
+      ...row,
+      action: normalizeAnchor(row.action),
+      conditions: Array.isArray(row.conditions)
+        ? row.conditions.map(condition => normalizeAnchor(condition))
+        : row.conditions,
+      result: normalizeAnchor(row.result, index === plan.length - 1),
+    };
+  });
+  return { ...item, causalPlan: normalized };
+}
+
 /** Called at the live generation boundary, never synthesizes missing plans from old text. */
-export function assertPremiseCausalPlans(selection: { selected: Record<string, unknown>[] }): void {
-  for (const item of selection.selected) {
+export function assertPremiseCausalPlans(selection: { selected: Record<string, unknown>[] }): void {  for (const item of selection.selected) {
     const errors = premiseCausalPlanIssues(item);
     if (errors.length) throw new Error(`已选题材 ${item.premiseId} 的生成前因果计划未完成：${errors.join('；')}`);
   }

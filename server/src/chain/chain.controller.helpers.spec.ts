@@ -1853,14 +1853,16 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     expect(generate.mock.calls[0][0].prompt).toContain('【服务器分类编号目录】');
     expect(generate.mock.calls[0][0].prompt).toContain('storyCategoryId');
     const poolCalls = generate.mock.calls.filter(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_pool_generation');
-    // Two pool calls plus the mandatory selector exhaust the original three-call limit.
-    expect(poolCalls).toHaveLength(2);
-    expect(poolCalls.slice(0, 2).map(([request]: any[]) => request.metrics?.attempt)).toEqual([0, 1]);
+    // Batches of at most five premises, then the mandatory selector. Read the
+    // expected count from the parameterization instead of hardcoding two.
+    const poolBatchCount = expectedPoolBatchSizes.length;
+    expect(poolCalls).toHaveLength(poolBatchCount);
+    expect(poolCalls.slice(0, poolBatchCount).map(([request]: any[]) => request.metrics?.attempt)).toEqual(expectedPoolBatchSizes.map((_, i) => i));
     expect(poolCalls[0][0].prompt).toContain('候选池并发生成');
     // Parallel batches cannot see one another: preserve complementary actual
     // strategy search directions without adding calls or reducing any Gate.
-    const lockedSlots=poolCalls.slice(0,2).flatMap(([request]:any[])=>JSON.parse(request.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]));
-    expect(new Set(lockedSlots.map((slot:any)=>slot.premiseId)).size).toBe(expectedPoolBatchSizes[0]+expectedPoolBatchSizes[1]);
+    const lockedSlots=poolCalls.slice(0,poolBatchCount).flatMap(([request]:any[])=>JSON.parse(request.prompt.split('【生成前锁定的候选槽位】')[1].split('\n逐项原样使用')[0]));
+    expect(new Set(lockedSlots.map((slot:any)=>slot.premiseId)).size).toBe(expectedPoolBatchSizes.reduce((a,b)=>a+b,0));
     expect(lockedSlots.every((slot:any)=>slot.requiredGenres.includes('悬疑推理')&&!Object.hasOwn(slot,'causalDirection')&&!Object.hasOwn(slot,'costDirection'))).toBe(true);
     expect(poolCalls.every(([request]:any[]) =>
       request.prompt.includes('【每项分类核心机制：生成与选优使用与审核相同的标准】')
@@ -1870,11 +1872,12 @@ describe('idea discovery orchestrator with simulated model responses', () => {
     )).toBe(true);
     expect(poolCalls[0][0].prompt).toContain('既有行动全部成立而所称结果仍可能不成立');
     expect(poolCalls[0][0].prompt).not.toContain('私存岗位记录');
-    expect(poolCalls[0][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[0] + ' 个轻量题材胚子');
-    expect(poolCalls[1][0].prompt).toContain('只生成恰好 ' + expectedPoolBatchSizes[1] + ' 个轻量题材胚子');
-    expect(poolCalls.slice(0,2).every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
+    expectedPoolBatchSizes.forEach((size, index) => {
+      expect(poolCalls[index][0].prompt).toContain('只生成恰好 ' + size + ' 个轻量题材胚子');
+    });
+    expect(poolCalls.slice(0,poolBatchCount).every(([request]: any[]) => !request.prompt.includes('"selectedPremises"'))).toBe(true);
     const selectionCall = generate.mock.calls.find(([request]: any[]) => request.metrics?.stepKey === 'idea_premise_selection');
-    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(2);
+    expect(generate.mock.calls.indexOf(selectionCall as any)).toBe(poolBatchCount);
     expect(selectionCall?.[0].prompt).toContain('【服务器已固定的候选池；不得新增、改写或重新编号】');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P1"');
     expect(selectionCall?.[0].prompt).toContain('"premiseId":"P2"');
@@ -2613,6 +2616,23 @@ describe('idea discovery requested quantity and concurrency regressions', () => 
     expect(IDEA_PREMISE_POOL_BASE_BATCHES).toBe(2);
     expect(IDEA_CARD_GENERATION_CONCURRENCY).toBe(8);
   });
+
+  it('hedges only the last slow batch and keeps the faster result', async () => {
+    const c = Object.create(ChainController.prototype) as any;
+    const calls: Record<number, number> = { 0: 0, 1: 0, 2: 0 };
+    const run = async (_size: number, index: number) => {
+      calls[index] = (calls[index] || 0) + 1;
+      const nth = calls[index];
+      // Batch 2's first attempt is a transient outlier; its hedge returns fast.
+      await new Promise(resolve => setTimeout(resolve, index === 2 && nth === 1 ? 3000 : 250));
+      return { index, nth };
+    };
+    const results = await c.runBatchesWithHedge([5, 5, 5], run, 150);
+    expect(results).toHaveLength(3);
+    expect(results[0]).toEqual({ index: 0, nth: 1 });
+    expect(results[1]).toEqual({ index: 1, nth: 1 });
+    expect(results[2]).toEqual({ index: 2, nth: 2 });
+  }, 15000);
 });
 
 

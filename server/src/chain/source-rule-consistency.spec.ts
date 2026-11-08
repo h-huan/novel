@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ChainController } from './chain.controller';
-import { confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
+import { confirmedStoryCharacterNames, confirmedWorldProtagonistName, describeWorldSourceCandidate, normalizeWorldSourceCandidate, normalizeWorldRuleStrings, orderConfirmedProtagonistCharacters } from './source-rule-consistency';
 
 describe('generic world source validation', () => {
   it('preserves long world rules through current and historical nested-array storage',()=>{
@@ -26,9 +26,29 @@ describe('generic world source validation', () => {
     }
   });
 
+  it('keeps free-text role descriptions out of mandatory character names', () => {
+    const characters = [
+      '我（主角）：庶女，装不会看账三年，靠替库房抄对牌攒下带经手人和时辰记号的存根。',
+      '我娘：妾室，被禁让主角读书；城南陪嫁铺子是外祖留下，主角要保的唯一活路。',
+      '嫡母：掌中馈，拿三千两亏空单逼铺子或把主角送去庄子；三笔过账记在其陪房名下。',
+      '祖母：掌家人，寿宴上叫外院账房先生核账，收回嫡母管事钥匙、发还铺子契书。',
+      '嫡母的陪房（管事妈妈）：库房经手人，三笔过账记在其名下，收走总账，后被逐出府。',
+      '外院账房先生：受祖母之命，核存根与库房底册。',
+    ];
+    expect(confirmedWorldProtagonistName('庶女，母亲是妾室。为保住外祖留给娘的城南陪嫁铺子……', characters)).toBe('');
+    expect(confirmedWorldProtagonistName('我娘：妾室，被禁让主角读书', characters)).toBe('');
+    expect(confirmedWorldProtagonistName('嫡母：掌中馈', characters)).toBe('');
+    expect(confirmedWorldProtagonistName('外院账房先生：受祖母之命', characters)).toBe('');
+    expect(confirmedStoryCharacterNames(characters)).toEqual([]);
+    expect(confirmedStoryCharacterNames(['姓名：沈昭', '我（主角）：庶女。', '主管：婚介所主管。'])).toEqual(['沈昭']);
+    expect(confirmedWorldProtagonistName('姓名：沈昭', ['姓名：沈昭'])).toBe('沈昭');
+  });
+
   it('retains an actually named first-person protagonist', () => {
-    expect(confirmedWorldProtagonistName('李明，修理工')).toBe('李明');
     expect(confirmedWorldProtagonistName('我叫李明，修理工')).toBe('李明');
+    expect(confirmedWorldProtagonistName('姓名：李明')).toBe('李明');
+    expect(confirmedWorldProtagonistName('李明')).toBe('');
+    expect(confirmedWorldProtagonistName('李明，修理工')).toBe('');
   });
   it('rejects malformed/empty world records without encoding a particular story mechanic', () => {
     expect(describeWorldSourceCandidate({ error: '生成失败', rules: [] }, '甲'))

@@ -127,7 +127,7 @@ describe('GenerationRecoveryService', () => {
       ALTER TABLE characters ADD COLUMN identity TEXT DEFAULT '';
       ALTER TABLE characters ADD COLUMN is_pov_character INTEGER DEFAULT 0;`);
     const settings = JSON.parse((db.prepare("SELECT settings FROM projects WHERE id='p1'").get() as any).settings);
-    settings.creativeConstitution.confirmedStory = {protagonist:'苏青',characters:[]};
+    settings.creativeConstitution.confirmedStory = {protagonist:'姓名：苏青',characters:[]};
     db.prepare("UPDATE projects SET settings=? WHERE id='p1'").run(JSON.stringify(settings));
     db.prepare("INSERT INTO world_settings VALUES ('saved-world','p1')").run();
     db.prepare("INSERT INTO characters VALUES ('c1','p1','王明','藏经阁杂役',1)").run();

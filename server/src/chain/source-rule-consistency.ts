@@ -6,18 +6,45 @@
  * They require stable fact/rule identity (source-fact-consistency.ts) or semantic
  * cross-source review. No novel-specific nouns or mechanisms belong in this file.
  */
-/** Bind only a genuinely confirmed name; an anonymous narrator or role
- * description must never become a mandatory personal name in the world plan. */
-export function confirmedWorldProtagonistName(protagonist: unknown): string {
+/** A free-text protagonist description is not a name. Only an explicitly
+ * authored name marker or a structured name property may become a mandatory
+ * exact-name requirement; role/kinship wording stays prompt context and never
+ * enters a closed role dictionary or a first-token name guess. */
+const EXPLICIT_PERSON_NAME = /^(?:我(?:叫|名叫)|姓名[:：]|主角姓名[:：]|人物姓名[:：])\s*([\p{Script=Han}]{1,4})(?=[，,。：:；;\s（(]|$)/u;
+
+function nameText(value: unknown): string {
+  return typeof value === 'string' ? value.trim()
+    : value && typeof value === 'object' ? String((value as {name?: unknown}).name || '').trim()
+      : '';
+}
+
+/** Only explicit name markers or structured name properties qualify. */
+export function confirmedStoryCharacterNames(characters: unknown): string[] {
+  const rows = Array.isArray(characters) ? characters : [];
+  const names = rows.flatMap(row => {
+    if (row && typeof row === 'object') {
+      const structured = String((row as {name?: unknown}).name || '').trim();
+      return structured ? [structured] : [];
+    }
+    const raw = nameText(row);
+    const explicit = raw ? EXPLICIT_PERSON_NAME.exec(raw) : null;
+    return explicit ? [explicit[1]] : [];
+  });
+  return [...new Set(names)];
+}
+
+/** Bind only a genuinely confirmed name; a free-text role description must
+ * never become a mandatory personal name. A structured name property is
+ * already explicit; a string must carry an explicit name marker. */
+export function confirmedWorldProtagonistName(protagonist: unknown, _confirmedCharacters?: unknown): string {
+  if (protagonist && typeof protagonist === 'object') {
+    const structured = String((protagonist as {name?: unknown}).name || '').trim();
+    return structured;
+  }
   const raw = typeof protagonist === 'string' ? protagonist.trim() : '';
   if (!raw) return '';
-  const explicitlyNamed = /^我(?:叫|名叫)([\p{Script=Han}]{1,4})(?=[，,。：:；;\s（(]|$)/u.exec(raw);
-  if (explicitlyNamed) return explicitlyNamed[1];
-  const token = raw.split(/[，,。：:；;\s（(]/)[0].trim();
-  if (/^(?:我|本人|主角|叙述者|匿名主角|无名主角|未命名主角|第一人称主角)$/.test(token)
-    || /^我(?:是|在|曾|被|要|想|有|没|从|正|只|以|靠|做|原|后来)/.test(token)
-    || /^(?:一名|一个|这位|这名|某位)/.test(token)) return '';
-  return token;
+  const explicit = EXPLICIT_PERSON_NAME.exec(raw);
+  return explicit ? explicit[1] : '';
 }
 
 /** Preserve the exact authored world rules on initial persistence and frozen
@@ -56,7 +83,7 @@ export function orderConfirmedProtagonistCharacters<T extends {name?:unknown}>(
   const name=typeof item.name==='string'?item.name.trim():'';
   return !!name&&source.includes(name);
  });
- if(matches.length!==1)throw new Error('长篇已确认主角与生成人物未形成唯一同名身份，禁止把第一位配角标为主角');
+ if(matches.length!==1)throw new Error('已确认主角与生成人物未形成唯一同名身份，禁止把第一位配角标为主角');
  const lead=matches[0];return [lead,...characters.filter(item=>item!==lead)];
 }
 

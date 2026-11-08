@@ -9,10 +9,10 @@ import { GenerationMetricsService, generationRulesetSnapshotIsCurrent } from './
 describe('generation ruleset staleness', () => {
   const digest = 'a'.repeat(64);
 
-  it('accepts only a snapshot from the same ruleset version and registry digest', () => {
-    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 77, registryDigest: digest }), 77, digest)).toBe(true);
-    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 76, registryDigest: digest }), 77, digest)).toBe(false);
-    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 77, registryDigest: 'b'.repeat(64) }), 77, digest)).toBe(false);
+  it('accepts only a snapshot from the same ruleset version and scenario digest, ignoring the global registry digest', () => {
+    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 77, digest, registryDigest: 'stale-global-digest' }), 77, digest)).toBe(true);
+    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 76, digest }), 77, digest)).toBe(false);
+    expect(generationRulesetSnapshotIsCurrent(JSON.stringify({ rulesetVersion: 77, digest: 'b'.repeat(64) }), 77, digest)).toBe(false);
   });
 
   it('treats legacy, absent and malformed snapshots as stale', () => {

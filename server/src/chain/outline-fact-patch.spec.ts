@@ -233,6 +233,23 @@ it('does not treat a private-message rewrite as a fix for the group-message cont
   .toContain('没有直接修改冲突描述中的原始断言');
 });
 
+it('accepts a local edit to either independently quoted side of the same conflict', () => {
+ const secondSideEdit = {
+  content: conflictingContent.replace('回复就挂在报修底下，头像是沈曼助理', '回复后来被撤回，头像仍是沈曼助理'),
+ };
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter, secondSideEdit, [groupReplyConflict])).toEqual([]);
+});
+
+it('applies a unique quoted-span replacement without rewriting the whole field', () => {
+ const patch={content:{find:'回复就挂在报修底下，头像是沈曼助理',replace:'回复后来被撤回，头像仍是沈曼助理'}};
+ const repaired=applyOutlineFactPatch(conflictingChapter,patch);
+ expect(repaired.content).toContain('回复后来被撤回');
+ expect(repaired.content).not.toContain('回复就挂在报修底下');
+ expect(outlineFactPatchSynchronizationIssues(conflictingChapter,patch,[groupReplyConflict])).toEqual([]);
+ expect(()=>applyOutlineFactPatch(conflictingChapter,{content:{find:'不存在的原句',replace:'x'}})).toThrow('唯一逐字存在');
+ expect(()=>applyOutlineFactPatch(conflictingChapter,{content:{find:'底下没人回',replace:'底下没人回'}})).toThrow('必须是不同的非空片段');
+});
+
 
 it('does not accept a fish-count repair that leaves the opposite count in dialogue or action fields',()=>{
  const chapter={

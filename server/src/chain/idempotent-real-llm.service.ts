@@ -334,9 +334,19 @@ export class IdempotentRealLLMService extends RealLLMService {
    */
   private attachLatestRunId(projectId: string, scenario: string, response: LLMResponse): LLMResponse {
     if (response.runId || !String(response.content || '').trim()) return response;
-    const row = this.database.getDb().prepare(`SELECT id FROM generation_runs
+    const db=this.database.getDb();
+    const project=db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
+    if(!project)return response;
+    const stage=qualityStage(scenario);
+    const compiled=compileContext(db,{projectId,stage});
+    const constitution=readConstitution(project);
+    const standards=standardDirectiveCache.snapshot(scenario,true,null);
+    const row = db.prepare(`SELECT id FROM generation_runs
       WHERE project_id=? AND scenario=? AND status='success' AND output_text=?
-      ORDER BY finished_at DESC,id DESC LIMIT 1`).get(projectId, scenario, response.content) as { id: string } | undefined;
+        AND constitution_revision IS ? AND context_version=? AND standards_snapshot=?
+      ORDER BY finished_at DESC,id DESC LIMIT 1`).get(
+        projectId, scenario, response.content, constitution?.revision ?? null, compiled.version,
+        JSON.stringify(standards)) as { id: string } | undefined;
     return row?.id ? { ...response, runId: row.id } : response;
   }
 

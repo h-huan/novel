@@ -2,6 +2,7 @@ import { defaultRepairStrategy, repairStrategies } from '../writing-quality/repa
 import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../writing-quality/issue-lifecycle';
 import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
+import { canonical } from '../writing-quality/character-contract';
 import { readConstitution } from '../project/creative-constitution';
 import { loadCharacterNames } from '../character/character-names';
 import { qualityStage } from '../../routing/scenario-taxonomy';
@@ -164,13 +165,18 @@ const BOTTLENECK_MIN_CALLS = 2;
 export function generationRulesetSnapshotIsCurrent(
   rawSnapshot: unknown,
   currentRulesetVersion: number,
-  currentRegistryDigest: string,
+  currentScenarioDigest: string,
 ): boolean {
   if (typeof rawSnapshot !== 'string' || !rawSnapshot.trim()) return false;
   try {
-    const snapshot = JSON.parse(rawSnapshot) as { rulesetVersion?: number; registryDigest?: string };
+    // Staleness is judged by the *scenario-level* directive digest (the exact
+    // rules a run was generated under), not the global registry digest. A global
+    // digest changes whenever any unrelated rule text changes, which would
+    // falsely expire a valid cached run whose own directive is unchanged. The
+    // idempotent cache already keys reuse on this same scenario-level digest.
+    const snapshot = JSON.parse(rawSnapshot) as { rulesetVersion?: number; digest?: string };
     return snapshot.rulesetVersion === currentRulesetVersion
-      && snapshot.registryDigest === currentRegistryDigest;
+      && snapshot.digest === currentScenarioDigest;
   } catch {
     return false;
   }
@@ -250,16 +256,62 @@ export class GenerationMetricsService implements OnModuleInit {
 
   runIsCurrent(runId: string, projectId: string): boolean {
     const db = this.databaseService.getDb();
-    const run = db.prepare('SELECT constitution_json,context_snapshot,standards_snapshot,stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    const run = db.prepare('SELECT constitution_json,context_snapshot,standards_snapshot,stage,chapter_index,scenario FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
     const row = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
-    return !!run && !!row
-      && run.constitution_json === JSON.stringify(readConstitution(row))
-      && run.context_snapshot === this.qualityContext(projectId, run.stage, run.chapter_index)
-      && generationRulesetSnapshotIsCurrent(
-        run.standards_snapshot,
+    // Compare canonical story facts so a storage/key-order rewrite or volatile
+    // timestamp update of the same canon does not falsely expire a valid run.
+    // Actual story/world/character changes still alter the stable value.
+    const volatileContextKey=/(^|_)(created_at|updated_at|started_at|finished_at)$/i;
+    const stableContext=(value:any):any=>{
+      if(!value||typeof value!=='object')return value;
+      if(Array.isArray(value))return value.map(stableContext);
+      const out:Record<string,any>={};
+      for(const [key,item] of Object.entries(value)){
+        if(!volatileContextKey.test(key))out[key]=stableContext(item);
+      }
+      return out;
+    };
+    const sameCanonical=(left:string,right:string)=>{
+      if(left===right)return true;
+      try{return canonical(stableContext(JSON.parse(left)))===canonical(stableContext(JSON.parse(right)));}catch{return false;}
+    };
+    const currentContext=this.qualityContext(projectId, run?.stage, run?.chapter_index);
+    const contextIsCurrent=()=>{
+      if(run.context_snapshot===currentContext)return true;
+      let before:any,after:any;
+      try{before=JSON.parse(run.context_snapshot);after=JSON.parse(currentContext);}catch{return false;}
+      // A stage must only be invalidated by the canon sections it actually
+      // consumes. Outline/previous-chapter metadata changing after a character
+      // run must not expire the character credential; real world/character
+      // changes still do.
+      const dependencySections:Record<string,string[]>={
+        character:['worldRules','characters','characterContracts','organizations','locations'],
+        world:['worldRules'],
+        outline:['worldRules','characters','characterContracts','outline'],
+      };
+      const keys=dependencySections[String(run.stage||'')];
+      if(keys?.length)return keys.every(key=>JSON.stringify(stableContext(before?.[key]??null))===JSON.stringify(stableContext(after?.[key]??null)));
+      return sameCanonical(run.context_snapshot,currentContext);
+    };
+    const standardsIsCurrent = () => {
+      let snap: { scenario?: string; stepKey?: string | null; enabled?: boolean } = {};
+      try { snap = JSON.parse(String(run?.standards_snapshot || '{}')); } catch {}
+      const scenario = typeof snap.scenario === 'string' && snap.scenario.trim()
+        ? snap.scenario
+        : String(run?.scenario || '');
+      const enabled = snap.enabled !== false;
+      const stepKey = snap.stepKey ?? null;
+      const currentScenarioDigest = standardDirectiveCache.snapshot(scenario, enabled, stepKey).digest;
+      return generationRulesetSnapshotIsCurrent(
+        run?.standards_snapshot,
         standardDirectiveCache.getRulesetVersion(),
-        standardDirectiveCache.getRulesetDigest(),
+        currentScenarioDigest,
       );
+    };
+    return !!run && !!row
+      && sameCanonical(run.constitution_json, JSON.stringify(readConstitution(row)))
+      && contextIsCurrent()
+      && standardsIsCurrent();
   }
 
   finishRun(id: string, status: 'success' | 'failed' | 'cancelled', started: number, output?: string, error?: string, model?: string) {

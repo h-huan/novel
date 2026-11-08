@@ -21,6 +21,27 @@ it('keeps a substantive gap negative when the model omits its repair route, and 
  expect(premisePayoffReviewDirective(selection)).toContain('gapRepair');
  expect(premisePayoffReviewDirective(selection)).toContain('"gapRepair":"replace_from_pool"');
 });
+it('normalizes a plan-index-only replace route to the same identity when a real source condition exists',()=>{
+ const planSelection={pool:[{premiseId:'P1',storyCore:'她通过已有录音报案；受害人提供已有资料，警方核实现场情况。她失去工作。'}],
+  selected:[{premiseId:'P1',activeChoice:'她留下录音并向警方报告具体地点。',
+   escalation:'受害人提供已有资料，警方核实现场情况。',
+   payoff:'警方到场解救被困的人，她失去工作。',
+   causalPlan:[{action:{field:'activeChoice',quote:'她留下录音并向警方报告具体地点。'},
+    conditions:[{field:'escalation',quote:'受害人提供已有资料，警方核实现场情况。'}],
+    result:{field:'payoff',quote:'警方到场解救被困的人，她失去工作。'}}]}],poolTargetMet:true};
+ const row={...supported,ref:'S1.payoff',status:'gap' as const,gapRepair:'replace_from_pool' as const,
+  reason:'原池已写核验过程，仅causalPlan索引倒置，按原池补正索引，不换题材',
+  links:[{ref:'S1.causalPlan[0]',status:'gap' as const,reason:'计划把终局绑到较早环节'}]};
+ const normalized=normalizePremisePayoffGapRoutes({payoffChecks:[row]},planSelection);
+ expect(normalized.payoffChecks[0]).toMatchObject({
+  gapRepair:'restore_source_conditions',sourceConditionQuote:'受害人提供已有资料，警方核实现场情况。'});
+ expect(materializePremisePayoffReview(normalized,planSelection)[0].repairMode).toBeUndefined();
+ expect(premisePayoffReviewIssues(normalized,planSelection)).toEqual([]);
+ const genuine={...row,reason:'原池确实缺少有权决定者的实际批准，必须换选'};
+ const kept=normalizePremisePayoffGapRoutes({payoffChecks:[genuine]},planSelection);
+ expect(kept.payoffChecks[0].gapRepair).toBe('replace_from_pool');
+ expect(premisePayoffReviewIssues(kept,planSelection)).toEqual([]);
+});
 it('keeps the exact transfer and conditional-decision prerequisites in the shared source/causal review standard',()=>{
   expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('电子照片、消息的发送不等于实物或原件已经转交');
   expect(PREMISE_PAYOFF_REVIEW_POLICY).toContain('一方明确提出先交付、先核验或先取得同意的交换条件');

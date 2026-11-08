@@ -77,6 +77,8 @@ class StandardDirectiveCacheClass {
     const directive = enabled ? this.get(scenario, stepKey) : '';
     return {
       enabled,
+      scenario,
+      stepKey: stepKey ?? null,
       available: !!directive,
       rulesetVersion: SYSTEM_WORKFLOW_RULESET_VERSION,
       registryDigest: this.getRulesetDigest(),

@@ -466,6 +466,46 @@ describe('truncated initial causal proof stays compact within its existing secon
  });
 });
 
+describe('large result shards keep the normal correction pass',()=>{
+ it('repairs a bad citation in its own shard without re-splitting or losing the sibling shard',async()=>{
+  const chapter={chapterNumber:3,chapterFunction:'climax',content:'他把材料当面交给负责人。',
+   scenes:Array.from({length:40},(_,i)=>({outcome:`第${i+1}项结果已登记，负责人确认第${i+1}项。`}))};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const allResults=causalChapterResultAnchors(anchors,0).map(anchor=>anchor.id);
+  expect(allResults.length).toBeGreaterThan(72);
+  const actionId=anchors.find(anchor=>anchor.path==='0.content'&&anchor.source==='body')!.id;
+  const firstPartitionFirst=allResults[0];
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockImplementation(async (request:any)=>{
+   const prompt=String(request.prompt||'');
+   if(prompt.includes('本次仅纠正编号[0]')){
+    return {content:JSON.stringify({repairs:[{index:0,actionAnchorId:actionId,
+      resultAnchorId:firstPartitionFirst,bridgeAnchorId:actionId,status:'supported',
+      reason:'当面交付由实际行动直接产生登记结果'}]})};
+   }
+   const marker='【章号与本章证据地址对应】';
+   const catalog=JSON.parse(prompt.split(marker)[1].split('\n')[0]);
+   const ids=catalog.flatMap((entry:any)=>entry.resultAnchorIds);
+   const needsRepair=ids.includes(firstPartitionFirst);
+   return {content:JSON.stringify({causalAudit:{status:'evaluated',
+    reason:'逐项核对实际行动、登记结果与成立条件',
+    proofRows:ids.map((id:string,index:number)=>[
+     index+1,actionId,needsRepair&&index===0?id:actionId,'supported',
+     needsRepair&&index===0?'该结果不能只用自己的声明证明':'当面交付行动直接产生登记结果',
+    ])}})};
+  });
+  (service as any).generateInternal=generate;
+  const result=await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+   JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(result.verified).toBe(true);
+  // One initial pass per shard plus exactly one correction for the shard that
+  // cited its own result. The other shard must not be re-split or re-run.
+  expect(generate).toHaveBeenCalledTimes(3);
+  expect(generate.mock.calls.filter((call:any)=>String(call[0].prompt).includes('本次仅纠正编号[0]'))).toHaveLength(1);
+  expect((result.audit as any[]).every((audit:any)=>audit.transitions.length===40)).toBe(true);
+ });
+});
+
 describe('decisive planning action proof', () => {
   it('rejects a supplied cross-chapter action ID even when both chapters have identical prose',async()=>{
     const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',

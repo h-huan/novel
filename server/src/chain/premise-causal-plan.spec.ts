@@ -243,6 +243,16 @@ describe('plan critical prerequisites before full story cards',()=>{
     (rows[0] as any).status='unknown';
     expect(materializePremisePayoffReview({payoffChecks:rows},s)).toEqual([expect.objectContaining({kind:'selection_fit',premiseId:'A',repairMode:'replace_from_pool',reason:expect.stringContaining('未确认')})]);
   });
+  it('replaces a payoff-complete premise whose sharing potential is weak, before card generation',()=>{
+    const s=selection(),row=payoffChecks(s)[0];
+    expect(materializePremisePayoffReview({payoffChecks:[row]},s)).toEqual([]);
+    (row as any).sharingCheck={status:'weak',reason:'只有查明事实和自证清白，缺少可供读者争论的两难或关系冲击'};
+    // The extra field never breaks the payoff protocol.
+    expect(premisePayoffReviewIssues({payoffChecks:[row]},s)).toEqual([]);
+    const issue=materializePremisePayoffReview({payoffChecks:[row]},s)[0];
+    expect(issue).toMatchObject({kind:'selection_fit',premiseId:'A',repairMode:'replace_from_pool'});
+    expect(issue.reason).toContain('传播潜力不足');
+  });
   it('rejects absent, duplicate and wrong-card checks while preserving true gaps',()=>{
     const s=selection(['A','B']);
     for(const kind of ['absent','duplicate','wrong-card']){

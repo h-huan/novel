@@ -117,6 +117,7 @@ it('allows citation-only correction for an evidenced selection-fit slot without 
   },2,3);
   const issue={kind:'selection_fit' as const,premiseId:'B',referencePremiseId:'B',
     quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+    planIndexOnly:true,
     reason:'此前引用计划越过了已写出的必要核验与决定环节'};
   const improved=[{action:{field:'activeChoice',quote:premise('B').activeChoice},
     conditions:[],result:{field:'escalation',quote:premise('B').escalation}},
@@ -643,15 +644,16 @@ it('does not enter another provider attempt after the last physical call returns
     c.reviewPremiseSelection=vi.fn().mockResolvedValueOnce(sourceFailure).mockResolvedValueOnce(failure).mockResolvedValue({passed:true,issues:[]});
     const fixed={...premise('A'),activeChoice:'恢复原池行动方向而非错误展开'};
     c.llmCallWithRetry=vi.fn(async (_label:string,prompt:string)=>{
-      expect(prompt).toContain('source_drift'); expect(prompt).toContain('overlap');
-      expect(prompt).toContain('replacements恰好2项');
-      return {data:{replacements:[{replacesPremiseId:'A',premise:fixed,comparisons:[compare('C')]},{replacesPremiseId:'B',premise:premise('C'),comparisons:[compare('A')]}]}};
+      expect(prompt).toContain('source_drift');
+      expect(prompt).toContain('replacements恰好1项');
+      return {data:{replacements:[{replacesPremiseId:'A',premise:fixed,comparisons:[compare('C')]}]}};
     });
     const result=await c.reconcilePremiseSelection(original,2,3,['悬疑'],'');
     expect(result.selected[0].activeChoice).toBe(fixed.activeChoice);
     expect(result.selectionAudit.initialReview.issues).toHaveLength(2);
+    expect(result.selectionAudit.initialReview.issues.some((row:any)=>row.kind==='overlap')).toBe(true);
     expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
-    expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(4);
+    expect(c.reviewPremiseSelection).toHaveBeenCalledTimes(3);
   });
   it('rechecks only changed overlap pairs after original-pool reselection and drops obsolete pair findings', async () => {
   const original=selection(),overlapCalls:any[]=[];
@@ -688,6 +690,7 @@ it('reuses independent overlap when only the causalPlan citation index changes, 
   },2,3);
   const issue={kind:'selection_fit' as const,premiseId:'B',referencePremiseId:'B',
     quote:premise('B').payoff,referenceQuote:premise('B').storyCore,
+    planIndexOnly:true,
     reason:'当前因果引用越过在故事中已建立的真实中间行动'};
   let sourceCalls=0,overlapCalls=0;
   const c=Object.create(ChainController.prototype) as any;
@@ -1204,11 +1207,11 @@ it('keeps source-correctable original IDs eligible when screening target exceeds
  });
  await c.reconcilePremiseSelection(input,2,3,['悬疑'],'',[],undefined,1);
  expect(allowed).toEqual(expect.arrayContaining(['A','C']));
- expect(allowed).not.toContain('B'); // forced replacement hedge must still change identity
+ expect(allowed).not.toContain('B'); // the optional hedge must change identity
  expect(accepted).toBe(true);expect(c.llmCallWithRetry).toHaveBeenCalledTimes(1);
 });
 
-it.each([{credits:8,recover:true},{credits:7,recover:false}])('funds the observed 3-card delivery gap before optional hedges with $credits shared calls',async({credits,recover})=>{
+it.each([{credits:8,recover:true},{credits:6,recover:false}])('funds the observed 3-card delivery gap before optional hedges with $credits shared calls',async({credits,recover})=>{
  vi.mocked(budgetConfig.readGenerationBudgets).mockReturnValue({...budgetConfig.GENERATION_BUDGET_DEFAULTS,sourceBatchSize:2});
  const {materializePremiseCategoryFit}=await import('./premise-category-fit');
  const make=(id:string)=>({...premise(id),payoff:'救出家属，自己按既定规则被遗忘'+id,causalPlan:[{action:{field:'activeChoice',quote:premise(id).activeChoice},
@@ -1245,7 +1248,7 @@ it.each([{credits:8,recover:true},{credits:7,recover:false}])('funds the observe
  const result=await c.reconcilePremiseSelection(input,8,12,['悬疑'],'unchanged standard',[],budget,5);
  expect(result.selected.map((row:any)=>row.premiseId)).toEqual(recover?['A','B','H','I','J','K']:['A','B']);
  expect(c.llmCallWithRetry).toHaveBeenCalledTimes(recover?1:0);
- expect(budget.reviews.remaining).toBe(recover?0:2);
+ expect(budget.reviews.remaining).toBe(recover?0:credits-5);
  expect(budget.reselection.remaining).toBe(recover?2:3);
  if(recover){
    expect(sourceInputs).toEqual([['A','B','C','D','E','F','G'],['H','I','J','K']]);

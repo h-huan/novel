@@ -16,6 +16,26 @@ export function hasProvenOutlineCheckpointConflict(error: unknown, repairWasRequ
   return isGateRejection(error) && error.report.status === 422;
 }
 
+/** Return the 0-based chapter orders explicitly named by aggregate conflict
+ * evidence, e.g. "本批·第4章.content". Never guess a chapter that is not
+ * named; the caller falls back to full invalidation when this is empty. */
+export function outlineConflictChapterOrders(contradictions: unknown): number[] {
+  if (!Array.isArray(contradictions)) return [];
+  const orders = new Set<number>();
+  for (const row of contradictions) {
+    const texts = typeof row === 'string'
+      ? [row]
+      : row && typeof row === 'object'
+        ? ['location1', 'location2'].map(key => String((row as Record<string, unknown>)[key] || ''))
+        : [];
+    for (const text of texts) for (const match of text.matchAll(/第\s*(\d+)\s*章/g)) {
+      const chapter = Number(match[1]);
+      if (Number.isInteger(chapter) && chapter > 0) orders.add(chapter - 1);
+    }
+  }
+  return [...orders].sort((left, right) => left - right);
+}
+
 interface CheckpointDb {
   exec(sql: string): unknown;
   prepare(sql: string): { get(...args: any[]): any; run(...args: any[]): any };

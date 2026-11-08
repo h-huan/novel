@@ -12,7 +12,7 @@ export function recordCreationStageFailure(
 ): void {
   if (!metrics) return;
   const started = Date.now();
-  const run = metrics.beginRun(projectId, 'review', message, undefined, 'creation_stage_failure', undefined, false);
+  const run = metrics.beginRun(projectId, step, message, undefined, 'creation_stage_failure', undefined, false);
   metrics.finishRun(run.id, 'failed', started,
     JSON.stringify({ ...details, kind: 'creation_stage_failure', step, origin }), message);
 }

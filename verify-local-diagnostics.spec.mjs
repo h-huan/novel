@@ -1,23 +1,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeIdeaDiscoveryAudit, discoveryWallClockCheck, discoveryWallBudgetMs, discoveryAuditIsHistorical, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence } from './verify-local-diagnostics.mjs';
+import { normalizeIdeaDiscoveryAudit, discoveryWallClockCheck, discoveryWallBudgetMs, discoveryAuditIsHistorical, discoveryProductionAcceptanceIssues, summarizeDiscoveryStepMetrics, redactDiagnosticValue, validateBackendHealth, normalizeProjectIntegrityAudit, summarizeRecentIdeaActivity, summarizeIdeaActivityEvidence, summarizeProjectRunFailures } from './verify-local-diagnostics.mjs';
 
-test('discovery performance acceptance targets eight minutes without stopping the generator',()=>{
- assert.equal(discoveryWallBudgetMs(), 8*60*1000);
+test('discovery performance acceptance enforces a twelve-minute wall-clock budget',()=>{
+ assert.equal(discoveryWallBudgetMs(), 12*60*1000);
  const base={available:true,startedAt:'2026-10-31T05:15:33.587Z'};
  assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:22:33.587Z'}),
    {measured:true,wallMs:420000,passed:true});
- assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:23:33.587Z'}),
-   {measured:true,wallMs:480000,passed:true});
- assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:23:33.588Z'}),
-   {measured:true,wallMs:480001,passed:false});
- assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:25:33.587Z'}),
-   {measured:true,wallMs:600000,passed:false});
- assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:25:33.588Z'}),
-   {measured:true,wallMs:600001,passed:false});
+ assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:27:33.587Z'}),
+   {measured:true,wallMs:720000,passed:true});
+ assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:27:33.588Z'}),
+   {measured:true,wallMs:720001,passed:false});
  assert.deepEqual(discoveryWallClockCheck({...base,finishedAt:'2026-10-31T05:29:20.031Z'}),
    {measured:true,wallMs:826444,passed:false});
  assert.equal(discoveryWallClockCheck({available:true,startedAt:null,finishedAt:null}).measured,false);
+});
+
+test('separates synthetic stage-failure records from real model failures', () => {
+  const onlySynthetic = summarizeProjectRunFailures([
+    { status: 'failed', stage: 'refinement', stageFailureRecord: true, creationStageFailureStep: 'characters' },
+    { status: 'success', stage: 'characters' },
+  ]);
+  assert.deepEqual(onlySynthetic, {
+    failedModelRunCount: 0, stageFailureRecordCount: 1, latestFailureStage: 'characters',
+  });
+  const mixed = summarizeProjectRunFailures([
+    { status: 'failed', stage: 'outline', stageFailureRecord: true, creationStageFailureStep: 'outline' },
+    { status: 'failed', stage: 'outline' },
+    { status: 'success', stage: 'world' },
+  ]);
+  assert.deepEqual(mixed, {
+    failedModelRunCount: 1, stageFailureRecordCount: 1, latestFailureStage: 'outline',
+  });
 });
 
 test('full production acceptance refuses missing, incomplete and contradictory audits without weakening Gates', () => {
@@ -34,9 +48,9 @@ test('full production acceptance refuses missing, incomplete and contradictory a
  assert.ok(discoveryProductionAcceptanceIssues({...good,qualified:3}).includes('latest_idea_discovery_quantity_mismatch'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,requested:null}).includes('latest_idea_discovery_quantity_unverified'));
  assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:null}).includes('latest_idea_discovery_latency_unverified'));
- assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:07:59.999Z'}),[]);
- assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.000Z'}),[]);
- assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:08:00.001Z'}).includes('latest_idea_discovery_over_wall_budget'));
+ assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:11:59.999Z'}),[]);
+ assert.deepEqual(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:12:00.000Z'}),[]);
+ assert.ok(discoveryProductionAcceptanceIssues({...good,finishedAt:'2026-10-31T05:12:00.001Z'}).includes('latest_idea_discovery_over_wall_budget'));
  const dynamic={...good,requested:2,returned:2,qualified:2,totalIdeas:2,shortfall:0};
  assert.deepEqual(discoveryProductionAcceptanceIssues(dynamic),[]);
 });
