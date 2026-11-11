@@ -66,7 +66,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
   getPending(projectId: string): ForeshadowingRow[] {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings
-      WHERE project_id = ? AND status IN ('active', 'reminder', 'pending')
+      WHERE project_id = ? AND status IN ('buried', 'active', 'reminder', 'pending')
       ORDER BY importance ASC, created_at ASC
     `);
     return stmt.all(projectId) as unknown as ForeshadowingRow[];
@@ -108,7 +108,7 @@ export class ForeshadowingRepository extends BaseRepository<ForeshadowingRow> {
     const stmt = this.db.prepare(`
       SELECT * FROM foreshadowings
       WHERE project_id = ?
-        AND status IN ('active', 'reminder', 'pending')
+        AND status IN ('buried', 'active', 'reminder', 'pending')
         AND COALESCE(recovery_window_end, planned_recovery_chapter_index) IS NOT NULL
         AND (COALESCE(recovery_window_end, planned_recovery_chapter_index) - ?) <= overdue_threshold
       ORDER BY COALESCE(recovery_window_end, planned_recovery_chapter_index) ASC

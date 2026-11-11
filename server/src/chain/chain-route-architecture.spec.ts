@@ -1,3 +1,4 @@
+import {STORY_PREREQUISITE_POLICY,IDEA_PREMISE_DIFFERENCE_POLICY,OUTLINE_PROJECTION_POLICY} from '../../shared/src/执行标准';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +31,22 @@ describe('chain HTTP architecture', () => {
     }
   });
 
+  it('does not report short or long project creation complete before the active state is stored', () => {
+    const source=read('chain.controller.ts');
+    const longPersist=source.indexOf('const longActivation=db.prepare(');
+    const longDone=source.indexOf("emit('done', 100, \`长篇生成完成");
+    const shortPersist=source.indexOf('const shortActivation=db.prepare(');
+    const shortDone=source.indexOf("emit('done', 100, '全部内容生成完成'");
+    expect(longPersist).toBeGreaterThan(0);
+    expect(shortPersist).toBeGreaterThan(longPersist);
+    expect(longDone).toBeGreaterThan(longPersist);
+    expect(shortDone).toBeGreaterThan(shortPersist);
+    expect(source).toContain("if(Number(longActivation.changes)!==1)throw");
+    expect(source).toContain("if(Number(shortActivation.changes)!==1)throw");
+    // Existing failed-project and active-project resumes remain authorized.
+    expect(source.split("status IN ('creating','generation_failed','active')").length - 1).toBe(2);
+  });
+
   it('keeps broad premise search as a non-blocking target before full idea cards', () => {
     const source = read('chain.controller.ts');
 
@@ -44,11 +61,145 @@ describe('chain HTTP architecture', () => {
     expect(source).not.toContain('pool.length < premisePoolSize || malformed');
   });
 
+  it('requires causally executable seed candidates and does not relax independent quality gates', () => {
+    const source = read('chain.controller.ts');
+    // The 2026-10-24 production report had 15 seed premises but only 2 qualified:
+    // missing decisive actors/conditions were being discovered after expensive reselection.
+    expect(source).toContain('既有行动全部成立而所称结果仍可能不成立');
+    expect(source).toContain('screened: screenPremisePoolBatch(parsed.pool)');
+    expect(source).toContain('const screened=batch.screened??screenPremisePoolBatch(batch.candidates)');
+    expect(source).toContain('就在本次生成调用内改构该槽位');
+    expect(source).toContain('不能把补造条件留到选优、成卡或终审');
+    expect(source).toContain('已经发出或交付的原件不能仍留在主角手中');
+    expect(source).toContain('不能拿主线调查成功自动担保');
+    // These constraints now live in the single canonical selection directive,
+    // not a fragile controller-side string replacement.
+    const selectionDirective = read('idea-discovery-contract.ts');
+    expect(source).toContain('ideaPremiseSelectionDirective(');
+    expect(selectionDirective).toContain('配角轮流解释旧资料不算推进');
+    expect(selectionDirective).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
+    expect(IDEA_PREMISE_DIFFERENCE_POLICY).toContain('只换职业、道具、名字或分类不算实质差异');
+    expect(source).toContain('不得因职业、地点或证据道具不同就漏掉真实的结构同构');
+    expect(source).toContain('普通扮猪吃虎类型外壳本身不构成同构');
+    expect(source).toContain("success: false, status: 'incomplete', ideas: []");
+    expect(source).toContain('qualifiedIdeas: acceptedWithAudit, totalIdeas: 0, warning, appealGate');
+    expect(source).toContain('每个独立结果的实际必要条件、决定者与执行状态');
+    expect(source).toContain('来源兼容不能代替因果、分类或流派通过');
+    expect(source).toContain('reviewChangedPremiseSources(');
+    expect(source).toContain("generationTasks.run('discovery', discoveryRequestId");
+    expect(source).toContain("generationTasks.cancel('discovery', requestId)");
+    expect(source).not.toContain('if(slots.length>=4)');
+    expect(source).toContain('splitReviewMaterial(slots,slot=>');
+    expect(source).toContain('if(!await reselectScope(part))return false');
+    expect(source).toContain('isReviewOutputCapacityError(error)');
+    expect(source).not.toContain('backupReplacements');
+    expect(source).not.toContain('pendingBackup');
+    expect(source).toContain('const finalReview=postReselectionReview;');
+    expect(source).not.toContain('reserveReconciliationRounds');
+
+    expect(source).toContain('quarantineIncompletePremiseReviews(completePremiseSourceProof(expandPremiseSourceCheckRows(value),selection),selection,requiredGenres,true)');
+    expect(source).toContain('review.issues.push(...materializePremisePayoffReview(payoffEvidence,selection,true))');
+    expect(source).toContain("const partial = selectedAccepted.length < requestedCount");
+  });
+
+  it('keeps evidenced physical proof and relationship conditions at the candidate source, not just final-card rejection', () => {
+    const source = read('chain.controller.ts');
+    const contract = read('idea-discovery-contract.ts');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资料的发现/取得/复制/转交/出示');
+    expect(STORY_PREREQUISITE_POLICY).toContain('资源时序');
+    expect(STORY_PREREQUISITE_POLICY).toContain('单个人同意不替代其它实际权利人或有权办理者的决定');
+    expect(source).toContain('承担结果的人物选择与必要条件须已实际发生');
+    expect(source).toContain('premisePayoffReviewDirective(selection)');
+    expect(source).toContain('premiseCategoryReviewDirective(selection');
+    expect(source).toContain('premiseSourceReviewWork(selection).pending');
+    expect(source).not.toContain('本次来源继承这一部分逐项核对');
+    expect(contract).toContain('标记在钥匙柄上就不能突然成为锁芯的痕迹');
+    expect(contract).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');
+    expect(contract).toContain('模型此轮只能忠实结构化当前已锁定身份');
+  });
+
+  it('anchors each new chapter result to an unconsumed chapter-local action instead of re-awarding prior outcomes', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('若前章已通过联名、决定、交付或对手改口实现目标');
+    expect(source).toContain('不能再把保管同一文件、重述既有决定写成第二次实现该目标');
+    expect(source).toContain('本章的文件保管、后续行动或付出代价，不得重述为前章已完成');
+    const shared = fs.readFileSync(path.resolve(chainDir, '../../shared/src/chapter-responsibility-review.ts'), 'utf8');
+    expect(shared).toContain('【跨章已完成结果不得重复兑现】');
+    expect(shared).toContain('每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明');
+    expect(source).toContain('chapterResponsibilityPlanningDirective(false)');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
+    const env=source.split('outlineEnvironmentContext=JSON.stringify({')[1]?.split('});')[0]||'';
+    expect(env).toContain('era:savedWorld.era');
+    expect(env).toContain('locations:worldPromptValue(savedWorld.locations)');
+    expect(env).not.toContain('rules:');
+    expect(env).not.toContain('constraints:');
+    expect(env).not.toContain('storyPremise:');
+    expect(source).not.toContain('outlineContextPrefix');
+    expect(source).not.toContain('【本章事件与状态唯一来源】');
+    expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(source).toContain('【首章已确认的原始吸睛钩子');
+    expect(source).toContain('savedWorldForOutline=savedWorld');
+    expect(source).toContain('world:savedWorldForOutline,emit}');
+    expect(source).toContain('const worldRowForOutline=savedWorldForOutline');
+    expect(source).toContain('const currentWorldForOutlineReview=savedWorldForOutline');
+    expect(source).not.toContain('const currentWorldForOutlineReview = db.prepare(');
+    expect(source).not.toContain('const worldRowForOutline = db.prepare(');
+  });
+
+  it('uses existing plan-only reselection support instead of requesting unchanged whole stories', () => {
+    const source = read('chain.controller.ts');
+    const normalizer = read('premise-selection-review.ts');
+    expect(source).toContain('const reselectionOutputShape=');
+    // A mandatory hedged replacement must not receive the old plan-only JSON template.
+    expect(source).toContain('const citationOnlyIds=new Set(scopedSlots.filter');
+    expect(source).toContain('citationOnlyIds.has(String(slot.replacesPremiseId))');
+    expect(source).toContain('【每个问题位置的实际输出形状】');
+    expect(source).not.toContain('只输出JSON：{"replacements":[{"replacesPremiseId":"问题位置原ID"');
+    expect(normalizer).toContain('const planOnly = row.premiseId === slotId');
+    expect(normalizer).toContain('bySlot.set(slotId, { ...slot.original, causalPlan: row.causalPlan })');
+  });
+
+  it('stops recovery once actual delivery count is independently vetted, not surplus screening count', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('retained.selection.selected.length>=deliveryCount&&retainedReview.passed');
+    expect(source).not.toContain('retained.selection.selected.length>=requestedCount&&retainedReview.passed');
+  });
+
+  it('counts plan-index correctable premises toward delivery and never reopens the whole repair list', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('const sameIdentityFixSlots=repairPlan.repairSlots.filter');
+    expect(source).toContain('const deliveryEligible=initiallyRetained.selection.selected.length+sameIdentityFixSlots.length');
+    expect(source).toContain('let recoverySlots=[...sameIdentityFixSlots');
+    expect(source).toContain('const correctOrReplaceSlots=repairPlan.repairSlots.filter');
+    expect(source).toContain('const replacementSlots=repairPlan.repairSlots.filter');
+    expect(source).not.toContain('let recoverySlots=deliveryCount<requestedCount');
+    expect(source).toContain('已证明仅计划索引错绑的位置必须保留原身份');
+  });
+
+  it('prevents claims of involuntary detention or binding decisions from being created only in projections', () => {
+    const source = read('chain.controller.ts');
+    expect(source).toContain('口头要求、自愿配合和合法实际控制不可混同');
+    expect(source).toContain('缺权限或执行动作时不得写成强制留置');
+    expect(source).toContain('【同源事件投影】${OUTLINE_PROJECTION_POLICY}');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('详细章纲先形成content的事件、人物、时间与结果');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能在辅助字段虚构交付、完成或授权');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('实际发令者、执行者、接收者、对象与当前完成状态');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('同一机构或组织的不同成员不得交换动作归属');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('不能把尚未完成的交付、核验或后续安排写成既成事实');
+    expect(OUTLINE_PROJECTION_POLICY).toContain('散会、日常叮嘱、普通离开等没有独立推进作用的行为留在content');
+    expect(source).not.toContain('【本章事件与状态唯一来源】');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence,{allowAdditiveCompletion:true})');
+  });
+
   it('materializes each selected premise as exactly one independent full card instead of one five-card JSON batch', () => {
     const source = read('chain.controller.ts');
 
     expect(source).toContain('const generateStructuredCard = async');
-    expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise, rawIdeas)');
+    expect(source).toContain('bindStructuredIdeaCardToPremise(selectedPremise,normalizedIdeas)');
+    expect(source).toContain('normalizeGeneratedFictionNames(raw)');
+    expect(source).not.toContain("applyFictionNamingReplacements(raw,{'微信':'青信'})");
+    expect(source).toContain('const prohibited = prohibitedFictionNames(candidate)');
     expect(source).toContain('第 ${position + 1}/${requestedCount} 个已选题材结构化失败');
     expect(source).toContain("structuringProtocol: 'one_selected_premise_per_call_server_owned_identity'");
     expect(source).toContain('JSON 结构（ideas 必须恰好 1 项）');
@@ -64,7 +215,7 @@ describe('chain HTTP architecture', () => {
     const gate = read('idea-appeal-gate.service.ts');
 
     expect(contract).toContain('selectedPremiseEvidenceByCard = new WeakMap');
-    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, { ...selectedPremise })');
+    expect(contract).toContain('selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise))');
     expect(contract).toContain('const selectedPremiseEvidence = selectedPremiseEvidenceForIdeaCard(card)');
     expect(contract).toContain('selectedPremiseEvidenceByCard.set(next, selectedPremiseEvidence)');
     expect(gate).toContain('selectedPremiseEvidenceForIdeaCard(idea)');
@@ -76,30 +227,194 @@ describe('chain HTTP architecture', () => {
   it('preserves final-gate-passed selected premises as diagnostics when the batch is incomplete', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain('finalGateRepairAttempted');
-    expect(source).toContain("repairProtocol: 'ordered_local_patch_server_owned_identity'");
-    expect(source).toContain('applyOrderedIdeaRepairPatches');
-    expect(source).toContain('ideaGateLocalRepairDirective');
-    expect(source).toContain("mode: 'premise_preselection_then_final_gate_bounded_repair'");
+    expect(source).toContain("repairProtocol: 'one_budgeted_lightweight_refill_wave_after_full_card_gate'");
+    expect(source).toContain('retainValidAutomaticPlotTags');
+    expect(source).not.toContain('await fulfillDiscoveryGaps(');
+    expect(source).not.toContain("kind:'repair_patch_rejected'");
+    expect(source).toContain("mode: 'parallel_vetted_full_card_filter'");
+    expect(source).toContain("work.runReview(budget=>accept(batch,");
+    expect(source).toContain('const missingAfterFirstGate=Math.max(0,requestedCount-accepted.length)');
+    expect(source).toContain("stepKey:'idea_premise_pool_refill'");
+    expect(source).toContain("stepKey:'idea_premise_refill_selection'");
+    expect(source).toContain('reviewReadyCards(refillWork,refillWave())');
+    expect(source).not.toContain("await accept(supplementaryStructured,'repair')");
+    expect(source).toContain('affordableFullCardRefillCount(');
+    expect(source).toContain('desiredSupplement>=missingAfterFirstGate');
+    expect(source).toContain('neededFreshPremiseSeeds(');
+    expect(source).not.toContain('Math.max(0,desiredSupplement-unusedSeeds.length)');
+    expect(source).toContain('affordableReviewedPremiseCount(');
+    expect(source).toContain('sourceCompletionBudget.remaining,discoveryBudget.sourceBatchSize,');
+    expect(source).toContain('discoveryBudget.reviewGroupingMode,missingAfterFirstGate');
+    // Both stages of the SAME already-funded refill must inherit independently
+    // evidenced preselection failure modes, not only later full-card failures.
+    expect(source).toContain('const refillFailureReasons=()=>premiseRefillFailureReasons(');
+    expect(source.match(/failureReasons:refillFailureReasons\(\)/g)).toHaveLength(2);
+    expect(source).not.toContain('failureReasons:rejectedReasons');
+    expect(source).not.toContain('minimumPresentationCredits');
     expect(source).toContain('selectedAccepted.length === 0');
     expect(source).toContain('selectedAccepted.length < requestedCount');
     expect(source).toContain("status: 'incomplete'");
     expect(source).toContain('qualifiedIdeas: acceptedWithAudit');
     expect(source).toContain('evaluatedAttempts: candidateAssessments.length');
-    expect(source).toContain('repairGenerated: finalGateRepairGenerated');
-    expect(source).toContain('repairError: finalGateRepairError');
+    expect(source).toContain('repairGenerated: supplementaryStructured.length');
+    expect(source).toContain("repairError: fulfillmentActions.find(item=>item.phase==='refill_blocked')?.reason||null");
     expect(source).not.toContain('selectedAccepted.length !== requestedCount');
     expect(source).not.toContain('系统不会把部分结果伪装成完整成功');
+  });
+
+  it('keeps the desktop discovery wizard aligned with current incomplete and earlier partial response contracts', () => {
+    const desktopPage = fs.readFileSync(
+      path.resolve(chainDir, '../../../desktop/src/renderer/pages/DiscoveryWizardPage.tsx'),
+      'utf8',
+    );
+    expect(desktopPage).toContain("result.status === 'partial'");
+    expect(desktopPage).toContain("result.status === 'incomplete'");
+    expect(desktopPage).toContain('normalizeDiscoveryResponse(res, requestedThisRun)');
+    expect(desktopPage).toContain('count: requestedThisRun');
+    expect(desktopPage).toContain('mergeDiscoveryBatch(preservedIdeas, newIdeas, configuredState.ideaCount)');
   });
 
   it('repairs outline fact conflicts as a local patch instead of regenerating the whole chapter plan', () => {
     const source = read('chain.controller.ts');
 
-    expect(source).toContain('factRepairFields');
+    const patch = read('outline-fact-patch.ts');
+    expect(source).toContain('OUTLINE_FACT_REPAIR_FIELDS');
     expect(source).toContain('禁止重新生成完整章纲');
-    expect(source).toContain('const preservedTargetWords = chData.targetWords');
-    expect(source).toContain('const preservedWordCountReason = chData.wordCountReason');
+    expect(source).toContain('const causalReviewChapter=(candidate:Record<string,any>)=>planningChapterForCausalReview(candidate,order+1,expectedChapter.func)');
+    expect(source).toContain('[causalReviewChapter(candidate)]');
+    expect(source).toContain('const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence,{allowAdditiveCompletion:true})');
+    expect(source).toContain('chData = applyOutlineFactPatch(chData,rawPatch)');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
+    expect(patch).toContain('OUTLINE_FACT_REPAIR_FIELDS = [');
+    expect(patch).not.toContain("'targetWords'");
+    expect(patch).not.toContain("'wordCountReason'");
     expect(source).not.toContain('只输出与当前章纲同字段的完整 JSON 对象；修复后所有事件');
   });
+  it('keeps one JSON extraction path and removes post-card retry/replacement without weakening review', () => {
+    const source = read('chain.controller.ts');
+    const afterGate = source.slice(source.indexOf("work.runReview(budget=>accept(batch,"), source.indexOf('const selectedAccepted = accepted'));
+    expect(afterGate).not.toContain('reservePremiseSelection(');
+    expect(afterGate).not.toContain('repairMissing(');
+    expect(afterGate).not.toContain('fulfillDiscoveryGaps(');
+    expect(source).toContain('全部进入并发完整卡生成');
+    expect(source).toContain("const selectedAccepted = accepted");
+    expect(source.includes("work.runReview(budget=>accept(batch,")).toBe(true);
+    const jsonRetry = source.slice(source.indexOf('private async llmCallWithRetry'));
+    expect(jsonRetry).toContain('this.safeExtractJson<T>(rawContent, null as unknown as T)');
+    expect(jsonRetry).not.toContain('const lineParsed: any[] = []');
+    expect(jsonRetry).not.toContain('rawContent.matchAll(');
+    expect(jsonRetry).toContain('if (parsedAnyResponse && lastValidationIssues.length > 0)');
+  });
+
+  it('does not confuse optional preselection screening hedge with the requested five final cards',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('partial:retained.selection.selected.length<deliveryCount');
+    expect(source).toContain('screeningCapacityGap:Math.max(0,requestedCount-retained.selection.selected.length)');
+    expect(source).toContain('个真实合格预选（尚非完整卡）');
+    expect(source).toContain('停止可选冗余换选，直接成卡及独立终审');
+    expect(source).toContain("selectionStopReason:'delivery_capacity_met'");
+    expect(source).not.toContain('affordablePreselectionHedge');
+    expect(source).not.toContain('capacityMet?');
+    expect(source).toContain('partial:false,screeningCapacityGap:Math.max(0,requestedCount-partialSelection.selected.length)');
+  });
+
+  it('retains full model reasoning for pool generation and evidence-bearing causal selection',()=>{
+    const real=read('real-llm.service.ts');
+    expect(real).not.toContain('preliminarySteps');
+    expect(real).not.toContain("idea_premise_pool_generation','idea_premise_pool_refill'");
+    expect(real).toContain("process.env.LLM_REASONING_EFFORT");
+  });
+
+  it('front-loads confirmed calendar anchors and quality self-checks into generation prompts',()=>{
+    const controller=read('chain.controller.ts');
+    expect(controller).toContain('【已确认日期/跨度锚点');
+    expect(controller).toContain('【入池前逐项自检');
+    expect(controller).toContain('【causalPlan 直接因果索引自检');
+    expect(controller).toContain('【选优前 causalPlan 直接因果自检');
+    expect(controller).toContain('只能直接产生它实际改变的结果');
+    expect(controller).toContain('仅仅尚未决定、尚未执行或尚未生效的状态不是改变');
+    const contract=read('idea-discovery-contract.ts');
+    expect(contract).toContain('【结构化前逐项自检');
+    expect(contract).toContain('【causalPlan 直接因果索引自检');
+    expect(contract).toContain('每个独立结果必须有实际决定者');
+  });
+
+  it('presents saved world rule arrays directly to short outline generation before incidental scenes',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('rules: worldPromptValue(worldRowForOutline.rules)');
+    expect(source).toContain("const parsed=JSON.parse(value)");
+    expect(source).toContain('世界规则也约束次要场景与过场动作');
+    expect(source).toContain('无推进价值的过场可不写');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
+  });
+
+  it('gives the first cross-stage review the same structured output budget as the candidate re-review',()=>{
+    const source=read('chain.controller.ts');
+    const firstAt=source.indexOf('const [alignmentSettled, stagePromiseSettled, sourceBoundarySettled] = await Promise.allSettled([');
+    const firstEnd=source.indexOf('reviewStagePromises(generatedBundle)',firstAt);
+    expect(firstAt).toBeGreaterThan(-1);expect(firstEnd).toBeGreaterThan(firstAt);
+    // A 32K cap can be consumed entirely by reasoning; the length-recovery
+    // attempt then disables reasoning and returns a shallow pass that misses
+    // real contradictions. Both review rounds must use the same full budget.
+    expect(source.slice(firstAt,firstEnd)).not.toContain('maxTokens');
+    const secondAt=source.indexOf('const secondAlignmentResult = await this.llmCallWithRetry<any>(');
+    const secondEnd=source.indexOf('const candidateAlignment = crossStageCoreVerdict',secondAt);
+    expect(secondAt).toBeGreaterThan(-1);expect(secondEnd).toBeGreaterThan(secondAt);
+    expect(source.slice(secondAt,secondEnd)).not.toContain('maxTokens');
+  });
+
+  it('bounds chapter fact repair to one attempt then regenerates with the cited defects',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('chapterRepairAttempts < 1');
+    expect(source).toContain('带已举证缺陷重生成');
+    expect(source).toContain('一次有界局部修复');
+  });
+
+  it('gives the decisive-chapter action audit the configured structured reasoning budget',()=>{
+    const real=read('real-llm.service.ts');
+    const at=real.indexOf("stepKey: countercheck ? 'framework_action_state_countercheck' : 'framework_action_proof'");
+    expect(at).toBeGreaterThan(-1);
+    expect(real.slice(Math.max(0,at-1600),at)).not.toContain('maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS');
+  });
+
+  it('starts the aggregate fact review with the source and result checks and drains it before returning',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('const aggregateFactReview = (async () => {');
+    expect(source).toContain('const factFindings = await aggregateFactReview;');
+    expect(source).toContain('if (aggregateFactError) throw aggregateFactError;');
+  });
+
+  it('checks selected tags and protagonist agency, and writes chapter titles at the chapter-plan source',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('扮猪吃虎等流派的隐藏优势须驱动主角主动操作');
+    expect(source).toContain('章节标题优先使用本章具体反常事件');
+  });
+
+  it('reviews each chapter against its frozen entry/exit contract before cross-stage',()=>{
+    const source=read('chain.controller.ts');
+    // The entry/exit contract is reviewed, but the upfront planning-only
+    // prerequisites/threads are excluded so a stale planning assumption cannot
+    // be asserted as a fact against the chapter's real action.
+    expect(source).toContain('[{...chapterFactsForReview(order, candidate), ...factReviewContract}]');
+    expect(source).toContain('const factReviewContract=');
+    expect(source).toContain('content、scenes.outcome、characterActions.action/result、characterStates中的同一物件位置');
+  });
+
+  it('carries the story tapestry through the card repair prompt so the repaired card can pass validation',()=>{
+    const source=read('chain.controller.ts');
+    // The card repair must request the same tapestry fields the validator
+    // requires; otherwise repair returns an incomplete card and creation stops.
+    expect(source).toContain('修复只改被点名的错误机制，其余人物、真相、结局与"故事织锦"保持');
+    expect(source).toContain('subPlots[{thread,serves,span,resolution}]');
+    expect(source).toContain('characterArcs[{character,start,turn,end}]');
+    expect(source).toContain('foreshadowingLayers[{content,layer:short|cross|volume|book|suspense,plantChapter,payoffChapter}]');
+  });
+
+  it('hard-stops project creation at the configured 30-minute ceiling',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('const deadlineAt = Date.now() + readGenerationBudgets().creationMaxWallMs');
+    expect(source).toContain('cancellation instanceof Error && cancellation.message');
+  });
+
 });

@@ -4,10 +4,10 @@ import { readConstitution } from '../modules/project/creative-constitution';
 import { parseScoreReviewJson } from './review-json';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 import { dimensionBasis } from '../test/quality-review.fixture';
-import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors, causalPlanningProofResultPartitions } from '../modules/writing-quality/causal-review';
 import { createServer } from 'node:http';
 
-it.each(['project_context:p1', 'project_context:p999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
+it.each(['project_context:v1', 'project_context:v999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
   const service = new RealLLMService({} as any);
   const constitution = readConstitution({ target_platform: 'fanqie', settings: { category: '悬疑', storyTone: ['冷峻'], writingStyle: ['简练'], webNovelGenre: ['都市'], genreFitNote: '现实城市职业与人际冲突推动人物选择', pov: '第三人称限知' } });
   const content = '真实规划：他进入锁住的屋子。';
@@ -21,8 +21,8 @@ it.each(['project_context:p1', 'project_context:p999'])('completes issue citatio
   expect(generate.mock.calls[1][0].prompt).toContain('repairs');
   expect(score.issues).toHaveLength(1);
   expect(score.issues[0].severity).toBe('medium');
-  expect(score.issues[0].evaluation).toBe(basisAnchorId.endsWith('p1') ? 'evidenced' : 'insufficient_evidence');
-  expect(score.status).toBe(basisAnchorId.endsWith('p1') ? 'evaluated' : 'partial');
+  expect(score.issues[0].evaluation).toBe(basisAnchorId.endsWith('v1') ? 'evidenced' : 'insufficient_evidence');
+  expect(score.status).toBe(basisAnchorId.endsWith('v1') ? 'evaluated' : 'partial');
 });
 
 it('preserves all findings when normalizing the observed review hierarchy and refuses incomplete values', () => {
@@ -59,6 +59,55 @@ it.each([32768,4096])('retains the original truncation and usage after the last 
  expect(record).toHaveBeenCalledTimes(1);expect(record.mock.calls[0][2]).toBe('truncated');
  expect((record.mock.calls[0][5] as any).resp.usage).toEqual(usage);
 });
+it.each([
+  'DeepSeek 网络连接失败(EAI_AGAIN): DNS 临时不可用',
+  'DeepSeek 网络连接失败(fetch failed): 上游连接中断',
+  'DeepSeek 网络连接失败(ENOTFOUND): DNS 解析失败',
+])('retains the real transport error when its source-review shard has only one funded call: %s',async(message)=>{
+  const service=createService(),budget={remaining:1};
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const callModel=vi.fn().mockRejectedValue(new Error(message));
+  (service as any).callModel=callModel;
+  await expect(service.generate({prompt:'锁定前独立来源因果审查',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}})).rejects.toThrow(message);
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(budget.remaining).toBe(0);
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('network_error');
+});
+it('keeps the original transport error if another concurrent review spends the shared retry credit during backoff',async()=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockRejectedValue(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'));
+  (service as any).callModel=callModel;
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const failure=expect(service.generate({prompt:'并发复核同一来源',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}}))
+    .rejects.toThrow('UND_ERR_SOCKET');
+  await new Promise(resolve=>setTimeout(resolve,40));
+  // Another already-authorized independent reviewer consumed the last
+  // shared recovery credit during the first transport failure's backoff.
+  budget.remaining=0;
+  await failure;
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('network_error');
+});
+it('keeps the original funded socket recovery when a second physical credit already exists',async()=>{
+  const service=createService(),budget={remaining:2};
+  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
+  const callModel=vi.fn().mockRejectedValueOnce(new Error('DeepSeek 网络连接失败(UND_ERR_SOCKET): other side closed'))
+    .mockResolvedValueOnce({content:'{"sourceChecks":[],"payoffChecks":[]}',finishReason:'stop'});
+  (service as any).callModel=callModel;
+  const response=await service.generate({prompt:'原来源审查',scenario:'idea_generate',
+    responseFormat:'json_object',physicalCallBudget:budget,
+    metrics:{stepKey:'idea_premise_source_drift_review'}});
+  expect(response.content).toContain('sourceChecks');
+  expect(callModel).toHaveBeenCalledTimes(2);
+  expect(budget.remaining).toBe(0);
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][2]).toBe('success');
+});
 it('keeps a network-recovered truncation instead of replacing it with a budget error',async()=>{
  const service=createService(),budget:{remaining:number;recoveryWithoutThinking?:boolean}={remaining:2};
  const record=vi.spyOn(service as any,'recordStepMetric').mockImplementation(()=>{});
@@ -84,7 +133,7 @@ it('aborts the physical call at the deadline without retrying or accepting parti
     }));
     (service as any).callModel = callModel;
     const pending = expect(service.generate({ prompt: '验收', scenario: 'review', timeout: 100, maxTokens: 4096 }))
-      .rejects.toThrow('LLM 主调用超时');
+      .rejects.toThrow('模型请求的原始时限已耗尽');
     await vi.advanceTimersByTimeAsync(100);
     await pending;
     await vi.advanceTimersByTimeAsync(2000);
@@ -122,6 +171,44 @@ it('cancels an already opened OpenAI compatible stream instead of retaining its 
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+it.each([true,false])('avoids serial output-cap expansion after an empty one-card review at a large configured cap (valid=%s)',async(valid)=>{
+ const service=createService(),budget={remaining:3};
+ const callModel=vi.fn().mockResolvedValueOnce({content:'',finishReason:'length'})
+  .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["核验缺少必要条件"]}]}':'',finishReason:valid?'stop':'length'});
+ (service as any).callModel=callModel;
+ const request={prompt:'真实卡与完整事实来源',scenario:'idea_generate',responseFormat:'json_object' as const,
+  maxTokens:131072,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+ if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+ else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+ expect(callModel).toHaveBeenCalledTimes(2);
+ expect(callModel.mock.calls.map(call=>call[4])).toEqual([131072,131072]);
+ expect(callModel.mock.calls.map(call=>call[8])).toEqual([undefined,true]);
+ expect(budget.remaining).toBe(1);
+});
+it.each([true,false])('recovers an actual one-card idea review truncated at the explicit ceiling, valid=%s',async(valid)=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValueOnce({content:'{"reviews":[{"position":1,',finishReason:'length'})
+    .mockResolvedValueOnce({content:valid?'{"reviews":[{"position":1,"payoffCredible":false,"issues":["真实缺失条件"]}]}':'{"reviews":[',finishReason:valid?'stop':'length'});
+  (service as any).callModel=callModel;
+  const request={prompt:'完整原池和单张题材卡、四项目标及全部原始证据',scenario:'idea_generate',responseFormat:'json_object' as const,
+    maxTokens:32768,structuredReviewUnitCount:1,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}};
+  if(valid)expect(JSON.parse((await service.generate(request)).content).reviews[0].payoffCredible).toBe(false);
+  else await expect(service.generate(request)).rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(2);
+  expect(callModel.mock.calls[0].slice(0,7)).toEqual(callModel.mock.calls[1].slice(0,7));
+  expect(callModel.mock.calls[1][8]).toBe(true);
+  expect(budget.remaining).toBe(0);
+});
+it('does not disable thinking or add recovery for a multi-card review after a partial truncation',async()=>{
+  const service=createService(),budget={remaining:2};
+  const callModel=vi.fn().mockResolvedValue({content:'{"reviews":[',finishReason:'length'});
+  (service as any).callModel=callModel;
+  await expect(service.generate({prompt:'两张完整题材卡',scenario:'idea_generate',responseFormat:'json_object',
+    maxTokens:32768,structuredReviewUnitCount:2,physicalCallBudget:budget,metrics:{stepKey:'idea_presentation_review'}}))
+    .rejects.toMatchObject({structuredOutputTruncated:true});
+  expect(callModel).toHaveBeenCalledTimes(1);
+  expect(budget.remaining).toBe(1);
 });
 it('recovers a complete cross-stage decision without re-generating its source candidate or changing the model contract', async () => {
   const service=createService(),budget={remaining:2};
@@ -328,7 +415,192 @@ describe('upstream responsibility preflight', () => {
   });
 });
 
+describe('full field coverage from unique literal chapter outcome reviews',()=>{
+ it('checks one independent occurrence and verifies every exact result-field alias without another model call',async()=>{
+  const chapter={chapterNumber:3,chapterFunction:'climax',
+   content:'她把登记单交给银行职员，银行职员当面签收。',
+   scenes:[{outcome:'银行收到签名的登记单。'}],
+   characterActions:[{action:'她把登记单交给银行职员，银行职员当面签收。',result:'银行收到签名的登记单。'}]};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const action=anchors.find(row=>row.path==='0.content'&&row.text===chapter.content)!;
+  const sceneResult=causalChapterResultAnchors(anchors,0).find(row=>row.path==='0.scenes.0.outcome')!;
+  const actionResult=causalChapterResultAnchors(anchors,0).find(row=>row.path==='0.characterActions.0.result')!;
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+   status:'evaluated',reason:'职员在现场完成了交接登记并签收原件',
+   transitions:[{chapterNumber:3,actionAnchorId:action.id,resultAnchorId:sceneResult.id,
+    bridgeAnchorId:action.id,status:'supported',reason:'当面递交且由银行职员签收直接完成了收件结果'}]}})});
+  (service as any).generateInternal=generate;
+  const review=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+    JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(review).toMatchObject({verified:true,issues:[]});
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(review.audit.transitions.map((row:any)=>row.resultAnchorId).sort()).toEqual([sceneResult.id,actionResult.id].sort());
+  expect(generate.mock.calls[0][0].prompt).toContain(sceneResult.id);
+  expect(generate.mock.calls[0][0].prompt).not.toContain('\\\"resultAnchorIds\\\":[\\\"'+sceneResult.id+'\\\",\\\"'+actionResult.id+'\\\"]');
+ });
+});
+
+describe('truncated initial causal proof stays compact within its existing second call',()=>{
+ it('restarts a complete compact review instead of asking to repair nonexistent rows',async()=>{
+  const chapter={chapterNumber:4,chapterFunction:'climax',
+   content:'职员拿着核对材料递交给窗口工作人员，工作人员当面收下材料。',
+   scenes:[{outcome:'工作人员正式登记收件并出具回执。'}]};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const action=anchors.find(row=>row.path==='0.content')!;
+  const resultId=causalChapterResultAnchors(anchors,0)[0].id;
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockRejectedValueOnce(new Error('结构化生成因输出长度被截断'))
+   .mockResolvedValueOnce({content:JSON.stringify({causalAudit:{
+    status:'evaluated',reason:'逐项核对收件手续是否有充分证据',
+    proofRows:[[1,action.id,'','gap','仅有当面交接，尚无正式登记与回执成立的原文证据']],
+   }})});
+  (service as any).generateInternal=generate;
+  const reviewed=await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+   JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate.mock.calls[1][0].prompt).toContain('proofRows逐行返回服务器结果唯一序号');
+  expect(generate.mock.calls[1][0].prompt).toContain('【完整章节结构，先按字段与事件顺序理解，后选择引文地址】');
+  expect(reviewed.audit?.transitions?.[0]).toMatchObject({resultAnchorId:resultId,status:'gap'});
+  expect(reviewed).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
+ });
+});
+
+describe('large result shards keep the normal correction pass',()=>{
+ it('repairs a bad citation in its own shard without re-splitting or losing the sibling shard',async()=>{
+  const chapter={chapterNumber:3,chapterFunction:'climax',content:'他把材料当面交给负责人。',
+   scenes:Array.from({length:40},(_,i)=>({outcome:`第${i+1}项结果已登记，负责人确认第${i+1}项。`}))};
+  const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+  const allResults=causalChapterResultAnchors(anchors,0).map(anchor=>anchor.id);
+  expect(allResults.length).toBeGreaterThan(72);
+  const actionId=anchors.find(anchor=>anchor.path==='0.content'&&anchor.source==='body')!.id;
+  const firstPartitionFirst=allResults[0];
+  const service=new RealLLMService({} as any);
+  const generate=vi.fn().mockImplementation(async (request:any)=>{
+   const prompt=String(request.prompt||'');
+   if(prompt.includes('本次仅纠正编号[0]')){
+    return {content:JSON.stringify({repairs:[{index:0,actionAnchorId:actionId,
+      resultAnchorId:firstPartitionFirst,bridgeAnchorId:actionId,status:'supported',
+      reason:'当面交付由实际行动直接产生登记结果'}]})};
+   }
+   const marker='【章号与本章证据地址对应】';
+   const catalog=JSON.parse(prompt.split(marker)[1].split('\n')[0]);
+   const ids=catalog.flatMap((entry:any)=>entry.resultAnchorIds);
+   const needsRepair=ids.includes(firstPartitionFirst);
+   return {content:JSON.stringify({causalAudit:{status:'evaluated',
+    reason:'逐项核对实际行动、登记结果与成立条件',
+    proofRows:ids.map((id:string,index:number)=>[
+     index+1,actionId,needsRepair&&index===0?id:actionId,'supported',
+     needsRepair&&index===0?'该结果不能只用自己的声明证明':'当面交付行动直接产生登记结果',
+    ])}})};
+  });
+  (service as any).generateInternal=generate;
+  const result=await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+   JSON.stringify({volumes:[{chapters:[chapter]}]}));
+  expect(result.verified).toBe(true);
+  // One initial pass per shard plus exactly one correction for the shard that
+  // cited its own result. The other shards must not be re-split or re-run.
+  const partitions=causalPlanningProofResultPartitions([chapter]);
+  expect(generate).toHaveBeenCalledTimes(partitions.length + 1);
+  expect(generate.mock.calls.filter((call:any)=>String(call[0].prompt).includes('本次仅纠正编号[0]'))).toHaveLength(1);
+  const audits=result.audit as any[];
+  expect(audits.map(audit=>audit.transitions.length).sort()).toEqual(partitions.map(part=>part.length).sort());
+  expect(new Set(audits.flatMap(audit=>audit.transitions.map((row:any)=>row.resultAnchorId)))).toEqual(new Set(allResults));
+ });
+});
+
 describe('decisive planning action proof', () => {
+  it('rejects a supplied cross-chapter action ID even when both chapters have identical prose',async()=>{
+    const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',
+      content:'她把验收材料递交给负责人。',
+      scenes:[{outcome:'负责人签收了材料。'}]}));
+    const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+    const wrongAction=anchors.find(a=>a.path==='0.content')!;
+    const ownResult=causalChapterResultAnchors(anchors,1)[0];
+    const bridge=anchors.find(a=>a.path==='1.content')!;
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'审查两章先后操作',
+      transitions:[{chapterNumber:2,actionAnchorId:wrongAction.id,
+        resultAnchorId:ownResult.id,bridgeAnchorId:bridge.id,
+        status:'supported',reason:'第二章有真实递交与签收行为'}]}})});
+    (service as any).generateInternal=generate;
+    const review=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+      JSON.stringify({volumes:[{chapters}]}));
+    expect(review.verified).toBe(false);
+    expect(review.errors.join('；')).toContain('行动编号未绑定本章');
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+  it('avoids a second paid action-address repair when the first verdict quotes a unique literal chapter action',async()=>{
+    const chapter={chapterNumber:2,chapterFunction:'climax',
+      content:'养马人将旧马交到军营验收处。',
+      scenes:[{outcome:'军营登记了旧马。'}]};
+    const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+    const outcome=causalChapterResultAnchors(anchors,0)[0];
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'记录提交与登记的真实因果关系',
+      transitions:[{chapterNumber:2,actionEvidence:chapter.content,resultAnchorId:outcome.id,
+        bridgeAnchorId:'',status:'gap',reason:'提交并不保证军营已经完成正式验收'}]}})});
+    (service as any).generateInternal=generate;
+    const result=await (service as any).auditPlanningActions({id:'r',context:'{}'}, {},
+      JSON.stringify({volumes:[{chapters:[chapter]}]}));
+    expect(result).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(result.audit.transitions[0].actionAnchorId).toBe(anchors.find(row=>row.path==='0.content')!.id);
+  });
+  it('keeps identical quotes in separate chapters bound to their actual chapter IDs',async()=>{
+    const chapters=[1,2].map(n=>({chapterNumber:n,chapterFunction:'climax',
+      content:'养马人提交了验马记录。',scenes:[{outcome:'负责人登记了验马结果。'}]}));
+    const service=new RealLLMService({} as any);
+    const generate=vi.fn().mockResolvedValue({content:JSON.stringify({causalAudit:{
+      status:'evaluated',reason:'严格检查章内记录引用是否真正满足成立条件',transitions:[]}})});
+    (service as any).generateInternal=generate;
+    await (service as any).auditPlanningActions({id:'r',context:'{}'},{},
+      JSON.stringify({volumes:[{chapters}]}));
+    const prompt=generate.mock.calls[0][0].prompt as string;
+    const catalog=JSON.parse(prompt.split('【章号与本章证据地址对应】')[1].split('\n服务器resultAnchorIds目录')[0]);
+    expect(catalog).toHaveLength(2);
+    expect(catalog[0].bodyIndex).toBe(0);
+    expect(catalog[1].bodyIndex).toBe(1);
+    expect(catalog[0]).not.toHaveProperty('anchorIds');
+    expect(catalog[1]).not.toHaveProperty('anchorIds');
+    const original=JSON.parse(prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\n')[0]);
+    const chapter0=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('0.'));
+    const chapter1=original.filter((a:{source:string;path?:string})=>a.source==='body'&&a.path?.startsWith('1.'));
+    expect(chapter0.length).toBeGreaterThan(0);
+    expect(chapter1.length).toBeGreaterThan(0);
+    expect(chapter0.some((a:{id:string})=>chapter1.some((b:{id:string})=>a.id===b.id))).toBe(false);
+    expect(catalog[0].resultAnchorIds.filter((id:string)=>catalog[1].resultAnchorIds.includes(id))).toEqual([]);
+    expect(prompt).toContain('path以本章bodyIndex和点号开头');
+  });
+  it('schedules disjoint groups concurrently and merges their results in chapter order',async()=>{
+    const concurrency=await import('./discovery-concurrency');
+    const spy=vi.spyOn(concurrency,'adaptiveDiscoveryConcurrency').mockReturnValue(2);
+    try {
+      const chapters=[1,2,3,4].map(n=>({chapterNumber:n,chapterFunction:'climax',content:'第'+n+'章发生行动'}));
+      const service=new RealLLMService({} as any);
+      const original=(service as any).auditPlanningActions.bind(service);
+      const started:number[]=[];
+      let release!:()=>void;
+      const hold=new Promise<void>(resolve=>{release=resolve;});
+      (service as any).auditPlanningActions=vi.fn(async (_run:any,_request:any,content:string)=>{
+        const rows=JSON.parse(content).volumes[0].chapters;
+        started.push(rows[0].chapterNumber);
+        if(rows[0].chapterNumber===1)await hold;
+        return {verified:true,errors:[],issues:[],audit:{first:rows[0].chapterNumber}};
+      });
+      const pending=original({id:'r',context:'{}'}, {},
+        JSON.stringify({volumes:[{chapters}]}));
+      await Promise.resolve();
+      expect(started).toEqual([1,4]);
+      release();
+      const result=await pending;
+      expect(result).toMatchObject({verified:true,audit:[{first:1},{first:4}]});
+      expect((service as any).auditPlanningActions).toHaveBeenCalledTimes(2);
+    } finally {spy.mockRestore();}
+  });
+
   it('在交给小说修复前补齐场景漏查项，保留首轮已举证缺口，不另开模型循环', async () => {
     const chapter = {chapterNumber:4,chapterFunction:'climax',content:'他把编号写在本子上。',scenes:[{outcome:'老人手里有了记录。'},{outcome:'证人没有离开。'}],characterActions:[{action:'他把编号写在本子上。',result:'记录登记完成。'}]};
     const body=JSON.stringify([chapter]);
@@ -346,6 +618,8 @@ describe('decisive planning action proof', () => {
     expect(result.audit.transitions.find((row:any)=>row.resultAnchorId===missing.id)).toMatchObject({chapterNumber:4,status:'gap'});
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[1][0].prompt).toContain('不能重审');
+    expect(generate.mock.calls[1][0].prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+    expect(generate.mock.calls[1][0].prompt).not.toContain('【完整章节结构，先按字段与事件顺序理解，后选择引文地址】');
   });
   const bad = { chapterNumber: 4, chapterFunction: 'climax', content: '他关上门。对手无法开门。' };
   const run = { id: 'r', context: JSON.stringify({ rule: '门外插销落下后，只能从门外移开。' }) };
@@ -360,7 +634,7 @@ describe('decisive planning action proof', () => {
     (service as any).generateInternal = generate;
     const result = await (service as any).auditPlanningActions(run, {}, JSON.stringify({ volumes: [{ chapters: [chapter] }] }), 'exitState');
     expect(result.verified).toBe(false);
-    expect(result.errors.join('；')).toContain('实际exitState');
+    expect(result.errors.join('；')).toContain('实际出口状态');
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[0][0].prompt).toContain('resultAnchorIds');
     expect(generate.mock.calls[0][0].prompt).toContain('完整章节结构');
@@ -460,7 +734,7 @@ describe('decisive planning action proof', () => {
     (service as any).generateInternal = generate;
     const result = await (service as any).auditPlanningActions(run, {}, JSON.stringify({ volumes: [{ chapters: [bad, other] }] }));
     expect(result.verified).toBe(false);
-    expect(result.errors.join('；')).toContain('第3项因果审查的章号');
+    expect(result.errors.join('；')).toContain('第3项因果审查的结果编号未绑定本章原文');
     expect(generate.mock.calls[0][0].prompt).toContain('章号与本章证据地址对应');
     expect(generate).toHaveBeenCalledTimes(2);
   });
@@ -529,7 +803,7 @@ describe('RealLLMService structured output guard', () => {
     const callModel = vi.fn().mockResolvedValue({ content: '{"ok":true}', finishReason: 'stop' });
     (service as any).callModel = callModel;
 
-    const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object' });
+    const response = await service.generate({ prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 4096 });
 
     // The transport now carries explicit thinking override and abort signal.
     expect(callModel.mock.calls[0][0]).toBe('deepseek-flash');
@@ -555,6 +829,20 @@ describe('RealLLMService structured output guard', () => {
     // 三次物理调用：同配置补发两次仍空，最后一次关闭思考补发（执行标准「模型空内容三档恢复」）
     expect(callModel).toHaveBeenCalledTimes(3);
     expect(callModel.mock.calls.map(call => call[8])).toEqual([undefined, undefined, true]);
+  });
+
+  it('does not accept a nonempty but length-truncated fallback after an empty response', async () => {
+    const service = createService();
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ content: '', finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: '{"partial":', finishReason: 'length' });
+    (service as any).callModel = callModel;
+    await expect(service.generate({
+      prompt: '完整JSON审核', scenario: 'outline', responseFormat: 'json_object', maxEmptyRetries: 0,
+    })).rejects.toThrow('模型返回空内容或截断');
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(callModel.mock.calls[0][8]).toBeUndefined();
+    expect(callModel.mock.calls[1][8]).toBe(true);
   });
 
   it('rejects a length-truncated structured response for a clean retry', async () => {
@@ -618,7 +906,7 @@ describe('RealLLMService structured output guard', () => {
     (service as any).callModel = callModel;
 
     const response = await service.generate({
-      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxEmptyRetries: 1,
+      prompt: '输出JSON对象', scenario: 'outline', responseFormat: 'json_object', maxTokens: 4096, maxEmptyRetries: 1,
     });
 
     expect(response.content).toBe('{"ideas":[]}');
@@ -797,9 +1085,55 @@ describe('RealLLMService structured output guard', () => {
   expect(() => parseScoreReviewJson(JSON.stringify({dimensions:{...dimensions,repairs},repairs:[]}))).toThrow();
  });
 
-it('applies saved-generation output sizing at the actual model-call boundary',async()=>{
+it('honors the explicit saved-generation output budget at the actual model-call boundary',async()=>{
  const service=createService(),callModel=vi.fn().mockResolvedValue({content:'{"ok":true}',finishReason:'stop',usage:{promptTokens:5,completionTokens:5,totalTokens:10}});
  (service as any).callModel=callModel;
  await service.generate({prompt:'本地协议检查',scenario:'idea_generate',responseFormat:'json_object',maxTokens:32768,deferQualityGate:true});
- expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(131072);
+ expect(callModel).toHaveBeenCalledOnce();expect(callModel.mock.calls[0][4]).toBe(32768);
+});
+
+
+it.each([false,true])('uses the persisted output budget at the source-review model boundary, truncated=%s',async(truncated)=>{
+ const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'novel-output-boundary-'));
+ const previous=process.env.DATA_DIR;
+ try{
+  process.env.DATA_DIR=directory;
+  fs.writeFileSync(path.join(directory,'generation-budgets.json'),JSON.stringify({structuredOutputTokens:131072,structuredOutputCeiling:393216}));
+  const service=createService(),budget={remaining:2};
+  const content=JSON.stringify({sourceChecks:[{ref:'S1.payoff',status:'drift',reason:'原池必要条件与候选实际触发条件互斥'}]});
+  const callModel=truncated
+   ?vi.fn().mockResolvedValueOnce({content:'{"sourceChecks":[',finishReason:'length'})
+     .mockResolvedValueOnce({content,finishReason:'stop'})
+   :vi.fn().mockResolvedValue({content,finishReason:'stop'});
+  (service as any).callModel=callModel;
+  const result=await service.generate({prompt:'完整原池事实及待核查题材',scenario:'idea_generate',responseFormat:'json_object',
+   deferQualityGate:true,physicalCallBudget:budget,metrics:{stepKey:'idea_premise_source_drift_review'}});
+  expect(result.content).toBe(content);
+  expect(callModel.mock.calls.map(call=>call[4])).toEqual(truncated?[131072,262144]:[131072]);
+  expect(budget.remaining).toBe(truncated?0:1);
+  expect(callModel.mock.calls.every(call=>call[0]==='deepseek-flash'&&call[1]==='完整原池事实及待核查题材'&&call[6]==='json_object'&&call[8]===undefined)).toBe(true);
+ }finally{
+  if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;
+  fs.rmSync(directory,{recursive:true,force:true});
+ }
+});
+
+it.each(['future_task','exit_state','current_task','prior_task'])('checks responsibility bridge addresses in actual preflight: %s',async mode=>{
+ const service=new RealLLMService({} as any);
+ const plan={chapterResponsibilities:[{chapter:1,title:'取得',function:'开篇',responsibility:'甲取得当夜入库授权',prerequisites:[],timeline:'当夜',exitState:'甲已经进入仓库'},{chapter:2,title:'开门',function:'推进',responsibility:'甲持有效授权打开库门',prerequisites:['当夜授权'],timeline:'随后',exitState:'甲在库内'}]};
+ const run={constitution:readConstitution({target_platform:'fanqie',settings:{category:'悬疑',pov:'第一人称'}}),context:JSON.stringify({world:'当夜入库须持有效授权'})};
+ const verdict={consistent:true,contradictions:[],conditionChecks:plan.chapterResponsibilities.map(ch=>({chapter:ch.chapter,taskAnchorId:'chapter:c'+ch.chapter+':task',status:'supported',bridgeAnchorIds:['chapter:c'+(mode==='prior_task'?1:ch.chapter)+':task'],anchoredBridgeVerified:true,reason:'按本章实际行动证明进入条件的取得'}))};
+ const generate=vi.fn(async(request:any)=>{
+  if(mode==='future_task')verdict.conditionChecks[0].bridgeAnchorIds=['chapter:c2:task'];
+  if(mode==='exit_state'){
+   const anchors=JSON.parse(request.prompt.split('【逐字证据地址】')[1].split('\n不要手抄')[0]);
+   verdict.conditionChecks[0].bridgeAnchorIds=[anchors.find((anchor:any)=>anchor.source==='body'&&anchor.path==='chapterResponsibilities.0.exitState').id];
+  }
+  return {content:JSON.stringify(verdict)};
+ });
+ (service as any).generateInternal=generate;vi.spyOn(service as any,'auditPlanningActions').mockResolvedValue({verified:true,errors:[],issues:[]});
+ const task=(service as any).compileVerifiedResponsibilities(run,{},JSON.stringify(plan));
+ if(['future_task','exit_state'].includes(mode)){await expect(task).rejects.toThrow('逐章条件核对');expect(generate).toHaveBeenCalledTimes(2);}
+ else {expect(JSON.parse(await task)).toEqual(plan);expect(generate).toHaveBeenCalledOnce();}
 });

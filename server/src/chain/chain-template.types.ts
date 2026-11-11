@@ -1,4 +1,4 @@
-import type { ChainConfig, ChainNode, ExecutionMode, VariableDef } from './chain.types';
+import type { ChainNode, VariableDef } from './chain.types';
 
 export interface ChainTemplate {
   id: string;
@@ -7,8 +7,6 @@ export interface ChainTemplate {
   description: string;
   nodes: ChainNode[];
   variables: VariableDef[];
-  executionMode: ExecutionMode;
-  config: ChainConfig;
   createdAt: string;
   updatedAt: string;
 }

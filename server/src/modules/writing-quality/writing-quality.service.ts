@@ -1,6 +1,6 @@
 import { retireStaleIssues, reviewedContentHash } from './issue-lifecycle';
-import { qualityIssue, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, type QualityStage } from './quality-issue';
-import { causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
+import { qualityIssue, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, isAdvisoryRule, type QualityStage } from './quality-issue';
+import { applyCausalAuditRepair, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from './semantic-evidence-repair';
 import { readConstitution, buildExecutionStandard } from '../project/creative-constitution';
 import { scorePolicy } from './score-policy';
@@ -1334,6 +1334,7 @@ export class WritingQualityService implements OnModuleInit {
     const timelineCheck = `
 额外检查时间线与因果链：
 - 时间顺序冲突：使用 issueType timeline_conflict 或 time_order_error。
+- 明确截止时间/排期：正文出现“某点某分、排期、最后期限”后，叙事时间推进到该时点，必须交代它已过、被叫停或延期；角色不得再把已过的截止时间当作未来紧迫理由。违反时使用 issueType timeline_conflict，并引用前后两处原文。
 - 因果链断裂：使用 issueType causality_gap。
 - 事件先后矛盾或读者得知顺序混乱：使用 issueType event_sequence_risk。
 这些问题需要保留在 tags 中，便于跳转到时间线页面。`;
@@ -1342,6 +1343,7 @@ export class WritingQualityService implements OnModuleInit {
 诊断维度：
 - 章节开头钩子（reader_hook / chapter_hook）
 - 段落节奏（pacing_risk）
+- 问话/核验场景重复：同一信息点不得由两个角色重复盘问；第二次必须有新增信息、关系变化或判断改变，否则记 pacing_risk，并指出可合并或改成不同目的的段落。
 - 冲突推进
 - 情绪回报（emotional_payoff / low_retention）
 - 爽点/记忆点（meme_point / retention_point）
@@ -1358,6 +1360,10 @@ export class WritingQualityService implements OnModuleInit {
 按已注入GEN-006人物声音规则执行。
 - 对正文中可明确归属的角色，逐人核对上下文内 speech_style、catchphrase、common_words、forbidden_words、tone_to_different_people、emotion_outburst_style、danger_reaction、betrayal_reaction、weak_person_reaction、strong_person_reaction、must_obey_rules、forbidden_writing。
 - 台词与行为偏移必须引用该角色的连续原文；无法确认说话人时不得归因，不得伪造角色违规。
+- 角色声音的局部句长、措辞或解释习惯漂移，只要人物的行动、立场、关系和关键选择不变，记低严重度建议，不阻断；只有像换了个人、立场/选择矛盾才阻断。
+- 场景落点/顺序与章纲有小偏差，但同一行动、结果、关系变化和章末出口不变时，记低严重度建议，不阻断；只有改变事件、结果、人物立场或后续承接才阻断。
+- 情绪曲线：本章是否有主导情绪和至少一次转折、代价或释放；整章事件流水、没有情绪变化记 pacing/emotion 建议；连续多章平才升级。
+- 句段节奏：句长是否有波动；大量1–2字句、一句一段、句号切碎动作、“了”过密记低严重度建议；不要为去AI痕迹把句子全改短或全删“了”。
 
 【AI Trace 3.0 语义审查】
 - 分别检查情绪解释过度、因果/作者解释过度、段落功能同构、场景结构同构、对白过度功能化或过度完整、潜台词不足、人物认知过度透明、抽象总结、跨章叙事模板重复。
@@ -1409,7 +1415,7 @@ ${timelineCheck}
 
 必要因果优先审查：按已注入QLT-003必要因果判据执行。
 ${context?.project?.type === 'short_story' ? '按已注入QLT-003短篇阅读承诺执行。' : ''}
-先输出causalAudit，再给总评；核对本章真正改变人命、权利、关系或机构决定的关键行动与结果，不要用日常小动作代替核心结果审查。最多6项，连续逐字引用行动、结果和支持条件；bridgeEvidence可以来自正文或已提供的项目上下文，但必须说明当前人物如何能使用该条件。没有成立条件时status=gap，允许bridgeEvidence为空，不编造证据。只有本章没有声称任何行动结果时才可not_applicable并解释。不得把“结果发生了”本身当作行动导致结果的证据。
+先输出causalAudit，再给总评；核对本章真正改变人命、权利、关系或机构决定的关键行动与结果，不要用日常小动作代替核心结果审查。最多6项，连续逐字引用行动、结果和支持条件；actionEvidence/resultEvidence/bridgeEvidence 必须是正文中一段连续原文，不得用省略号、顿号、跨段拼接或改写；找不到连续原文就判 gap，不要用拼接引文凑成 supported。bridgeEvidence可以来自正文或已提供的项目上下文，但必须说明当前人物如何能使用该条件。没有成立条件时status=gap，允许bridgeEvidence为空，不编造证据。只有本章没有声称任何行动结果时才可not_applicable并解释。不得把“结果发生了”本身当作行动导致结果的证据。
 
 章节正文：
 ${content}
@@ -1480,7 +1486,12 @@ ${content}
         metrics: { projectId, stepKey: 'quality_causal_contract' },
       } as any);
       const fixed = this.parseJson<any>(repaired.content || '');
-      (parsed as any).causalAudit = materializeCausalAuditAnchors(fixed?.causalAudit, content, evidenceSources);
+      // causalAuditRepairPrompt returns the named rows in `repairs` (the same
+      // transport the generation-side audit uses). Merge them onto the original
+      // ledger; reading fixed.causalAudit here silently discarded every repair
+      // and re-failed the same contract.
+      (parsed as any).causalAudit = materializeCausalAuditAnchors(
+        applyCausalAuditRepair((parsed as any).causalAudit, causal.errors, fixed), content, evidenceSources);
       causal = validateCausalAudit((parsed as any).causalAudit, content, evidenceSources);
     }
     if (!causal.verified) throw new BadRequestException(`必要因果评审未完成：${causal.errors.join('；')}；保留旧报告`);
@@ -1565,7 +1576,17 @@ ${content}
       if (!valid && result.tagFit) delete result.tagFit[dim.dimension];
       if (result.tagFitEvidence) result.tagFitEvidence[dim.dimension] = quote.verified ? quote.quote : '';
     }
-    result.evidenceValidation = { status: unverifiedIssues.length ? 'not_evaluated' : 'evaluated', unverifiedIssues };
+    result.evidenceValidation = {
+      // 评审完整性只由阻断结论和执行维度证据决定。建议级 AI 痕迹/对白占比
+      // 的引文即使没有逐字命中，也保留为“证据未核实”的建议，不把整章判成未评估。
+      status: unverifiedIssues.some(row => {
+        if (row.index < 0) return true;
+        const issue = result.issues[row.index];
+        return !!issue && !isAdvisoryRule({ ruleId: String(issue.issueType) })
+          && (['blocking', 'critical'].includes(String(issue.severity)) || (issue as any).requiredPlanningCondition === true);
+      }) ? 'not_evaluated' : 'evaluated',
+      unverifiedIssues,
+    };
   }
 
   // 规范化标签契合分（六维，0-100 整数；未返回的维度保持缺失，不折算 0、不缩小分母）

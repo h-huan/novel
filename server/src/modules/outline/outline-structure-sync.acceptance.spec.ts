@@ -50,6 +50,29 @@ describe('outline structure and body synchronization', () => {
     expect(response.plan.core).toBe(plan.core);
     expect((db.prepare('SELECT content FROM chapters WHERE outline_id=?').get(first.id) as any).content).toBe(before.content);
   });
+  it('canonicalizes content/scenes on update and archives old duplicate copies', () => {
+    const { db, service, first } = fixture();
+    const scenes = {
+      scenes: [{ location: '值班室', goal: '抽页', conflict: '有人回来', outcome: '三页到手' }],
+      characterActions: [{ character: '我', action: '抽出三页', result: '三页到了我身上' }],
+      conflicts: [{ name: '抽页', trigger: '值班室空着', escalation: '翻登记本', resolution: '三页到手' }],
+      highlights: [{ point: '缺页被翻出' }],
+      hook: '天亮前去找老周',
+      emotionalTone: '冷',
+    };
+    db.prepare('UPDATE outlines SET content=?, scenes=? WHERE id=?').run(
+      '核心内容：抽页。\n人物行动：{"character":"我","action":"旧副本","result":"旧结果"}',
+      JSON.stringify(scenes),
+      first.id,
+    );
+    service.update(first.id, { content: '核心内容：抽三页；回宿舍比对。', scenes });
+    const saved = db.prepare('SELECT * FROM outlines WHERE id=?').get(first.id) as any;
+    expect(saved.content).toBe('核心内容：抽三页；回宿舍比对。');
+    expect(saved.content).not.toContain('人物行动：');
+    expect(saved.ending_setup).toBe('天亮前去找老周');
+    expect(saved.location_summary).toBe('值班室');
+    expect((db.prepare('SELECT COUNT(*) AS c FROM outline_normalization_log WHERE outline_id=?').get(first.id) as any).c).toBeGreaterThan(0);
+  });
   it('splits a blank chapter, keeps bodies blank, and shifts legacy chapter references atomically', () => {
     const { db, service, first } = fixture();
 

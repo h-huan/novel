@@ -78,6 +78,7 @@ export interface StoryFoundation {
   escalation?: string;
   mainReversal?: string;
   endingDirection?: string;
+  scopeBreakdown?: unknown[];
   uniquePoint?: string;
   setting?: string;
   characters?: unknown[];
@@ -182,9 +183,10 @@ export function buildStoryFoundation(confirmedStory: unknown): StoryFoundation {
   assign('activeChoice', firstText(story.activeChoice));
   assign('escalation', firstText(story.escalation, story.secondOrderConsequence));
   assign('mainReversal', firstText(story.mainReversal, story.reversalEffect));
-  assign('endingDirection', firstText(story.endingDirection, story.payoff));
+  assign('endingDirection', firstText(story.endingDirection, story.ending, story.payoff));
   assign('uniquePoint', firstText(story.uniquePoint, story.uniqueSelling, story.differentiation));
   assign('setting', firstText(story.setting));
+  if (Array.isArray(story.scopeBreakdown) && story.scopeBreakdown.length) assign('scopeBreakdown', structuredClone(story.scopeBreakdown));
   if (Array.isArray(story.characters) && story.characters.length) assign('characters', structuredClone(story.characters));
   const targetWords = story.recommendedTargetWords ?? story.estimatedWords;
   if ((typeof targetWords === 'number' && Number.isFinite(targetWords)) || (typeof targetWords === 'string' && targetWords.trim())) {
@@ -203,5 +205,6 @@ export function buildCanonPolicyDirective(): string {
     + `3. 其它冲突不按“为了通过 Gate 就重写整层”的方式处理。必须优先选择影响范围最小、修改单元最少、下游依赖最少、可局部圆回的资料；通常优先级为派生摘要/RAG → 未接受草稿 → 当前或未来 ChapterPlan → 局部伏笔/时间线/角色状态 → 卷/全书骨架。\n`
     + `4. Creative Constitution / confirmedStory 代表作者已经确认的创作方向，自动流程不得为了迁就下层内容反向改写；若它与不可自动修改的世界观或锁定事实发生真正互斥，必须阻断并要求人工裁决。\n`
     + `5. RAG 与摘要只是检索/派生材料，没有独立事实权威；它们与真实 Canon 冲突时直接重建或丢弃，不得反向覆盖 Canon。\n`
-    + `6. 修复必须局部、单调：只改被选中的最小修复点，复检后冲突必须减少且不得新增更大影响的冲突；否则回滚并停止。`;
+    + `6. 修复必须局部、单调：只改被选中的最小修复点，复检后冲突必须减少且不得新增更大影响的冲突；否则回滚并停止。`
+    + `7. 已确认题材（confirmedStory / Creative Constitution）中明确写出的关键动作由谁执行、关键物件在谁手里、关键因果与结果，是不可改的已确认事实：任何生成、计划或修复都不得为“合理化”改换执行者、把 A 的动作写成 B 的，或改写已确认动作。题材内部存在表面张力时（如“只让我擦台面”与“我替她净面”），必须用故事内原因解释（当事人在场/不在场、临时指派、第一次放手让他做），不得改归属或改写已确认动作。`;
 }

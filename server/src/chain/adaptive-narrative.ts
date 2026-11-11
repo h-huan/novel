@@ -12,6 +12,9 @@ export interface ChapterResponsibilityInput {
   title?: string;
   function?: string;
   responsibility?: string;
+  prerequisites?: string[];
+  timeline?: string;
+  exitState?: string;
 }
 
 export interface NarrativeBeatPlanItem {
@@ -19,6 +22,9 @@ export interface NarrativeBeatPlanItem {
   title: string;
   function: string;
   responsibility: string;
+  prerequisites?: string[];
+  timeline?: string;
+  exitState?: string;
   beatRole: NarrativeBeatRole;
   beatLabel: string;
   isFinalChapter: boolean;
@@ -66,6 +72,9 @@ export function buildNarrativeBeatPlan(chapters: ChapterResponsibilityInput[]): 
       title: String(chapter.title || ''),
       function: String(chapter.function || ''),
       responsibility: String(chapter.responsibility || ''),
+      ...(chapter.prerequisites!==undefined?{prerequisites:[...chapter.prerequisites]}:{}),
+      ...(chapter.timeline!==undefined?{timeline:chapter.timeline}:{}),
+      ...(chapter.exitState!==undefined?{exitState:chapter.exitState}:{}),
       beatRole,
       beatLabel: `叙事节拍·${ROLE_LABELS[beatRole]}`,
       isFinalChapter: index === chapters.length - 1,

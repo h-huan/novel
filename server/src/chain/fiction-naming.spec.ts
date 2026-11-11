@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fictionNarrativeText, prohibitedFictionNames } from '../../shared/src/fiction-naming';
+import { fictionNarrativeText, prohibitedFictionNames, normalizeGeneratedFictionNames } from '../../shared/src/fiction-naming';
 import { applyOrderedIdeaRepairPatches, confirmedIdeaStoryCard, normalizePremiseSelectionPayload } from './idea-discovery-contract';
 
 describe('story naming contract', () => {
@@ -26,4 +26,18 @@ describe('story naming contract', () => {
     const pool = [{ premiseId: 'P1', workingTitle: '救回宠物', storyCore: '主角必须争回自己的宠物豆包' }];
     expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: [{ premiseId: 'P1' }] }, 1, 3)).toThrow('禁止的故事命名');
   });
+});
+
+it('normalizes every known prohibited narrative name without changing facts or metadata',()=>{
+ const originals=['豆包','ChatGPT','DeepSeek','文心一言','通义千问','腾讯元宝','Kimi','美团','饿了么','微信','抖音'];
+ const generated={sourcePremiseId:'P1',targetPlatform:'抖音',model:'DeepSeek',
+   title:'主角得到了新线索',description:originals.join('、'),characters:[{name:'豆包',role:'朋友'}],
+   scopeBreakdown:[{outcome:'微信里保存着证据'}],plannedChapters:8};
+ const cleaned=normalizeGeneratedFictionNames(generated);
+ expect(prohibitedFictionNames(cleaned)).toEqual([]);
+ expect(cleaned).toMatchObject({sourcePremiseId:'P1',targetPlatform:'抖音',model:'DeepSeek',plannedChapters:8});
+ expect(cleaned.characters).toEqual([{name:'云芽',role:'朋友'}]);
+ expect(cleaned.scopeBreakdown[0].outcome).toContain('青信');
+ expect(generated.characters).toEqual([{name:'豆包',role:'朋友'}]);
+ expect(normalizeGeneratedFictionNames({title:'无品牌的故事'})).toEqual({title:'无品牌的故事'});
 });

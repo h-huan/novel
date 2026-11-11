@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySemanticEvidenceRepairs } from './semantic-evidence-repair';
+import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from './semantic-evidence-repair';
 import { verifySemanticEvidence, resolveExactCausalBasisSource } from './quality-issue';
 import { createRequire } from 'node:module';
 import { WritingQualityService } from './writing-quality.service';
@@ -11,6 +11,28 @@ const issue = { issueType: 'causality_gap', severity: 'low', summary: '传播缺
   basisSource: 'chapter_plan', basisEvidence: '不在计划', basisReason: '尚未交代发行员向复核处送报。' };
 
 describe('manual review citation repair', () => {
+  it('uses one exact server catalog for structured citation prompts and validation',()=>{
+    const content=JSON.stringify({chapters:[{content:'她当众提交了证据。',result:'负责人接受了材料。'}]});
+    const sources={chapter_plan:JSON.stringify({required:'已登记后才能正式受理。'})};
+    const issues=[{evidenceKind:'causal_gap',message:'声称受理但没有登记动作',basisSource:'chapter_plan'}];
+    const prompt=semanticEvidenceRepairPrompt(issues,[0],content,sources);
+    const catalog=causalEvidenceAnchorOptions(content,sources);
+    expect(catalog.some(row=>row.id==='body:v1')).toBe(true);
+    expect(prompt.prompt).toContain('body:v1');
+    expect(prompt.systemPrompt).toContain('目录中真实存在');
+    expect(prompt.prompt).not.toContain('body段落编号');
+    const forbidden=applySemanticEvidenceRepairs(issues,[0],{repairs:[{
+      index:0,evidenceAnchorId:'body:p1',basisAnchorId:'chapter_plan:p1',
+    }]},content,sources);
+    expect(forbidden[0].evidence).toBe('');
+    expect(forbidden[0].basisEvidence).toBe('');
+    const valid=applySemanticEvidenceRepairs(issues,[0],{repairs:[{
+      index:0,evidenceAnchorId:'body:v2',basisAnchorId:'chapter_plan:v1',
+    }]},content,sources);
+    expect(valid[0].evidence).toBe('负责人接受了材料。');
+    expect(valid[0].basisEvidence).toBe('已登记后才能正式受理。');
+  });
+
   it('completes omitted causal source and reasoning from real structured values without changing the verdict', () => {
     const content = JSON.stringify({ chapters: [{ content: '她仍在屋内。' }, { content: '他锁门后从楼道带她出来。' }] });
     const original = { ruleId: 'logic.exit_path', evidenceKind: 'causal_gap', severity: 'medium', message: '撤离顺序缺少交代', evidence: '错误拼接' };

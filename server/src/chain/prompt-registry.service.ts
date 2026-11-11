@@ -169,7 +169,7 @@ export class PromptRegistryService {
 故事设定：{{user_input.story_setting}}
 目标总字数：{{user_input.targetWords}}万字；分类：{{user_input.genre}}
 
-先确定主角起点、核心矛盾、不可撤销的关键选择、阶段推进、结局与代价，再依照这些因果节点划分卷。卷数与章数由故事决定，不得平均分配或套用固定数量。每章按${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字核对全书目标字数的可承载性。已选文风须落实为叙事单元与卷内结构；关系类标签须落实为具名人物、双方行动及关系变化；情节取向须落实为具体事件与代价。现实题材不得无依据添加穿越、修炼或超能力。
+先从已确认题材锁定主角身份、能力触发对象与条件、关键行动及其可达结果；未知限制保持未知，不得为了分卷临时新增否定原题材行动的规则。再确定主角起点、核心矛盾、不可撤销的关键选择、阶段推进、结局与代价，依照这些因果节点划分卷。卷数与章数由故事决定，不得平均分配或套用固定数量。每章按${CHAPTER_WORD_RANGE.min}-${CHAPTER_WORD_RANGE.max}字核对全书目标字数的可承载性。已选文风须落实为叙事单元与卷内结构；关系类标签须落实为具名人物、双方行动及关系变化；情节取向须落实为具体事件与代价。现实题材不得无依据添加穿越、修炼或超能力。
 
 只输出合法 JSON 对象，包含：
 {"coreSetting":{"title":"书名","type":"类型","coreSellingPoints":["具体卖点"],"targetReaders":"目标读者","setting":"故事背景","coreConflict":"不可调和的主线矛盾","protagonist":"具名主角与身份","initialDilemma":"开篇困境","wantMost":"长期目标","fearMost":"内心恐惧","antagonist":"阻碍力量","emotionalEnding":"结局情绪与代价","highConcept":"高概念","narrativeForm":"文风如何成为全书叙事单元","keyRelationships":"具名关系及变化事件","volumePlan":[{"volume":1,"theme":"阶段主题","goal":"阶段目标","conflict":"核心冲突","turningPoint":"人物变化","climax":"卷末高潮"}]},"skeletonVolumes":[{"volumeNumber":1,"title":"卷名","theme":"主题","description":"阶段目标与因果事件链","estimatedChapters":1,"chapterCountReason":"依据事件链、节奏及目标字数说明章数","narrativeFormExecution":"叙事形式如何落到本卷","relationshipEvent":"具名人物的关系行动"}]}
@@ -189,9 +189,9 @@ export class PromptRegistryService {
 分类：{{user_input.genre}}
 已验收骨架：{{{json chain_output.node_1_skeleton}}}
 
-依据骨架中的事件链与人物选择，定义必要的地点、社会结构、真实职业或超常能力边界、经济、文化、历史及势力。每个维度要说明它如何约束主线行动；现实题材不得凭空添加修炼与超能力。人物年龄、履历、年份、亲属关系及机构名称必须与骨架一致。每个维度应具体可核查，不得以抽象套话占位。
+依据骨架中的事件链与人物选择，定义必要的地点、社会结构、真实职业或超常能力边界、经济、文化、历史及势力。已确认题材和骨架中明确的触发条件、作用对象、时空范围及代价必须原义继承；未确认的人数、距离、历史年份与新权限不得凭空补成限制既定主线行动的硬前提。每个维度要说明它如何约束主线行动；现实题材不得凭空添加修炼与超能力。人物年龄、履历、年份、亲属关系及机构名称必须与骨架一致。每个维度应具体可核查，不得以抽象套话占位。若原确认故事确有必须以明确条件触发的因果规则，可输出rules数组逐条陈述作用对象、条件及代价；没有独立规则时rules为[]，不得将powerSystem的体系说明拆作已生效规则。
 
-只输出合法 JSON：{"worldview":{"geography":[{"name":"地点名","description":"地点如何约束事件"}],"socialStructure":"阶层与制度","powerSystem":"能力或现实机制的来源、代价、边界","economy":"资源与利益分配","culture":"习俗与价值冲突","history":[{"date":"时间","event":"与主线相关的历史事件"}],"factions":[{"name":"势力名","description":"作用与边界","coreGoal":"目标","leader":"负责人"}]}}。每个世界维度至少30字，地理与势力条目必须有具名对象及具体作用。不得输出第二份主线或章纲。`,
+只输出合法 JSON：{"worldview":{"geography":[{"name":"地点名","description":"地点如何约束事件"}],"socialStructure":"阶层与制度","powerSystem":"能力或现实机制的来源、代价、边界","rules":[],"economy":"资源与利益分配","culture":"习俗与价值冲突","history":[{"date":"时间","event":"与主线相关的历史事件"}],"factions":[{"name":"势力名","description":"作用与边界","coreGoal":"目标","leader":"负责人"}]}}。每个世界维度至少30字，地理与势力条目必须有具名对象及具体作用。不得输出第二份主线或章纲。`,
       variables: ['user_input.story_setting', 'user_input.genre', 'chain_output.node_1_skeleton'],
       isActive: true,
     });

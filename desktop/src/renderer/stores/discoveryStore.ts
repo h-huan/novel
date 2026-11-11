@@ -91,6 +91,8 @@ interface DiscoveryState {
 
   // Step 2: 发现
   isGenerating: boolean;
+  /** Ephemeral ID of the active backend discovery task. Survives route remount, not app restart. */
+  activeDiscoveryRequestId: string | null;
   genProgress: string;
   ideas: DiscoveryIdea[];
   /** 本批灵感生成时的六维与篇幅配置；选择题材前校验，防止改了设定仍创建旧结果。 */
@@ -136,6 +138,7 @@ interface DiscoveryState {
   setCategoryWordScaleDeviation: (value: string) => void;
 
   setGenerating: (isGenerating: boolean) => void;
+  setActiveDiscoveryRequestId: (id: string | null) => void;
   setGenProgress: (progress: string) => void;
   setIdeas: (ideas: DiscoveryIdea[]) => void;
   setGeneratedSignature: (signature: string | null) => void;
@@ -190,6 +193,7 @@ const INITIAL_STATE = {
   categoryWordScaleDeviation: '',
 
   isGenerating: false,
+  activeDiscoveryRequestId: null as string | null,
   genProgress: '',
   ideas: [] as DiscoveryIdea[],
   generatedSignature: null as string | null,
@@ -271,6 +275,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
       setCategoryWordScaleDeviation: (categoryWordScaleDeviation) => set({ categoryWordScaleDeviation }),
 
       setGenerating: (isGenerating) => set({ isGenerating }),
+      setActiveDiscoveryRequestId: (activeDiscoveryRequestId) => set({activeDiscoveryRequestId}),
       setGenProgress: (genProgress) => set({ genProgress }),
       // UI 的唯一题材列表只保存后端明确标记为通过 Gate 的候选；raw/rejected/旧格式候选一律不进入展示状态。
       setIdeas: (ideas) => set({ ideas: acceptedDiscoveryIdeas(ideas) }),
@@ -296,7 +301,7 @@ export const useDiscoveryStore = create<DiscoveryState>()(
 
       reset: () => set({ ...INITIAL_STATE, creationStepStatus: { ...INITIAL_STEP_STATUS } }),
       resetDiscovery: () => set({
-        isGenerating: false, genProgress: '', ideas: [], generatedSignature: null, generationDone: false,
+        isGenerating: false, activeDiscoveryRequestId: null, genProgress: '', ideas: [], generatedSignature: null, generationDone: false,
         prevTitles: [], excludeDetails: [],
       }),
     }),

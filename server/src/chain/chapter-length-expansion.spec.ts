@@ -50,7 +50,7 @@ describe('chapter length preserves the story exit',()=>{
   controller.generationMetrics={getLengthCalibration:vi.fn(()=>calibration)};
   controller.realLLM={generate:vi.fn().mockImplementation(async(options:any)=>{
    const values=JSON.parse(options.prompt.split('【本次首稿篇幅验收参数】')[1].trim());
-   expect(values).toMatchObject({targetWords:40,minWords:30,maxWords:100,countingBasis:'汉字数＋英文词数；标点、空白、纯数字不计入'});
+   expect(values).toMatchObject({targetWords:40,minWords:30,splitThreshold:66,chapterAbsoluteMax:66,maximumIsAdvisory:true,countingBasis:'汉字数＋英文词数；标点、空白、纯数字不计入'});
    expect(values.historicalFirstPass).toEqual(calibration?{samples:8,actualToTargetRatio:0.64}:null);
    return {content:'她沿着门边留下的痕迹找到钥匙，又拿出信封核对收件人，终于确认屋里的人已经离开了。'};
   })};

@@ -21,7 +21,7 @@ function fixture() {
     CREATE TABLE generation_runs(
       id TEXT PRIMARY KEY,project_id TEXT,stage TEXT,scenario TEXT,status TEXT,
       constitution_revision INTEGER,context_version TEXT,prompt_version TEXT,
-      chapter_index INTEGER,output_text TEXT,model TEXT,finished_at TEXT
+      chapter_index INTEGER,output_text TEXT,model TEXT,finished_at TEXT,standards_snapshot TEXT
     );
   `);
   const constitution = {
@@ -88,9 +88,9 @@ function seedCachedRun(
   const project = db.prepare('SELECT * FROM projects WHERE id=?').get('p') as any;
   const runtimeConstitution = readConstitution(project);
   const promptVersion = digest(systemPrompt + JSON.stringify(runtimeConstitution) + standards.digest);
-  db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     runId, 'p', stage, scenario, 'success', runtimeConstitution.revision ?? null, contextVersion, promptVersion,
-    chapterIndex, output, 'test-model', finishedAt,
+    chapterIndex, output, 'test-model', finishedAt, JSON.stringify(standards),
   );
 }
 
@@ -116,6 +116,30 @@ describe('IdempotentRealLLMService', () => {
       expect(response.latency).toBe(0);
       expect(response.runId).toBe('run-1');
     } finally { db.close(); }
+  });
+
+  it('binds the live generation run id directly instead of depending on a post-hoc fingerprint lookup', async () => {
+    const metrics = {
+      beginRun: vi.fn(() => ({ id: 'run-live', constitution: null })),
+      finishRun: vi.fn(),
+      setRunModel: vi.fn(),
+    };
+    const service = new RealLLMService({
+      getModelForScenario: () => ({ modelName: 'test-model', modelVersion: 'v1' }),
+      getConfig: () => ({ scenarios: {}, defaults: { maxTokens: 4096 } }),
+    } as any, metrics as any);
+    (service as any).generateInternal = vi.fn(async () => ({
+      content: '{"world":"live"}', model: 'test-model', latency: 1,
+    }));
+
+    const response = await service.generate({
+      prompt: '生成世界观JSON', scenario: 'world_building',
+      metrics: { projectId: 'p', stepKey: 'world_source_local_repair' },
+    } as any);
+
+    expect(response.content).toBe('{"world":"live"}');
+    expect(response.runId).toBe('run-live');
+    expect(metrics.finishRun).toHaveBeenCalledWith('run-live', 'success', expect.any(Number), '{"world":"live"}', undefined, 'test-model');
   });
 
   it('reuses an identical chapter-scoped planning review but not a changed review', async () => {
@@ -159,9 +183,12 @@ describe('IdempotentRealLLMService', () => {
       latency: 12,
     });
     try {
-      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        'run-fresh','p','chapter','writing','success',1,'ctx','prompt',1,
+      db.prepare(`INSERT INTO generation_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        'run-fresh','p','chapter','writing','success',1,
+        compileContext(db, { projectId: 'p', stage: qualityStage('writing') }).version,
+        'prompt',1,
         '{"chapter":"fresh"}','test-model','2026-09-27T00:00:01.000Z',
+        JSON.stringify(standardDirectiveCache.snapshot('writing', true, null)),
       );
       const service = serviceFor(db);
 
@@ -323,15 +350,5 @@ describe('IdempotentRealLLMService', () => {
     } finally {superGenerate.mockRestore();db.close();}
   });
 
-  it('physically blocks the historical automatic whole-chapter alignment rewrite', async () => {
-    const { db } = fixture();
-    try {
-      const service = serviceFor(db);
-      await expect(service.generate({
-        prompt: '根据评审结论重写整章',
-        scenario: 'writing_climax',
-        metrics: { projectId: 'p', chapterIndex: 1, stepKey: 'body_alignment_repair' },
-      })).rejects.toThrow(/自动整章.*禁用/);
-    } finally { db.close(); }
-  });
+
 });

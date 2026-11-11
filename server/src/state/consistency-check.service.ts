@@ -285,9 +285,12 @@ ${characterContent.substring(0, 500)}
       });
     }
 
-    const overdue = db.prepare(`SELECT id, content, planned_recovery_chapter_index FROM foreshadowings
+    const overdue = db.prepare(`SELECT id, content, planned_recovery_chapter_index,
+        COALESCE(recovery_window_end, planned_recovery_chapter_index) AS effective_recovery_chapter
+      FROM foreshadowings
       WHERE project_id = ? AND status IN ('buried','active','reminder')
-        AND planned_recovery_chapter_index IS NOT NULL AND planned_recovery_chapter_index < ?`
+        AND planned_recovery_chapter_index IS NOT NULL
+        AND COALESCE(recovery_window_end, planned_recovery_chapter_index) < ?`
     ).all(row?.project_id || '', chapter.index) as any[];
     for (const item of overdue) {
       checks.push({
@@ -299,7 +302,7 @@ ${characterContent.substring(0, 500)}
         details: [{
           field: 'foreshadowing',
           sourceId: item.id,
-          expected: `第${item.planned_recovery_chapter_index}章前回收或重新排期`,
+          expected: `第${item.effective_recovery_chapter}章前回收或重新排期`,
           actual: `检查到第${chapter.index}章仍未回收`,
           suggestion: '回收、取消，或由作者明确调整回收窗口。',
         }],

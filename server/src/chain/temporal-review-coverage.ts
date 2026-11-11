@@ -54,10 +54,10 @@ export function temporalNumbers(evidence: string) {
     digitalRanges.push([match.index!,match.index!+match[0].length]);
   }
   const clocks: Array<{ original: string; minutes: number; minuteOptions:number[]; minuteBounds?:{min:number;max:number}; relativeDay?:number }> = [];
-  const clockPattern = new RegExp(`(${number})(?:点|时)(?:(半)|(?:过)?(${number})分?)?|([0-2]?\\d)[:：]([0-5]\\d)`, 'g');
+  const clockPattern = new RegExp(`(${number})(?:点|时)(?:(半)|([一三13])刻|(?:过)?(${number})分?)?|([0-2]?\\d)[:：]([0-5]\\d)`, 'g');
   for (const match of evidence.matchAll(clockPattern)) {
     if(digitalRanges.some(([start,end])=>match.index!>=start&&match.index!<end))continue;
-    let hour = timeNumber(match[1] ?? match[4]), minute = match[2] ? 30 : match[3] ? timeNumber(match[3]) : Number(match[5] ?? 0);
+    let hour = timeNumber(match[1] ?? match[5]), minute = match[2] ? 30 : match[3] ? timeNumber(match[3])*15 : match[4] ? timeNumber(match[4]) : Number(match[6] ?? 0);
     const period=evidence.slice(Math.max(0,match.index!-4),match.index!);
     if(/下午|傍晚|晚上/.test(period)&&hour<12)hour+=12;
     if(/凌晨/.test(period)&&hour===12)hour=0;
@@ -68,14 +68,21 @@ export function temporalNumbers(evidence: string) {
     const minuteBounds=suffix?{min:hour*60+minute,max:(hour+1)*60}:undefined;
     if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) clocks.push({ original: match[0]+(suffix||''), minutes: hour * 60 + minute, ...(minuteBounds?{minuteBounds}:{}), ...(relativeDay===undefined?{}:{relativeDay}), minuteOptions: match[1] && hour<=12 && !/下午|傍晚|晚上|凌晨|清早|清晨|早上|上午/.test(period) ? [hour%12*60+minute,(hour%12+12)*60+minute] : [hour*60+minute] });
   }
-  return { durations, clocks, countdowns };
+  // Calendar spans are locators, not clock arithmetic. They let the outline
+  // fact review see "五年档案 / 十四个月 / 上个月" and check that the same
+  // archive's coverage and earliest/latest records can coexist. Body temporal
+  // validation continues to use only durations/clocks/countdowns.
+  const calendarSpans: Array<{ original: string; position: number }> = [];
+  const calendarPattern = /(?:[零〇一二两三四五六七八九十百千\d]+(?:个)?(?:年|月|天|日)|上个月|下个月|去年|今年|明年|前天|昨天|今天|明天|后天)/g;
+  for (const match of evidence.matchAll(calendarPattern)) calendarSpans.push({ original: match[0], position: match.index! });
+  return { durations, clocks, countdowns, calendarSpans };
 }
 
 /** Locates review material; it does not infer event identity or block from keywords. */
 export function temporalReviewCatalog(content: string) {
   const numericTime = /(?:[零〇一二两三四五六七八九十百千\d]+(?:\.[\d]+)?(?:来)?(?:个)?(?:多)?(?:小时|钟头|分钟|秒钟|秒|年|个月|天|日|点|时)|\d{1,2}[:：]\d{2})/;
   return content.split(/\r?\n/).map(s => s.trim()).filter(s => s && (numericTime.test(s)||/(?:今天|今日|明天|明日|后天|昨天|昨日|前天)|(?:天刚亮|天没亮|天亮了|过了中午|已经下午|入夜)/.test(s)))
-    .map((evidence, i) => {const numbers=temporalNumbers(evidence);return { id: `T${i + 1}`, evidence, ...numbers, clocks:numbers.clocks.map((clock,j)=>({...clock,id:`T${i+1}:C${j+1}`})), digitalClocks:numbers.countdowns.map((read,j)=>({id:`T${i+1}:D${j+1}`,original:read.original,minutes:read.seconds/60,minuteOptions:[read.seconds/60],precisionSeconds:1,readingIndex:j})).filter(clock=>clock.minutes<1440) };});
+    .map((evidence, i) => {const {calendarSpans:_calendarSpans,...numbers}=temporalNumbers(evidence);return { id: `T${i + 1}`, evidence, ...numbers, clocks:numbers.clocks.map((clock,j)=>({...clock,id:`T${i+1}:C${j+1}`})), digitalClocks:numbers.countdowns.map((read,j)=>({id:`T${i+1}:D${j+1}`,original:read.original,minutes:read.seconds/60,minuteOptions:[read.seconds/60],precisionSeconds:1,readingIndex:j})).filter(clock=>clock.minutes<1440) };});
 }
 
 export function validateTemporalReview(audit: unknown, catalog: ReturnType<typeof temporalReviewCatalog>, content: string) {

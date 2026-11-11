@@ -337,6 +337,8 @@ export class ChapterService {
     } else {
       warnings.push('State candidate sync service is unavailable');
     }
+    try { this.stateItemService?.pruneStoryStateItems(existing.project_id); }
+    catch (error) { warnings.push(`State cleanup failed: ${this.errorMessage(error)}`); }
     if (this.derivedDataSync) {
       try {
         derivedSync = await this.derivedDataSync.syncAfterContentChange({
@@ -400,8 +402,11 @@ export class ChapterService {
     if (actual === 0) {
       throw new BadRequestException('本章正文为空（0 字）。请先写作或生成正文后再提交质检或锁定。');
     }
+    if (actual < CHAPTER_WORD_RANGE.min) {
+      throw new BadRequestException(`本章正文仅 ${actual} 字，低于单章下限 ${CHAPTER_WORD_RANGE.min} 字（本章目标 ${target} 字），需补足后才能提交质检或锁定。`);
+    }
     if (!isChapterBodyLengthAcceptable(actual)) {
-      throw new BadRequestException(`本章正文已达 ${actual} 字，超过 ${CHAPTER_WORD_RANGE.max} 字上限（本章目标 ${target} 字），需精简后才能提交质检或锁定。`);
+      throw new BadRequestException(`本章正文已达 ${actual} 字，超过单章拆分阈值（本章目标 ${target} 字），需与章纲一起拆分后才能提交质检或锁定，不能硬压或删减关键因果。`);
     }
   }
 

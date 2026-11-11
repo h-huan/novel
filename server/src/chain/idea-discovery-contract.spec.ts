@@ -1,18 +1,129 @@
+import {PREMISE_CAUSAL_SEQUENCE_DIRECTIVE} from './premise-causal-plan';
+import { readyOriginalPoolReselectionPayload, normalizeTargetedPremiseReselection } from './premise-selection-review';
+import { premiseSeedFactIssues, premiseSeedNearDuplicate, screenPremisePoolBatch, recoverClosedPremisePoolObjects, decodePremisePoolTransport, claimLockedPremiseSlot, freezePremiseCreationChoices, premisePayoffBridgeIssues } from './idea-discovery-contract';
+import { premiseCausalPlanIssues, normalizeCausalPlanFieldNames } from './premise-causal-plan';
 import { describe, expect, it } from 'vitest';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
 import {
   confirmedIdeaStoryCard,
+  separateIdeaDiscoveryAudit,
   applyOrderedIdeaRepairPatches,
+  applyIsolatedIdeaRepairPatches,
+  retainValidAutomaticPlotTags,
   bindStructuredIdeaCardToPremise,
   ideaCardStructuringDirective,
+  ideaPreselectionCapacity,
+  ideaCardHistoryTitleReminder,
   ideaGateLocalRepairDirective,
   ideaHookRequirement,
   ideaPremiseSelectionDirective,
   ideaDiscoveryAuthorSettings,
   ideaDiscoveryAuthorContext,
   normalizePremiseSelectionPayload,
+  capRankedPremiseSelections,
+  rankPremisePoolByMaturityScore,
+  sourceReadyScoredPremiseSelection,
+  readPremiseMaturityScore,
   selectedPremiseEvidenceForIdeaCard,
+  presentationLockedPremiseView,
 } from './idea-discovery-contract';
+
+describe('source-owned scored pool skips redundant model selection only with valid provenance',()=>{
+  const create=(id:string,title:string,category:string)=>{
+    const situation='接到通知，主人公一家将在明天失去住处，必须在今晚决定是否公开共同签署的旧协议。';
+    const action='主人公主动向邻居说明协议经过，并把仍在自己手里的原件交给能够核对的签署人。';
+    const conditions='协议原件始终由主人公保管，签署人已经答应当面核对，而对手试图阻挠交付。';
+    const payoff='签署人核对记录后当面撤回对主人公的指控，主人公却失去了本来可以独自保留的补偿机会。';
+    const genre='旧协议、共同住房权益和邻里关系共同驱动对抗及责任选择。';
+    return {premiseId:id,workingTitle:title,storyCategoryId:category==='悬疑'?'K2':'K1',storyCategory:category,
+      storyCore:`【处境触发】${situation}\n【主动选择】${action}\n【必要条件】${conditions}\n【反转兑现】${payoff}\n【分类流派机制】${genre}`,
+      readerQuestion:'签署人核对原件后会维护谁的权益，主角要付出什么代价？',
+      causalPlan:[{action:{field:'activeChoice',quote:action},
+        conditions:[{field:'protagonistSituation',quote:situation}],
+        result:{field:'payoff',quote:payoff}}]};
+  };
+  it('uses scores to select exact source facts, without a second authoring call or changing identity',()=>{
+    const first=create('P1','公开旧协议之后','都市');
+    const second=create('P2','赶在搬家前核对','都市');
+    const result=sourceReadyScoredPremiseSelection([first,second],new Map([['P1',70],['P2',93]]),2,3,['都市']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P2','P1']);
+    expect(result?.selected.every(row=>Array.isArray(row.causalPlan) && row.payoff.includes('签署人核对记录后'))).toBe(true);
+    expect(result?.pool.map(row=>row.premiseId)).toEqual(['P1','P2']);
+  });
+  it('preserves mixed-category exploration without changing any source category or score',()=>{
+    const seeds=[create('P1','赶在查封前救家','都市'),
+      create('P2','邻居为何退出协议','都市'),create('P3','旧协议的签字疑云','悬疑')];
+    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P1',95],['P2',92],['P3',86]]),2,3,['都市','悬疑']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P1','P3']);
+    expect(result?.selected.map(row=>row.storyCategory)).toEqual(['都市','悬疑']);
+  });
+  it('reuses already-audited category diversity during ranked refill without inventing a new category',()=>{
+    const seeds=[create('P4','月底交出钥匙前','都市'),
+      create('P5','老房的签字人消失','都市')];
+    const result=sourceReadyScoredPremiseSelection(seeds,new Map([['P4',91],['P5',85]]),
+      2,7,['都市','悬疑'],['悬疑']);
+    expect(result?.selected.map(row=>row.premiseId)).toEqual(['P4','P5']);
+    expect(result?.selected.every(row=>row.storyCategory==='都市')).toBe(true);
+    expect(result?.poolTargetMet).toBe(false);
+  });
+  it('replaces defective positions using unused scored original facts, still subject to strict normalizer',()=>{
+    const seeds=[create('P1','原选择题材','都市'),create('P2','待选高分题材','都市'),
+      create('P3','另一可选题材','都市')];
+    const scores=new Map([['P1',99],['P2',93],['P3',83]]);
+    const original=sourceReadyScoredPremiseSelection(seeds,scores,1,3,['都市'])!;
+    expect(original.selected[0].premiseId).toBe('P1');
+    const payload=readyOriginalPoolReselectionPayload(original,
+      [{replacesPremiseId:'P1'}],['P2','P3'],seeds,scores,3,['都市']);
+    expect(payload?.replacements.map(row=>row.premise.premiseId)).toEqual(['P2']);
+    const review={passed:false,issues:[{kind:'selection_fit' as const,
+      premiseId:'P1',referencePremiseId:'P1',repairMode:'replace_from_pool' as const,
+      reason:'原有候选被独立审核举证拒绝',quote:'现有引用',referenceQuote:'原始来源'}]};
+    const normalized=normalizeTargetedPremiseReselection(payload,original,review,1,3,['都市'],1);
+    expect(normalized.selected.map(row=>row.premiseId)).toEqual(['P2']);
+    expect(normalized.selected[0].causalPlan).toEqual(seeds[1].causalPlan);
+    expect(readyOriginalPoolReselectionPayload(original,[{replacesPremiseId:'P1'}],
+      ['P2'],[{...seeds[1],causalPlan:[]}],scores,3,['都市'])).toBeNull();
+    expect(readyOriginalPoolReselectionPayload(original,[{replacesPremiseId:'P1'}],
+      ['P1'],seeds,scores,3,['都市'])).toBeNull();
+  });
+  it('falls back to original paid selection when provenance, causal plan, score or quantity is missing',()=>{
+    const good=create('P1','归还旧合同之前','都市');
+    const missing=create('P2','卖房前的旧协议','都市');
+    const scores=new Map([['P1',88],['P2',81]]);
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,causalPlan:[]}],scores,2,3,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,readerQuestion:''}],scores,2,3,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,missing],new Map([['P1',88]]),2,3,['都市'])).toBeNull();
+    expect(sourceReadyScoredPremiseSelection([good,{...missing,
+      causalPlan:[{action:{field:'activeChoice',quote:'不存在于原池的行动'},conditions:[],
+        result:{field:'payoff',quote:'不存在于原池的结果'}}]}],scores,2,3,['都市'])).toBeNull();
+  });
+});
+
+describe('original-pool same-generation maturity ranking',()=>{
+  it('prioritizes an already-selected shortlist without changing source identities or dropping unscored items',()=>{
+    const selected=[{premiseId:'P9',storyCategory:'都市',causalPlan:[{action:'a'}]},{premiseId:'P3',storyCategory:'悬疑',causalPlan:[{action:'b'}]},{premiseId:'P1',storyCategory:'现实',causalPlan:[{action:'c'}]}];
+    const sorted=rankPremisePoolByMaturityScore(selected,new Map([['P3',96],['P1',82]]));
+    expect(sorted.map(row=>row.premiseId)).toEqual(['P3','P1','P9']);
+    expect(sorted.find(row=>row.premiseId==='P3')).toBe(selected[1]);
+    expect(selected.map(row=>row.premiseId)).toEqual(['P9','P3','P1']);
+  });
+  it('accepts integer wire scores without fabricating missing, invalid or negative scores',()=>{
+    expect(readPremiseMaturityScore(93)).toBe(93);
+    expect(readPremiseMaturityScore('87')).toBe(87);
+    for(const value of [null,undefined,'87.5','高分',-2,101,83.5])expect(readPremiseMaturityScore(value)).toBeNull();
+  });
+  it('ranks by stored original-pool scores, preserves identities and keeps legacy candidates without a score',()=>{
+    const pool=[{premiseId:'P1'},{premiseId:'P2'},{premiseId:'P3'}];
+    expect(rankPremisePoolByMaturityScore(pool,new Map([['P1',70],['P2',94]]))
+      .map(row=>row.premiseId)).toEqual(['P2','P1','P3']);
+    expect(pool.map(row=>row.premiseId)).toEqual(['P1','P2','P3']);
+  });
+  it('keeps the locked platform category when a generated full card attempts to relabel its premise',()=>{
+    const card=bindStructuredIdeaCardToPremise({premiseId:'P1',workingTitle:'原题材',storyCategory:'古言虐恋'},
+      [{title:'新标题',storyCategory:'宫斗宅斗'}]);
+    expect(card.storyCategory).toBe('古言虐恋');
+  });
+});
 
 const selectedPremise = (premiseId: string) => ({
   premiseId,
@@ -29,6 +140,111 @@ const selectedPremise = (premiseId: string) => ({
   differentiation: '冲突由具体职业责任和不可替换关系共同推动，不靠换名套路',
 });
 
+describe('reader-facing source-bound card generation', () => {
+  it('requires a title understandable without the synopsis and forbids inventing stage outcomes', () => {
+    const prompt=ideaCardStructuringDirective(selectedPremise('P-readable'),[],false);
+    expect(prompt).toContain('只凭标题须能知道发生了何种反常关系');
+    expect(prompt).toContain('需要读完概要才懂的隐喻');
+    expect(prompt).toContain('每个scopeBreakdown.outcome只写本阶段已由原池行动支持的状态变化');
+     expect(prompt).toContain('同一证据的反复解释写成两次新的反转');
+     expect(prompt).toContain('每个alternateTitles是否能被没看过本卡');
+    expect(prompt).toContain('他人转念');
+    expect(prompt).toContain('ending由服务器继承已审核');
+    expect(prompt).toContain('禁止替换、合并、拆分、另造题材');
+  });
+});
+
+describe('locked-card historical exclusion transport', () => {
+  it('does not repeat full historical story material once the premise is locked, while retaining every title', () => {
+    const excludes = [
+      { title: '旧题材一', hook: '历史钩子秘密不应重复给已锁定题材卡'.repeat(15), description: '历史故事完整概要应在上游去重和最终Gate保留'.repeat(40) },
+      { title: '旧\n题材二', hook: '第二条历史钩子', description: '第二条历史概要' },
+    ];
+    const original = structuredClone(excludes);
+    const prompt = ideaCardHistoryTitleReminder(excludes);
+    expect(prompt).toContain('1. 旧题材一');
+    expect(prompt).toContain('2. 旧 题材二');
+    expect(prompt).toContain('最终去重仍使用原始完整历史');
+    expect(prompt).not.toContain(excludes[0].hook);
+    expect(prompt).not.toContain(excludes[0].description);
+    expect(prompt).not.toContain(excludes[1].description);
+    expect(excludes).toEqual(original);
+    expect(prompt.length).toBeLessThan(JSON.stringify(excludes).length / 3);
+    expect(ideaCardHistoryTitleReminder([])).toBe('');
+  });
+});
+
+describe('original fixed-pool causation must anticipate evidenced final Gate failures',()=>{
+ it('requires real contract, evidence attribution and authority before any selected payoff is promised',()=>{
+  const prompt=ideaPremiseSelectionDirective('short_story',5,15,false,5,true);
+  expect(prompt).toContain('权限及实际决定');
+  expect(prompt).toContain('普通直接因果不额外强加机构或手续');
+  expect(prompt).toContain('证明范围与责任归属');
+  expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
+ });
+});
+
+describe('bounded preselection surplus',()=>{
+  it('keeps eight reviewed paths only when the fixed pool supports five plus three',()=>{
+    expect(ideaPreselectionCapacity(5,15)).toBe(8);
+    expect(ideaPreselectionCapacity(5,6)).toBe(6);
+    expect(ideaPreselectionCapacity(5,5)).toBe(5);
+    expect(ideaPreselectionCapacity(2,12)).toBe(3);
+    expect(ideaPreselectionCapacity(1,10)).toBe(2);
+    expect(ideaPreselectionCapacity(3,12)).toBe(5);
+    expect(ideaPreselectionCapacity(4,12)).toBe(6);
+    expect(ideaPreselectionCapacity(8,24)).toBe(11);
+    expect(ideaPreselectionCapacity(10,7)).toBe(7);
+    expect(()=>ideaPreselectionCapacity(5,-1)).toThrow('候选池数量无效');
+  });
+});
+
+describe('locked-card structuring reference transport',()=>{
+  it('retains full target facts and all peer causal differences without repeatedly sending peer source and self-praise',()=>{
+    const target={...selectedPremise('P1'),workingTitle:'目标题材',storyCore:'目标原池事实保留且不得更改',causalPlan:[{action:{field:'activeChoice',quote:'目标行动'}}]};
+    const peer={...selectedPremise('P2'),workingTitle:'参照题材',storyCategory:'都市日常',
+      storyCore:'参照原池完整故事不应在每张其它卡里重复'.repeat(60),
+      differentiation:'参照候选自己声称新颖不得替代真正故事区别'.repeat(30),
+      causalPlan:[{action:{field:'activeChoice',quote:'参照重复行动'},conditions:[],result:{field:'payoff',quote:'参照重复结局'}}]};
+    const before=structuredClone([target,peer]);
+    const prompt=ideaCardStructuringDirective(target,[target,peer],false);
+    const refs=JSON.parse(prompt.split('【同批差异参照（只作边界，不生成或借用其故事路径）】')[1].trim());
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({
+      workingTitle:peer.workingTitle,storyCategory:peer.storyCategory,
+      coreConflict:peer.coreConflict,activeChoice:peer.activeChoice,escalation:peer.escalation,
+      reversalEffect:peer.reversalEffect,payoff:peer.payoff,
+      irreplaceableCarrier:peer.irreplaceableCarrier,
+    });
+    expect(prompt).toContain(target.storyCore);
+    expect(prompt).toContain('目标行动');
+    expect(prompt).not.toContain(peer.storyCore);
+    expect(prompt).not.toContain(peer.differentiation);
+    expect(prompt).not.toContain('参照重复行动');
+    expect([target,peer]).toEqual(before);
+    const oldPeers=Object.fromEntries(Object.entries(peer).filter(([key])=>key!=='premiseId'&&key!=='causalPlan'));
+    expect(JSON.stringify(refs).length).toBeLessThan(JSON.stringify([oldPeers]).length/2);
+  });
+});
+
+describe('requested genre is an identity constraint, not a duplicate verdict',()=>{
+  it('keeps the selected genre shell and requires an event-level distinguishing beat without new fields',()=>{
+    const prompt=ideaPremiseSelectionDirective('short_story',5,15);
+    expect(prompt).toContain('隐藏能力、被低估、亮出本事属于应当兑现的共同类型承诺');
+    expect(prompt).toContain('本身不算重复');
+    expect(prompt).toContain('不可互换的关键操作、意外升级、胜负转向和实际代价');
+    expect(prompt).toContain('不要求硬塞热血、搞笑、热梗');
+    expect(prompt).toContain('收存证据、准备材料不能冒充导致对手行动');
+    expect(prompt).toContain('恋爱类不能只有查案、补课、事后作证');
+    expect(prompt).toContain('入选骨架应有至少一个真实事件构成可简短转述的记忆点');
+    // Output economy is a transport optimization, not permission to omit
+    // causal links or downgrade the preselection quality contract.
+    expect(prompt).toContain('最短连续原文');
+    expect(prompt).toContain('不丢掉决定性桥接');
+    expect(prompt).toContain('严格避免重复叙述原池全文和其它字段');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
+  });
+});
 describe('idea discovery preselection contract', () => {
   it('allows omitted self-assessed differentiation but keeps every causal field mandatory', () => {
     const item:any=selectedPremise('P1');delete item.differentiation;
@@ -39,6 +255,38 @@ describe('idea discovery preselection contract', () => {
     for(const field of ['activeChoice','escalation','reversalEffect','payoff']) {
       expect(()=>normalizePremiseSelectionPayload({pool,selectedPremises:[{...item,[field]:''}]},1,1)).toThrow(field);
     }
+  });
+  it('keeps only already generated legal automatic tags, without choosing new tags or overriding manual choices',()=>{
+    const raw={plotTags:['宫斗','字典外的自造标签','逆袭','宫斗'],description:'不可改动的故事事件'};
+    const valid=retainValidAutomaticPlotTags(raw,[],['宫斗','逆袭','悬念反转']);
+    expect(valid.plotTags).toEqual(['宫斗','逆袭']);
+    expect(valid.description).toBe(raw.description);
+    expect(raw.plotTags).toHaveLength(4);
+    expect(retainValidAutomaticPlotTags(raw,['宫斗'],['宫斗'])).toBe(raw);
+    const unknown={plotTags:['完全不存在的词']};
+    expect(retainValidAutomaticPlotTags(unknown,[],['宫斗'])).toBe(unknown);
+    expect(retainValidAutomaticPlotTags({plotTags:[]},[],['宫斗'])).toEqual({plotTags:[]});
+  });
+  it('isolates illegal card repair patches while preserving exact accepted dictionary and story rules',()=>{
+    const first={sourcePremiseId:'P6',plotTags:['字典外标签'],description:'原故事一'};
+    const second={sourcePremiseId:'P2',plotTags:['宫斗'],description:'原故事二'};
+    const rejected:any[]=[];
+    const fixed=applyIsolatedIdeaRepairPatches([first,second],
+      [{dimensionPatch:{plotTags:['字典外标签']}},{description:'对原故事二已经核实的实际条件作局部补正'}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']},{}],
+       dimensionOnlyPositions:[0],metadataOnlyPositions:[0],
+       storyRepairPositions:[1]},
+      (index,error)=>rejected.push({index,reason:String((error as Error).message)}));
+    expect(fixed[0]).toBe(first);
+    expect(fixed[1].description).toBe('对原故事二已经核实的实际条件作局部补正');
+    expect(fixed[1].sourcePremiseId).toBe('P2');
+    expect(rejected).toEqual([{index:0,reason:'标签修复只能修改服务器点名字段并使用本次字典或作者选择的候选'}]);
+    expect(()=>applyIsolatedIdeaRepairPatches([first,second],[{}],{},()=>{})).toThrow('数量不符');
+    // A forbidden manual choice remains forbidden; a legal per-card patch never implies Gate passage.
+    const fixedManual=applyIsolatedIdeaRepairPatches([first],[{dimensionPatch:{plotTags:['逆袭']}}],
+      {dimensionRepairOptions:[{plotTags:['宫斗','逆袭']}],dimensionRepairSelections:[{plotTags:['宫斗']}],
+       dimensionOnlyPositions:[0]},()=>{});
+    expect(fixedManual[0]).toBe(first);
   });
   it('repairs only authorized dictionary fields and rejects invented labels or story edits for dimension-only failures',()=>{
     const original={sourcePremiseId:'P5',storyTone:['温情','热血'],description:'既有完整故事保持不变',ending:'原结局保持不变'};
@@ -80,6 +328,10 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('选择导致的升级—改变胜负条件—兑现及代价');
     expect(contract).toContain('共同条件之外的选择、升级机制和兑现路径仍应分别构思');
     expect(contract).toContain('不默认取pool前几项');
+    expect(contract).toContain('建立能指向责任人的具体比对依据');
+    expect(contract).toContain('已问话不等于已取得回答');
+    expect(contract).toContain('对手获知的途径');
+    expect(contract).toContain('普通直接因果不补无关手续或法律条文');
   });
 
   it('carries the whole causal chain into one-card structuring', () => {
@@ -102,6 +354,93 @@ describe('idea discovery preselection contract', () => {
     expect(result.pool).toHaveLength(5);
     expect(result.selected).toHaveLength(5);
     expect(result.poolTargetMet).toBe(false);
+  });
+
+  it('continues with a qualified partial pool when the search target exceeds the minimum deliverable count', () => {
+    const pool = Array.from({ length: 3 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '成熟候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具有独立选择、升级和兑现路径的轻量题材骨架。',
+    }));
+    const result = normalizePremiseSelectionPayload({
+      pool,
+      selectedPremises: pool.map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3);
+
+    expect(result.pool).toHaveLength(3);
+    expect(result.selected).toHaveLength(3);
+    expect(result.poolTargetMet).toBe(false);
+    expect(() => normalizePremiseSelectionPayload({
+      pool: pool.slice(0, 2),
+      selectedPremises: pool.slice(0, 2).map(item => selectedPremise(item.premiseId)),
+    }, 5, 15, undefined, 3)).toThrow('低于最低可交付数量 3 个');
+  });
+
+  it('allows fixed-pool selection to proceed with one qualified candidate when the broad pool is short', () => {
+    const pool = [1, 2].map(index => ({
+      premiseId: 'P' + index,
+      workingTitle: '候选' + index,
+      storyCore: '这是一个具有独立选择、升级和兑现路径的轻量题材骨架' + index,
+    }));
+    const result = normalizePremiseSelectionPayload({
+      pool,
+      selectedPremises: [selectedPremise('P1')],
+    }, 5, 15, undefined, 1);
+    const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 1);
+
+    expect(result.pool).toHaveLength(2);
+    expect(result.selected).toHaveLength(1);
+    expect(result.poolTargetMet).toBe(false);
+    expect(directive).toContain('只有 1-5 个题材真正满足');
+    expect(directive).toContain('selectedPremises 返回 1-5 项');
+    expect(directive).toContain('绝不为了凑数加入弱项');
+  });
+
+  it('asks the fixed-pool selector for as many mature premises as exist without padding weak candidates', () => {
+    const directive = ideaPremiseSelectionDirective('short_story', 5, 15, false, 3);
+    expect(directive).toContain('只有 3-5 个题材真正满足');
+    expect(directive).toContain('selectedPremises 返回 3-5 项');
+    expect(directive).toContain('绝不为了凑数加入弱项');
+    expect(ideaPremiseSelectionDirective('short_story', 5)).toContain('selectedPremises 返回 恰好 5 项');
+  });
+
+  it('caps only unfunded ranked selections while retaining strict source and quality validation', () => {
+    const pool = Array.from({ length: 9 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具备独立行动、升级和兑现依据的故事骨架。',
+    }));
+    const ranked = pool.map(item => selectedPremise(item.premiseId));
+    const admitted = capRankedPremiseSelections(ranked, 8) as ReturnType<typeof selectedPremise>[];
+    expect(admitted.map(item => item.premiseId)).toEqual(pool.slice(0, 8).map(item => item.premiseId));
+    expect(ranked).toHaveLength(9);
+    expect(normalizePremiseSelectionPayload({pool, selectedPremises: admitted},8,9).selected).toHaveLength(8);
+    expect(() => normalizePremiseSelectionPayload({pool, selectedPremises: ranked},8,9)).toThrow('8-8 个成熟题材');
+    expect(() => capRankedPremiseSelections(ranked,0)).toThrow('选优预算数量无效');
+  });
+
+  it('allows fewer independently selected mature premises without relaxing evidence requirements', () => {
+    const pool = Array.from({ length: 15 }, (_, index) => ({
+      premiseId: 'P' + (index + 1),
+      workingTitle: '候选' + (index + 1),
+      storyCore: '这是第' + (index + 1) + '个具备独立因果路径的轻量题材骨架。',
+    }));
+    const four = pool.slice(0, 4).map(item => selectedPremise(item.premiseId));
+    const result = normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15, undefined, 3);
+    expect(result.selected).toHaveLength(4);
+    expect(result.poolTargetMet).toBe(true);
+
+    const three = normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 3) }, 5, 15, undefined, 3);
+    expect(three.selected).toHaveLength(3);
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four.slice(0, 2) }, 5, 15, undefined, 3))
+      .toThrow('3-5 个成熟题材');
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: four }, 5, 15))
+      .toThrow('5-5 个成熟题材');
+
+    const missingEvidence = four.slice(0, 3).map(item => ({ ...item }));
+    missingEvidence[1] = { ...missingEvidence[1], payoff: '' };
+    expect(() => normalizePremiseSelectionPayload({ pool, selectedPremises: missingEvidence }, 5, 15, undefined, 3))
+      .toThrow('payoff');
   });
 
   it('ignores malformed unselected extras instead of letting one weak pool item zero the whole batch', () => {
@@ -189,7 +528,8 @@ describe('idea discovery preselection contract', () => {
     expect(directive).toContain('候选二');
     expect(directive).not.toContain('P2');
     expect(directive).toContain('不要输出 premiseId、sourcePremiseId');
-    expect(directive).toContain('模型不得自行换身份、补生题材、改写其它题材或使用旧批次');
+    expect(directive).toContain('一次有界轻量候选补足、候选独立复核和完整卡终审');
+    expect(directive).toContain('模型此轮只能忠实结构化当前已锁定身份');
   });
 
   it('binds each one-card response back to the server-owned selected premise identity', () => {
@@ -321,6 +661,14 @@ describe('idea discovery preselection contract', () => {
     expect(contract).toContain('信息差');
     expect(contract).toContain('未解问题');
     expect(contract).toContain('不得按关键词数量或固定信号个数凑 Gate');
+    expect(contract).toContain('不预先讲完最后胜利、处罚和所有证据');
+    expect(contract).toContain('不能把关键行动/选择只藏在 description 里');
+    const fixed=ideaPremiseSelectionDirective('short_story',5,15,false,3,true);
+    expect(fixed).toContain('不得写成“一个某职业的人如何逆袭”');
+    expect(fixed).toContain('不允许提前泄露终局');
+    const structuring=ideaCardStructuringDirective({...selectedPremise('P1'),storyCategory:'男频脑洞'},[]);
+    expect(structuring).toContain('首屏先让已确认的冲突真实发生');
+    expect(structuring).toContain('不在钩子里提前交代整篇的全部胜利');
     expect(contract).not.toContain('内部广泛寻找');
     expect(contract).not.toContain('补足缺少');
   });
@@ -354,6 +702,18 @@ describe('server-owned selected-premise evidence', () => {
     expect(JSON.stringify(card)).not.toContain('protagonistSituation');
   });
 
+  it('preserves server-owned premise authority when an automatic plot tag is removed',()=>{
+    const premise=selectedPremise('P-tag-evidence');
+    const card=bindStructuredIdeaCardToPremise(premise,[{title:'自动标签归位',hook:'已有明确的初始冲突和可验证的真实行动路径。'}]);
+    card.plotTags=['宫斗','模型自造词'] as any;
+    const normalized=retainValidAutomaticPlotTags(card,[],['宫斗','逆袭']);
+    expect(normalized.plotTags).toEqual(['宫斗']);
+    expect(selectedPremiseEvidenceForIdeaCard(normalized)).toEqual(expect.objectContaining({
+      premiseId:'P-tag-evidence',activeChoice:premise.activeChoice
+    }));
+    expect(normalized.sourcePremiseId).toBe('P-tag-evidence');
+    expect(JSON.stringify(normalized)).not.toContain(premise.activeChoice);
+  });
   it('preserves the same server-owned evidence across a bounded local repair clone', () => {
     const premise = selectedPremise('P-repair-evidence');
     const card = bindStructuredIdeaCardToPremise(premise, [{
@@ -397,6 +757,17 @@ describe('category diversity before story-card creation', () => {
   it('retains each selected premise category across a mixed-category batch', () => {
     const value = normalizePremiseSelectionPayload(payload(['悬疑惊悚', '现实生活', '古代言情']), 3, 9, ['悬疑惊悚', '现实生活', '古代言情']);
     expect(value.selected.map(x => x.storyCategory)).toEqual(['悬疑惊悚', '现实生活', '古代言情']);
+  });
+  it('accepts a single-category refill only when the entire independently vetted discovery already crossed categories', () => {
+    const single=payload(['悬疑惊悚','悬疑惊悚']);
+    const options=['悬疑惊悚','现实生活','古代言情'];
+    expect(()=>normalizePremiseSelectionPayload(single,2,6,options,2)).toThrow('全部落在同一分类');
+    expect(()=>normalizePremiseSelectionPayload(single,2,6,options,2,['悬疑惊悚'])).toThrow('全部落在同一分类');
+    const refill=normalizePremiseSelectionPayload(single,2,6,options,2,['古代言情','现实生活']);
+    expect(refill.selected.map(item=>item.storyCategory)).toEqual(['悬疑惊悚','悬疑惊悚']);
+    expect(refill.selected.every(item=>item.premiseId.startsWith('P'))).toBe(true);
+    expect(()=>normalizePremiseSelectionPayload(payload(['不存在的分类','悬疑惊悚']),2,6,options,2,['古代言情']))
+      .toThrow('不在本次平台分类候选');
   });
   it('rejects a batch collapsed into one category when several were explicitly offered', () => {
     expect(() => normalizePremiseSelectionPayload(payload(['悬疑惊悚', '悬疑惊悚']), 2, 6, ['悬疑惊悚', '现实生活'])).toThrow('全部落在同一分类');
@@ -447,4 +818,446 @@ it('packs local repair standards losslessly with per-card facts and all pending 
  expect(data.cards.map((row:any)=>row.gateIssues)).toEqual(targets.map(row=>row.gateIssues));
  expect(data.cards.map((row:any)=>row.card)).toEqual(targets.map(row=>row.card));
  expect(JSON.stringify(targets)).toBe(before);
+});
+
+
+
+it('fixed-pool selection uses the canonical single-output contract without obsolete runtime substitutions', () => {
+ const rule=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+ expect(rule).toContain('服务器已提供固定候选池，共15个轻量胚子');
+ expect(rule).toContain('主角须凭选择取得可感知的关系');
+ expect(rule).toContain('不能只让旁观者获益');
+ expect(rule).toContain('能否排除其它合理解释');
+ expect(rule).toContain('【服务器实际字段与原池分节映射】');
+ expect(rule).toContain('"escalation":["必要条件","反转兑现"]');
+ expect(rule).toContain('不存在necessaryConditions字段');
+ expect(rule).toContain('只输出selectedPremises；');
+ expect(rule).toContain('一次完成全池比较、选择已有身份及这些身份的因果引用索引');
+ expect(rule).toContain('有效索引就直接进入原有独立来源');
+ expect(rule).not.toContain('不装配引用索引');
+ expect(rule).not.toContain('不要返回sourceBindings、causalPlan');
+ expect(rule).toContain('主角在新阻力下要有实际选择');
+ expect(rule).toContain('逐对比较');
+ expect(rule).toContain('必要条件');
+ expect(rule).not.toContain('6. 输出 pool 和 selectedPremises');
+ expect(rule).not.toContain('1. 以 15 个');
+ expect(rule).not.toContain('原池范围和已有调用不增加模型调用');
+ const legacy=ideaPremiseSelectionDirective('short_story',8,15,false,5);
+ expect(legacy).toContain('1. 以 15 个');
+ expect(legacy).toContain('6. 输出 pool 和 selectedPremises');
+});
+
+describe('confirmed story persistence boundary', () => {
+  it('keeps reviewed agreement as agreement when card formatting invents completed registration',()=>{
+    const source={premiseId:'P1',reversalEffect:'办理方暂缓，要求相关人员先协商。',payoff:'丈夫同意加名，主角与家人关系破裂。'};
+    const card=bindStructuredIdeaCardToPremise(source,[{title:'原题材',ending:'名字已回到协议上，后续产权登记也已经写上。',description:'原有协商行动'}]);
+    expect(card.ending).toBe(source.reversalEffect+'\n'+source.payoff);
+    expect(card.description).toBe('原有协商行动');
+    expect(selectedPremiseEvidenceForIdeaCard(card)?.payoff).toBe(source.payoff);
+  });
+  it('keeps the batch discovery audit separate from the canonical selected story without mutating input', () => {
+    const input = {
+      title: '已选题材',
+      sourcePremiseId: 'P2',
+      ideaDiscoveryAudit: {
+        schemaVersion: 8,
+        acceptedEvidence: [{ sourcePremiseId: 'P2', title: '已选题材' }],
+        candidateAssessments: [{ sourcePremiseId: 'P3', passed: false, issues: ['不合格候选'] }],
+      },
+    };
+    const original = structuredClone(input);
+    const result = separateIdeaDiscoveryAudit(input);
+    expect(result.confirmedStory).toEqual({ title: '已选题材', sourcePremiseId: 'P2' });
+    expect(result.ideaDiscoveryAudit).toEqual(original.ideaDiscoveryAudit);
+    expect(input).toEqual(original);
+    expect(JSON.stringify(result.confirmedStory)).not.toContain('candidateAssessments');
+  });
+
+  it('does not invent an audit when the selected story has none', () => {
+    const result = separateIdeaDiscoveryAudit({ title: '自定义题材' });
+    expect(result.confirmedStory).toEqual({ title: '自定义题材' });
+    expect(result.ideaDiscoveryAudit).toBeNull();
+  });
+});
+
+describe('shared original/refill pool factual deduplication',()=>{
+ const sections=(action:string,condition:string,payoff:string)=>
+  '【处境触发】小城同一市场发生争议，普通职员收到一份需要核对的旧材料。'
+  +'【主动选择】'+action
+  +'【必要条件】'+condition
+  +'【反转兑现】'+payoff
+  +'【分类流派机制】普通人必须凭可以核查的真实决定争取结果，承担自己的实际代价。';
+ it('does not discard distinct causal choices under identical headings and genre language',()=>{
+  const bridge=sections(
+   '配送员拒绝签下不实的材料收货单，主动请求工地监理重新核对进场批次。',
+   '监理接受签收资料核验委托，材料单据的日期与批次可以现场对照。',
+   '核验后监理签发暂停验收通知，承包方按合同重新提供材料。');
+  const clinic=sections(
+   '护理员向家属主动展示连续的用药交接记录，请求主治医生核查剂量。',
+   '诊疗记录和交班签名齐全，医生有权复核处方并签署调整建议。',
+   '医生复核后改变用药方案，护理员仍须接受此前交班疏漏的调查。');
+  expect(premiseSeedNearDuplicate(bridge,clinic)).toBe(false);
+ });
+ it('rejects renamed and lightly extended copies only when choice, bridge and payoff recur',()=>{
+  const original=sections(
+   '送货员拒绝签下不实的材料收货单，主动请求工地监理重新核对进场批次。',
+   '监理接受签收资料核验委托，材料单据的日期与批次可以现场对照。',
+   '核验后监理签发暂停验收通知，承包方按合同重新提供材料。');
+  const renamed=original.replace('送货员','司机').replace('小城','县城');
+  expect(premiseSeedNearDuplicate(original,original)).toBe(true);
+  expect(premiseSeedNearDuplicate(original,renamed)).toBe(true);
+  expect(premiseSeedNearDuplicate(original,'缺少五节的摘要')).toBe(false);
+ });
+ it('preserves alternatives with same action but different established conditions or consequences',()=>{
+  const action='店员拒绝收下没有签名的退货单，并要求负责人当面清点库存记录。';
+  const prerequisite='负责人已授权当班核对库存，原始进货单和领用明细均可交叉查验。';
+  const first=sections(action,prerequisite,'库存查明后店铺向顾客退还押金，但店员仍需承担临时停业的损失。');
+  const second=sections(action,'负责人没有授权清点仓库，店员只能公开递交核查申请等待独立审批。','审批未完成，退款仍处于待定状态，店员必须先保护原始证据避免销毁。');
+  expect(premiseSeedNearDuplicate(first,second)).toBe(false);
+ });
+});
+
+describe('candidate seed structural evidence prevents downstream rescue',()=>{
+ it('rejects lengthy freeform synopses with no traceable prerequisite',()=>{
+  expect(premiseSeedFactIssues('发现线索后胜利了。'.repeat(50))).toContain('候选骨架缺少有序的处境触发、主动选择、必要条件、反转兑现、分类流派机制');
+ });
+ it('blocks missing causal bridge even when other sections are present',()=>{
+  const front='【处境触发】某普通职员发现主管隐瞒了影响居民权益的关键材料。【主动选择】职员决定拒绝替主管签字并公开原始记录。';
+  const end='【反转兑现】主管的决定被原始材料推翻，职员却因此失去了原有工作。【分类流派机制】被低估的普通人依靠多年积累的职业技能揭破欺骗并承担代价。';
+  expect(premiseSeedFactIssues(front+'【必要条件】有证据。'+end)).toContain('【必要条件】缺少足以进入选优的实际事件或因果条件');
+  expect(premiseSeedFactIssues(front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end)).toEqual([]);
+  const valid=front+'【必要条件】记录须经过有权核查人员确认并作出书面决定后才产生效果。'+end;
+  expect(premiseSeedFactIssues(valid.replace('【必要条件】','【必要条件】已完成材料查验但尚未取得认可。'+'【必要条件】'))).not.toEqual([]);
+  expect(premiseSeedFactIssues('前缀无来源内容'+valid)).not.toEqual([]);
+  const screened=screenPremisePoolBatch([
+   {workingTitle:'确认过事件的职员',storyCore:valid},null,
+   {workingTitle:'无因果故事',storyCore:'发现一个线索就直接胜利。'},
+  ]);
+  expect(screened).toMatchObject({invalidShape:1,invalidFields:1,invalidNaming:0});
+  expect(screened.candidates).toHaveLength(1);
+  expect(screened.candidates[0].storyCore).toBe(valid);
+  const duplicate='【处境触发】普通人被迫处理一份失去关键证据的旧案。'
+    +'【主动选择】主角实际找到当年的原始记录并决定交给能处理的负责人。'
+    +'【必要条件】主角实际找到当年的原始记录并决定交给能处理的负责人。'
+    +'【反转兑现】负责人在核实原始记录后作出决定并将当事人恢复名誉。'
+    +'【分类流派机制】低估主角的人亲眼看到调查结果和决定的真实改变。';
+  expect(premiseSeedFactIssues(duplicate)).toContain('候选的主动选择、必要条件和反转兑现重复同一段事实，没有不同的因果状态变化');
+  expect(premiseSeedFactIssues(valid)).toEqual([]);
+ });
+});
+
+// Regression from 2026-10-29 real 5/15/5/3 trace: a legitimate preselection
+// surplus is only useful when the original story and its full card both keep
+// the same actor decisions, actual evidence and terminal status.
+describe('source-to-card payoff continuity in the existing selection call',()=>{
+  it('tests opposing actors and provisional results before selecting an apparently mature premise',()=>{
+    const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+    expect(prompt).toContain('对手按已写性格可能采取的拒绝、拖延或反制');
+    expect(prompt).toContain('准备、提议、暂缓、调查等状态不等于最终生效');
+    expect(prompt).toContain('旧事件证据不能自动证明新事件');
+    expect(prompt).toContain('临时条件被撤销后须仍有真实生效的替代条件');
+    expect(prompt).toContain('不同主体的申请、受理、认定和执行分别核查');
+    expect(prompt).toContain('排除自身或同地出现不能自动归责他人');
+    expect(prompt).toContain('知情与配合动机');
+    expect(prompt).toContain('物证取得及传递');
+    expect(prompt).toContain('权限及实际决定');
+    expect(prompt).toContain('必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留');
+  });
+  it('does not upgrade a stopped process or past recording to a new completed outcome during card structuring',()=>{
+    const prompt=ideaCardStructuringDirective(selectedPremise('P1'),[],false);
+    expect(prompt).toContain('暂缓/中止、调查和未来目标');
+    expect(prompt).toContain('对方必然答应');
+    expect(prompt).toContain('任何录音、记录或材料须严格说明它实际证明的是哪一次事件');
+    expect(prompt).toContain('临时拦截被对手绕过后');
+    expect(prompt).toContain('不同机关的调查、受理、认定');
+    expect(prompt).toContain('不能从同款物品或排除自身跳到他人归责');
+  });
+});
+
+
+describe('locked-card title recovery stays inside original quality pipeline',()=>{
+ it('converts only overlong authored card titles and keeps source evidence bound to the returned object',()=>{
+  const premise={...selectedPremise('P5'),workingTitle:'伺候人的手艺，不丢人'};
+  const title='瘫了三年的老人，在我手心写下药苦和秘密';
+  const card=bindStructuredIdeaCardToPremise(premise,[{
+   title,alternateTitles:['老人掌心的秘密'],hook:'第十天老人写下药苦',description:'保洁发现老人换药',
+   scopeBreakdown:[],
+  }]);
+  expect(card.title).toBe('老人掌心的秘密');
+  expect(card.sourcePremiseId).toBe('P5');
+  expect(selectedPremiseEvidenceForIdeaCard(card)).toMatchObject({premiseId:'P5'});
+ });
+});
+
+it('rejects hidden factual fields outside the independent source-review contract',()=>{
+ const seed={premiseId:'P1',workingTitle:'原池真实题材',storyCore:'原池已经写明完整行动、成立条件与实际结果'};
+ for(const field of ['conditions','prerequisites','secretEvidence']){
+  expect(()=>normalizePremiseSelectionPayload({pool:[seed],selectedPremises:[{...selectedPremise('P1'),[field]:'未参与审核的秘密条件'}]},1,1)).toThrow('额外字段');
+ }
+});
+
+it('uses the same causal sequence in identity-only and expanded selection',()=>{
+ for(const fixed of [false,true]){
+  const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,fixed);
+  expect(prompt.includes(PREMISE_CAUSAL_SEQUENCE_DIRECTIVE)).toBe(true);
+  expect(prompt).toContain('每个result只填写该步action及其已成立conditions实际产生的结果');
+ }
+});
+
+describe('single lossless five-section pool contract',()=>{
+ const facts={
+  '处境触发':'村里的桥停工，我运送的材料被扣，家里人还要靠这座桥出行。',
+  '主动选择':'我拿出过去的采购单，请在现场的监理核对材料批次，不依赖突然出现的力量。',
+  '必要条件':'监理已接受现场查验委托，采购单有盖章签收和可以核对的日期。',
+  '反转兑现':'监理现场确认实际批次不合格并签发暂停验收通知，承包方依合同退换了材料。',
+  '分类流派机制':'被轻视的送货司机凭多年留存的清单改变局面，自己也承担运输延误的代价。',
+ };
+ it('materializes literal five-section facts into the only canonical storyCore',()=>{
+  const raw={premiseId:'B2-P1',workingTitle:'送货司机保住了旧桥',storyCategoryId:'K1',storySections:facts};
+  const before=structuredClone(raw),result=screenPremisePoolBatch([raw]);
+  expect(result.invalidFields).toBe(0);expect(result.candidates).toHaveLength(1);
+  expect(result.candidates[0].storyCore).toBe(Object.entries(facts).map(([name,body])=>'【'+name+'】'+body).join('\n'));
+  expect(result.candidates[0]).not.toHaveProperty('storySections');
+  expect(raw).toEqual(before);
+  expect(premiseSeedFactIssues(result.candidates[0].storyCore)).toEqual([]);
+ });
+ it('rejects missing sections, ambiguous extra facts and conflicting alternate stories',()=>{
+  const raw={workingTitle:'送货司机仍保留收据',storySections:facts};
+  const result=screenPremisePoolBatch([
+   {...raw,storySections:{...facts,'必要条件':''}},
+   {...raw,storySections:{...facts,'另一个结局':'未经审核的新事实'}},
+   {...raw,storyCore:'与原章节故事互斥的另一份正文'},
+  ]);
+  expect(result.candidates).toHaveLength(0);expect(result.invalidFields).toBe(3);
+  expect(Object.values(result.invalidFieldReasons).reduce((sum,count)=>sum+count,0)).toBe(3);
+ });
+ it('retains valid legacy storyCore and rejects incomplete old input',()=>{
+  const storyCore=Object.entries(facts).map(([name,body])=>'【'+name+'】'+body).join('\n');
+  const raw={workingTitle:'原来那座桥',storyCore};
+  expect(screenPremisePoolBatch([raw]).candidates).toEqual([raw]);
+  expect(screenPremisePoolBatch([{...raw,storyCore:'只有开头的一段场景'}]).invalidFields).toBe(1);
+ });
+});
+
+describe('automatic plot-tag metadata never discards valid story facts',()=>{
+ const options={storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+  plotTags:['调查','亲情','反击'],pov:['第一人称']};
+ const submission={required:false,options:[] as string[]};
+ const raw={storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],
+  plotTags:['调查','未在字典中的临时标签','调查','反击'],pov:'第一人称'};
+ it('keeps the model selected valid subset without inventing labels or touching source',()=>{
+  const before=structuredClone(raw);
+  const result=freezePremiseCreationChoices(raw,{},options,submission);
+  expect(result.plotTags).toEqual(['调查','反击']);
+  expect(raw).toEqual(before);
+  expect(result.storyTone).toEqual(['紧张']);
+ });
+ it('still blocks wholly invalid or absent automatic tags',()=>{
+  for(const generated of [['无效标签'],[],undefined]){
+   expect(()=>freezePremiseCreationChoices({...raw,plotTags:generated}, {}, options, submission))
+    .toThrow('候选未固定有效创作选项：plotTags');
+  }
+ });
+ it('manual tags are strictly inherited and cannot be altered by model metadata',()=>{
+  const manual={plotTags:['亲情']};
+  expect(freezePremiseCreationChoices({...raw,plotTags:['完全无效']},manual,options,submission).plotTags).toEqual(['亲情']);
+  expect(()=>freezePremiseCreationChoices({...raw,webNovelGenre:['未知类型']},{},options,submission))
+   .toThrow('候选未固定有效创作选项：webNovelGenre');
+ });
+});
+
+describe('shared original and refill pool title envelope before paid model selection',()=>{
+ const seed=(title:string)=>({premiseId:'B1-P1',workingTitle:title,storyCategoryId:'K1',premiseMaturityScore:90,
+   storySections:{
+    '处境触发':'掌柜临时将一笔未核对的欠款写到学徒名下，明天必须交付。',
+    '主动选择':'学徒留下来查明订单的实际签收人，并决定承担追查的代价。',
+    '必要条件':'店铺真实保留两份签收底联，原始签收人愿意在会上出示。',
+    '反转兑现':'学徒查出记录被修改，签收人提供独立原件，掌柜撤回指控。',
+    '分类流派机制':'学徒放弃稳定职位，选择公开证据保护受连累的同事。',
+   }});
+ it('rejects title lengths that the unchanged full-card Gate would reject',()=>{
+  for(const title of ['线索','这个故事标题长度已经超过十六个字仍然不能直接用于平台']){
+   const initial=screenPremisePoolBatch([seed(title)]);
+   const refill=screenPremisePoolBatch([seed(title)]);
+   expect(initial.candidates).toHaveLength(0);
+   expect(refill.candidates).toHaveLength(0);
+   expect(initial.invalidFieldReasons['暂名不在4-16字内或故事正文缺失']).toBe(1);
+   expect(refill.invalidFieldReasons).toEqual(initial.invalidFieldReasons);
+  }
+ });
+ it('retains an actual four-to-sixteen-character premise and never treats self-score as a pass',()=>{
+  const result=screenPremisePoolBatch([seed('学徒替谁背债')]);
+  expect(result.candidates).toHaveLength(1);
+  expect(result.candidates[0].premiseMaturityScore).toBe(90);
+  expect(result.candidates[0].storyCore).toContain('【必要条件】');
+  expect(result.candidates[0].storySections).toBeUndefined();
+ });
+});
+
+describe('bounded pool JSON partial transport recovery never invents weak candidate facts',()=>{
+ const section=(label:string)=>label+'这一条有对应行动与现有权力的真实条件，双方在明确时间内互相阻挡，实际执行后产生不同结果。';
+ const card=(id:string)=>({premiseId:id,workingTitle:'对应机制'+id,storyCategoryId:'K1',storySections:{
+  '处境触发':section('处境触发'),'主动选择':section('主动选择'),
+  '必要条件':section('必要条件'),'反转兑现':section('反转兑现'),
+  '分类流派机制':section('分类流派机制'),
+ },storyTone:['紧张'],writingStyle:['简洁'],webNovelGenre:['悬疑推理'],plotTags:['调查']});
+ it('recovers fully closed first seven seeds from an unfinished eighth seed, without changing the exact originals',()=>{
+  const seven=Array.from({length:7},(_,i)=>card('B1-P'+(i+1)));
+  const raw='{"pool":['+seven.map(row=>JSON.stringify(row)).join(',')+',{"premiseId":"B1-P8","workingTitle":"只生成到';
+  const recovered=recoverClosedPremisePoolObjects(raw);
+  expect(recovered).toEqual(seven);
+  expect(screenPremisePoolBatch(recovered).candidates).toHaveLength(7);
+  expect(recovered.every(row=>row.premiseId!=='B1-P8')).toBe(true);
+ });
+ it('accepts no fabricated entry after an unterminated or malformed first object',()=>{
+  expect(recoverClosedPremisePoolObjects('{"pool":[{"premiseId":"B1-P1"')).toEqual([]);
+  expect(recoverClosedPremisePoolObjects('{"pool":[{"premiseId":,"workingTitle":"x"}]}')).toEqual([]);
+  expect(recoverClosedPremisePoolObjects('{"notPool":[{"premiseId":"x"}]}')).toEqual([]);
+ });
+ it('handles escaped quotes, nested objects and arrays inside independently closed original entries',()=>{
+  const row={...card('B1-P1'),extra:{quote:'她说"不行"，接着行动',facts:['拥有凭证','看见拒绝']}};
+  expect(recoverClosedPremisePoolObjects('{"pool":['+JSON.stringify(row)+',{"premiseId":"B1-P2"')).toEqual([row]);
+ });
+ it('recovers every complete sibling when only the known conditions array wrapper is missing',()=>{
+  const withPlan=(id:string)=>({...card(id),causalPlan:[{
+   action:{field:'主动选择',quote:section('主动选择')},
+   conditions:[{field:'处境触发',quote:section('处境触发')}],
+   result:{field:'反转兑现',quote:section('反转兑现')},
+  }]});
+  const valid=JSON.stringify(withPlan('B1-P1'));
+  // Reproduce the captured transport defect exactly: the `[` before the
+  // conditions object is missing, so the valid array's closing `]` sits
+  // between conditions and result. Story text is untouched.
+  const malformed=Array.from({length:7},(_,i)=>
+   JSON.stringify(withPlan('B1-P'+(i+2))).replace('"conditions":[{','"conditions":{'));
+  const recovered=recoverClosedPremisePoolObjects('{"pool":['+[valid,...malformed].join(',')+']}');
+  expect(recovered.map(row=>row.premiseId)).toEqual(Array.from({length:8},(_,i)=>'B1-P'+(i+1)));
+  expect((recovered[1] as any).causalPlan[0].conditions).toHaveLength(1);
+  expect(screenPremisePoolBatch(recovered).candidates).toHaveLength(8);
+ });
+ it('keeps later complete objects after an unrelated malformed sibling without fabricating the first',()=>{
+  const later=card('B1-P2');
+  const recovered=recoverClosedPremisePoolObjects(
+   '{"pool":[{"premiseId":,"workingTitle":"x"},'+JSON.stringify(later)+']}');
+  expect(recovered.map(row=>row.premiseId)).toEqual(['B1-P2']);
+ });
+});
+
+describe('shared premise transport and preallocated slot validation',()=>{
+ it('decodes a valid fenced batch and preserves the existing prerequisite block',()=>{
+  const row={premiseId:'B1-P1',workingTitle:'独立行动骨架'};
+  const fence=String.fromCharCode(96).repeat(3);
+  const encoded=fence+'json\n'+JSON.stringify({pool:[row]})+'\n'+fence;
+  expect(decodePremisePoolTransport(encoded,'原池').value.pool).toEqual([row]);
+  expect(decodePremisePoolTransport(JSON.stringify({blocked:true,reason:'分类缺失'}),'原池').value.blocked).toBe(true);
+ });
+ it('retains completed sibling entries when a new refill entry corrupts the JSON',()=>{
+  const row={premiseId:'B1-P1',workingTitle:'已完成'};
+  const corrupt='{"pool":['+JSON.stringify(row)+',{"premiseId":'+String.fromCharCode(0);
+  const output=decodePremisePoolTransport(corrupt,'补位');
+  expect(output.value.pool).toEqual([row]);
+  expect(output.partiallyRecovered).toBe(true);
+ });
+ it('rejects missing, fabricated, reused and wrong-category seed IDs in either path',()=>{
+  const slots=[{premiseId:'B1-P1',storyCategoryId:'K1'},{premiseId:'B1-P2',storyCategoryId:'K2'}];
+  const claimed=new Set<string>();
+  expect(claimLockedPremiseSlot({premiseId:'P1',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K2'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P3',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K1'},slots,claimed)).toBe(true);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P1',storyCategoryId:'K1'},slots,claimed)).toBe(false);
+  expect(claimLockedPremiseSlot({premiseId:'B1-P2',storyCategoryId:'K2'},slots,claimed)).toBe(true);
+ });
+});
+
+it('full-card structuring must preserve the original proof material and its actual usability',()=>{
+ const prompt=ideaCardStructuringDirective({premiseId:'P1',workingTitle:'从原始账册当众核对',
+  storyCore:'主角保住原始账册并在有权人员面前核对。'},[],false);
+ expect(prompt).toContain('重要原始证据的可用状态必须跨字段保持一致');
+ expect(prompt).toContain('scopeBreakdown');
+ expect(prompt).toContain('不能在description或scopeBreakdown新增');
+});
+
+it('fixed-pool selection requires evidence for each independent result before paid review',()=>{
+ const prompt=ideaPremiseSelectionDirective('short_story',8,15,false,5,true);
+ expect(prompt).toContain('同一段同时写出证据查明与另行处分');
+ expect(prompt).toContain('证明前者不自动证明后者');
+ expect(prompt).toContain('任何需要补造原池没有的桥梁才能成立的身份必须淘汰');
+ expect(prompt).toContain('只输出selectedPremises');
+});
+
+it('transports the complete pre-vetted premise to final review without duplicating identical source sections',()=>{
+ const sections={
+  '处境触发':'我在市场里被掌柜当成只会搬箱子的学徒，店铺欠款正准备推到我身上。',
+  '主动选择':'我决定保住师傅留下的发票，当着所有采购员核对订单。'.repeat(2),
+  '必要条件':'每份票据由我与库房分别保管，另一份底联确实还在库房手里。'.repeat(2),
+  '反转兑现':'库房拿出已登记的底联，掌柜当众承认自己改过订单。'.repeat(2),
+  '分类流派机制':'我一直隐藏的账目核算能力此刻改变双方选择，掌柜不得不撤回指控。'.repeat(2),
+ };
+ const storyCore=Object.entries(sections).map(([name,value])=>'【'+name+'】'+value).join('\n');
+ const source={...selectedPremise('P-locked-review'),storyCore,workingTitle:'学徒保住了发票',
+  protagonistSituation:sections['处境触发'],openingEvent:sections['处境触发'],
+  activeChoice:sections['主动选择'],
+  escalation:sections['必要条件']+'\n'+sections['反转兑现'],
+  reversalEffect:sections['反转兑现'],payoff:sections['反转兑现'],
+  irreplaceableCarrier:sections['处境触发']+'\n'+sections['分类流派机制'],
+ };
+ const card=bindStructuredIdeaCardToPremise(source,[{title:'他们以为我不懂账',hook:'我在店铺面临当众背锅，唯一的底联却在库房'}]);
+ const before=selectedPremiseEvidenceForIdeaCard(card)!;
+ const projected=presentationLockedPremiseView(card)!;
+ expect(projected.storyCore).toBe(before.storyCore);
+ expect(projected.causalPlan).toEqual(before.causalPlan);
+ expect(projected.activeChoice).toEqual({fromSourceSections:['主动选择']});
+ expect(projected.protagonistSituation).toEqual({fromSourceSections:['处境触发']});
+ expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(before).length*0.9);
+ expect(selectedPremiseEvidenceForIdeaCard(card)).toEqual(before);
+ // The packed prompt is not the server's canonical evidence and cannot add a new fact.
+ expect(JSON.stringify(card)).not.toContain('fromSourceSections');
+});
+
+it('requires a structural payoff bridge to quote its own premise and keeps older pools compatible',()=>{
+ const core='【处境触发】家属签字时老人睁着眼。\n【主动选择】我摊开两周的记录本。\n【必要条件】主治医生有权复测，依据是三次按约眨眼。\n【反转兑现】主治复测后评估单改为存在意识，放弃签字作废。\n【分类流派机制】他们把我当只会擦身子的护工。';
+ // Three verbatim, distinct quotes pass.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toEqual([]);
+ // A fabricated quote, a result standing in for its own cause, or a
+ // missing field must be rejected before paid selection.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'不存在的结论',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'评估单改为存在意识',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{decisiveResult:'评估单改为存在意识'}},core)).toHaveLength(1);
+ // Section placement: a decider quoted only from the trigger section, or a
+ // decisive result quoted from the choice section, is rejected deterministically.
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'评估单改为存在意识',decider:'家属签字时老人睁着眼',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ expect(premisePayoffBridgeIssues({payoffBridge:{
+   decisiveResult:'我摊开两周的记录本',decider:'主治复测后',basis:'三次按约眨眼'}},core)).toHaveLength(1);
+ // Older pools that never authored the field stay with the independent payoff Gate.
+ expect(premisePayoffBridgeIssues({},core)).toEqual([]);
+});
+
+it('losslessly maps Chinese section names in causalPlan fields to English narrative fields',()=>{
+ const item={premiseId:'P1',
+   openingEvent:'触发事件原文足够长',activeChoice:'主角主动行动原文足够长',
+   escalation:'必要条件与反转原文足够长',reversalEffect:'反转结果原文足够长',payoff:'兑现结果原文足够长',
+   causalPlan:[
+     {action:{field:'主动选择',quote:'主角主动行动原文足够长'},
+      conditions:[{field:'处境触发',quote:'触发事件原文足够长'}],
+      result:{field:'必要条件',quote:'必要条件与反转原文足够长'}},
+     {action:{field:'反转兑现',quote:'反转结果原文足够长'},
+      conditions:[{field:'必要条件',quote:'必要条件与反转原文足够长'}],
+      result:{field:'反转兑现',quote:'兑现结果原文足够长'}},
+   ]};
+ // Before: Chinese section names fail the causal-plan validator.
+ expect(premiseCausalPlanIssues(item).length).toBeGreaterThan(0);
+ const normalized=normalizeCausalPlanFieldNames(item);
+ // After: English fields, final result = payoff, plan is valid, story text untouched.
+ expect(premiseCausalPlanIssues(normalized)).toEqual([]);
+ expect(normalized.causalPlan[0].action).toEqual({field:'activeChoice',quote:'主角主动行动原文足够长'});
+ expect(normalized.causalPlan[1].result).toEqual({field:'payoff',quote:'兑现结果原文足够长'});
+ expect(normalized.openingEvent).toBe(item.openingEvent);
+ // Already-English fields are untouched.
+ expect(normalizeCausalPlanFieldNames({causalPlan:[{action:{field:'activeChoice',quote:'x'}}]})).toEqual(
+   {causalPlan:[{action:{field:'activeChoice',quote:'x'},conditions:undefined,result:undefined}]});
 });

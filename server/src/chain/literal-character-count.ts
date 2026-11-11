@@ -31,5 +31,62 @@ export function literalCharacterCountMismatches(content: string) {
     if(!Number.isFinite(declared)||declared===actual)continue;
     findings.push({start,end:start+match[0].length,quote:match[2],declared,actual,evidence:match[0]});
   }
+  // Anaphoric counts ("这四个字", or a paragraph opening with "四个字") point
+  // back to the nearest complete quotation. Direct quotes are owned by the
+  // expression above. Ambiguous windows, quoted speech and mixed scripts are
+  // skipped rather than guessed.
+  const quotedExpression=/([“「『])([^“”「」『』]{1,80})([”」』])/g;
+  const countPhrase=/(?:这|那)([零〇一二两三四五六七八九十\d]{1,3})个字/g;
+  const paragraphOpeningCount=/^[ \t]*([零〇一二两三四五六七八九十\d]{1,3})个字/gm;
+  const isInsideQuote=(index:number):boolean=>{
+    const stack:string[]=[];
+    const prefix=content.slice(0,index);
+    for(let i=0;i<prefix.length;i++){
+      const char=prefix[i];
+      if(char==='\\'){i++;continue;}
+      if(char==='"'){if(stack.at(-1)==='"')stack.pop();else stack.push('"');}
+      else if(pairs[char])stack.push(pairs[char]);else if(stack.at(-1)===char)stack.pop();
+    }
+    return stack.length>0;
+  };
+  const antecedentAt=(index:number):{text:string;start:number;end:number}|null=>{
+    const windowStart=Math.max(0,index-400);
+    const window=content.slice(windowStart,index);
+    const quotes=[...window.matchAll(quotedExpression)]
+      .filter(row=>pairs[row[1]]===row[3])
+      .map(row=>({text:row[2].replace(/[。！？；：，、…\s]+$/,''),start:windowStart+row.index!,end:windowStart+row.index!+row[0].length}))
+      .filter(row=>row.text.length>=2&&/^[㐀-䶿一-鿿]+$/.test(row.text));
+    if(quotes.length!==1)return null;
+    const [quote]=quotes;
+    // The immediate "quote + N个字" form belongs to the direct expression.
+    // A paragraph break means the count is anaphoric, not adjacent.
+    const between=content.slice(quote.end,index);
+    if(index-quote.end<4&&!between.includes('\n')&&between.trim()==='')return null;
+    return quote;
+  };
+  const inspectCount=(raw:string,phraseIndex:number,declaredText:string)=>{
+    const start=phraseIndex;
+    const end=start+raw.length;
+    if(isInsideQuote(start))return;
+    const near=content.slice(Math.max(0,start-8),start);
+    if(/(?:不是|并非|不止|不只|至少|最多|所谓|不到|不足|超过|大约|约为)\s*$/.test(near))return;
+    const antecedent=antecedentAt(start);
+    if(!antecedent)return;
+    const declared=number(declaredText),actual=Array.from(antecedent.text).length;
+    if(!Number.isFinite(declared)||declared===actual)return;
+    // An anaphoric count can point at a sub-phrase inside the quote ("这两个字"
+    // referring to two words of a longer sentence). Only flag a close count
+    // where the quote is at least as long as the claimed count; a shorter
+    // quote is ambiguous and must not become a hardline false positive.
+    if(actual<declared||Math.abs(actual-declared)>2)return;
+    const evidence=`${antecedent.text}……${raw}`;
+    findings.push({start,end,quote:antecedent.text,declared,actual,evidence});
+  };
+  for(const match of content.matchAll(countPhrase)) {
+    inspectCount(match[0],match.index!,match[1]);
+  }
+  for(const match of content.matchAll(paragraphOpeningCount)) {
+    inspectCount(match[1]+'个字',match.index!+match[0].indexOf(match[1]),match[1]);
+  }
   return findings;
 }

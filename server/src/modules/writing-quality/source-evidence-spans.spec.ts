@@ -4,7 +4,10 @@ describe('server-owned result-proof source spans',()=>{
  it('round-trips compact transport without removing sources, roles or original text',()=>{
   const packed=packSourceEvidenceSpans(context);
   const decoded=packed.rows.map(([id,path,spans])=>({id,path,spans:(spans as string[][]).map(([id,text])=>({id,text}))}));
-  expect(decoded).toEqual(sourceEvidenceSpanCatalog(context));
+  const catalog=sourceEvidenceSpanCatalog(context);
+  expect(decoded).toEqual(catalog.map(source=>({id:source.id,path:source.path,spans:source.spans.map(({id,text})=>({id,text}))})));
+  expect(catalog.map(source=>source.id)).toEqual(sourceEvidenceCatalog(context).map(source=>source.id));
+  expect(catalog.every(source=>source.spans.every(span=>span.text.length>0))).toBe(true);
  });
  const rows=[{id:'c',plan_json:JSON.stringify({characterActions:[{action:'他填好账本。',result:'欠款记入账本。'}]})}];
  const context=sourceBoundaryEvidenceContext(JSON.stringify({chapters:[{content:'双方定下按月结清，什么时候方便什么时候给。她点了头。他在账本填入数字，前面标了个欠字。'}]}));

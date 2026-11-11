@@ -211,3 +211,18 @@ describe('compound durations and wall-clock precision',()=>{
  it('still blocks a duration outside minute resolution',()=>{expect(review('4分03秒').issues.join('')).toContain('不满足');});
  it('keeps second-precision clocks strict',()=>{expect(review('2分03秒',true).issues.join('')).toContain('不满足');expect(review('2分00秒',true)).toMatchObject({verified:true,issues:[]});});
 });
+
+it.each([['下午六点一刻',1095],['下午六点三刻',1125],['六点一刻',375],['六点三刻',405],['六点一分',361]])('preserves complete quarter-hour clock precision: %s',(text,minutes)=>{
+ const clock=temporalNumbers(text).clocks[0];
+ expect(clock.original).toBe(text.replace(/^下午/,''));expect(clock.minutes).toBe(minutes);
+});
+
+it('locates year/month/day spans for outline fact review without changing body clock arithmetic',()=>{
+ const spans=temporalNumbers('那五年攒下的底单，最早一张比公证书早一年零两个月；公证书是上个月办的。').calendarSpans.map(span=>span.original);
+ expect(spans).toEqual(expect.arrayContaining(['五年','一年','上个月']));
+ expect(spans.some(span=>span.includes('两个月'))).toBe(true);
+ const catalog=temporalReviewCatalog('倒计时23:59:58。');
+ expect(catalog).toHaveLength(1);
+ expect((catalog[0] as any).calendarSpans).toBeUndefined();
+ expect(catalog[0].countdowns[0].seconds).toBe(86398);
+});

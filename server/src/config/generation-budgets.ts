@@ -1,9 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {resolveDataDir} from './data-dir';
-export const GENERATION_BUDGET_DEFAULTS={reviewGroupingMode:0,structuredOutputTokens:131072,structuredOutputCeiling:393216,sourceMaxPhysicalCalls:12,presentationMaxPhysicalCalls:24,premiseReselectionMaxCalls:12,sourceBatchSize:3,presentationBatchSize:2,complexTimeoutMs:1200000};
+export const GENERATION_BUDGET_DEFAULTS={reviewGroupingMode:0,structuredOutputTokens:131072,structuredOutputCeiling:393216,sourceMaxPhysicalCalls:12,presentationMaxPhysicalCalls:24,premiseReselectionMaxCalls:12,sourceBatchSize:3,presentationBatchSize:2,poolBatchSize:0,complexTimeoutMs:1200000,
+ // Hard wall-clock ceiling for one background project creation. The user
+ // requires creation to be interrupted at 30 minutes; 30 minutes is also the
+ // maximum configurable value, not a soft target.
+ creationMaxWallMs:1800000,
+ // Long novels build the complete volume/world/character framework at creation,
+ // but only this many detailed chapter outlines; the existing rolling outline
+ // path keeps the same lookahead as prose advances. Default 5 keeps first
+ // creation inside the 20-minute target instead of spending it on 20 chapters.
+ creationDetailWindow:5};
 export type GenerationBudgets=typeof GENERATION_BUDGET_DEFAULTS;
-export const GENERATION_BUDGET_RANGES:Record<keyof GenerationBudgets,[number,number]>={reviewGroupingMode:[0,1],structuredOutputTokens:[1024,393216],structuredOutputCeiling:[1024,393216],sourceMaxPhysicalCalls:[1,200],presentationMaxPhysicalCalls:[1,200],premiseReselectionMaxCalls:[1,200],sourceBatchSize:[1,20],presentationBatchSize:[1,20],complexTimeoutMs:[60000,3600000]};
+export const GENERATION_BUDGET_RANGES:Record<keyof GenerationBudgets,[number,number]>={reviewGroupingMode:[0,1],structuredOutputTokens:[1024,393216],structuredOutputCeiling:[1024,393216],sourceMaxPhysicalCalls:[1,200],presentationMaxPhysicalCalls:[1,200],premiseReselectionMaxCalls:[1,200],sourceBatchSize:[1,20],presentationBatchSize:[1,20],poolBatchSize:[0,20],complexTimeoutMs:[60000,3600000],creationMaxWallMs:[300000,1800000],creationDetailWindow:[1,50]};
 export function validateGenerationBudgets(value:unknown):GenerationBudgets{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('生成预算须为配置对象');
  const input=value as Record<string,unknown>,next={...GENERATION_BUDGET_DEFAULTS};
@@ -23,8 +32,17 @@ export function saveGenerationBudgets(value:unknown):GenerationBudgets{
  const next=validateGenerationBudgets({...readGenerationBudgets(),...(value as object)}),file=path.join(resolveDataDir(),'generation-budgets.json');
  fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(next,null,2));fs.renameSync(temp,file);return next;
 }
-/** Official DeepSeek /models lists 393216 output tokens for deepseek-flash. Other models keep their existing configured limit. */
-export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets()){
- if(model!=='deepseek-flash')return {initial:requested,ceiling:32768};
- return {initial:Math.min(settings.structuredOutputCeiling,Math.max(requested,settings.structuredOutputTokens)),ceiling:settings.structuredOutputCeiling};
+/**
+ * Inherited JSON calls use the saved first-round amount and recovery ceiling.
+ * A route default is not an explicit per-task override: treating it as one made
+ * the visible structured settings ineffective and restored the old 32768 cap.
+ * Explicit task limits, ordinary text and other models retain their own budgets.
+ * Transport recovery still consumes the task's existing physical-call allowance.
+ */
+export function generationOutputBounds(model:string,requested:number,settings=readGenerationBudgets(),useStructuredDefaults=false){
+ if(model!=='deepseek-flash')return {initial:requested,ceiling:Math.max(requested,32768)};
+ const initial=Math.min(useStructuredDefaults?Math.max(requested,settings.structuredOutputTokens):requested,settings.structuredOutputCeiling);
+ const ordinaryCeiling=Math.min(settings.structuredOutputCeiling,Math.max(initial,32768));
+ const ceiling=useStructuredDefaults||requested>=settings.structuredOutputTokens?settings.structuredOutputCeiling:ordinaryCeiling;
+ return {initial,ceiling:Math.max(initial,ceiling)};
 }

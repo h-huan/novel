@@ -1,5 +1,10 @@
+import { jsonrepair } from 'jsonrepair';
+import { projectedPremisePromptView, compactRepeatedPremiseText, projectPremiseSourceChoices } from './premise-source-bindings';
+import { retainValidStructuredIdeaTitle } from './discovery-fulfillment';
+import {materializePremiseSourceBindings,PREMISE_SOURCE_SECTIONS,SOURCE_BINDING_EXAMPLE,premiseSourceSections} from './premise-source-bindings';
 import {IDEA_CARD_PROMISE_CLOSURE_POLICY, STORY_PREREQUISITE_POLICY} from '../../shared/src/system-workflow-rules.registry';
-import { assertPremiseCausalPlans, bindPremiseCausalPlan } from './premise-causal-plan';
+import { assertPremiseCausalPlans, bindPremiseCausalPlan, premiseCausalPlanIssues, normalizeCausalPlanFieldNames, PREMISE_CAUSAL_SEQUENCE_DIRECTIVE, PREMISE_SOURCE_REFERENCE_DIRECTIVE } from './premise-causal-plan';
+import { PREMISE_READER_VALUE_POLICY } from '../../shared/src/system-workflow-rules.registry';
 import { applyIdeaScopeAllocation, bindUniqueIdeaScopeAllocation, type IdeaScopeAllocationPlan } from './idea-scope-allocation';
 import { prohibitedFictionNames, applyFictionNamingReplacements } from '../../shared/src/fiction-naming';
 import { bindPremiseCategory } from './premise-category-identity';
@@ -7,6 +12,14 @@ import { FICTION_NAMING_POLICY, IDEA_PRESELECTION_REVIEW_POLICY } from '../../sh
 export type IdeaStoryType = 'short_story' | 'long_novel';
 
 export class PremiseNamingError extends Error {}
+
+/** Select enough independent screening candidates for this request, with a
+ * bounded surplus; all successfully reviewed candidates enter full-card work. */
+export function ideaPreselectionCapacity(requestedCount:number,availableCount:number):number {
+  if(!Number.isInteger(requestedCount)||requestedCount<1)throw Error('题材数量必须为正整数');
+  if(!Number.isInteger(availableCount)||availableCount<0)throw Error('候选池数量无效');
+  return Math.min(availableCount,requestedCount+Math.min(3,Math.max(1,Math.ceil(requestedCount/2))));
+}
 
 /** Current rejection and attempt history are different views. Never report a
  * fixed initial defect as the reason the latest candidate is still blocked. */
@@ -52,6 +65,15 @@ export function selectedPremiseEvidenceForIdeaCard(value: unknown): Record<strin
   return evidence ? structuredClone(evidence) : null;
 }
 
+/** Lossless final-review transport only. The original server-owned premise
+ * remains untouched in the WeakMap and is still consumed by every semantic
+ * validation. Exact source-section and repeated-field references are
+ * restored from the complete storyCore / prior field in the SAME premise. */
+export function presentationLockedPremiseView(card: unknown): Record<string, unknown> | null {
+  const original=selectedPremiseEvidenceForIdeaCard(card);
+  return original ? projectedPremisePromptView(original) : null;
+}
+
 export const SELECTED_PREMISE_FIELDS = [
   'protagonistSituation',
   'openingEvent',
@@ -90,15 +112,391 @@ export function confirmedIdeaStoryCard(idea: Record<string, any>): Record<string
   };
 }
 
+export function separateIdeaDiscoveryAudit(idea: Record<string, any>): {
+  confirmedStory: Record<string, any>;
+  ideaDiscoveryAudit: Record<string, any> | null;
+} {
+  const confirmedStory = structuredClone(idea);
+  const audit = confirmedStory.ideaDiscoveryAudit;
+  delete confirmedStory.ideaDiscoveryAudit;
+  return {
+    confirmedStory,
+    ideaDiscoveryAudit: audit && typeof audit === 'object' && !Array.isArray(audit) ? audit : null,
+  };
+}
+
+
+/** The source pool must contain the real causal and category facts needed to
+ * shortlist a story. This is a structural gate; semantic review is unchanged. */
+export const PREMISE_SEED_FACT_LABELS = PREMISE_SOURCE_SECTIONS;
+export function premiseSeedFactIssues(storyCore: unknown): string[] {
+  const raw = typeof storyCore === 'string' ? storyCore.trim() : '';
+  // Use the SAME lossless five-section parser as indexedPremiseSourcePool.
+  // Counting first occurrences alone accepted repeated/misordered headers;
+  // the later sourceRef codec rejected them only after a paid selection call.
+  let sections: ReturnType<typeof premiseSourceSections>;
+  try { sections = premiseSourceSections({storyCore:raw}); }
+  catch { return ['候选骨架缺少有序的处境触发、主动选择、必要条件、反转兑现、分类流派机制']; }
+  const issues: string[] = [];
+  for (const section of sections) {
+    if (section.text.replace(/[，。；：、！!？?\s]/g,'').length < 12)
+      issues.push('【'+section.name+'】缺少足以进入选优的实际事件或因果条件');
+  }
+  // Source provenance and a real causal progression are different claims.
+  // Catch only a literal duplicate of the action, prerequisite or outcome
+  // section; ambiguous semantic validity remains with the existing reviewer.
+  const stateSections=sections.filter(section=>['主动选择','必要条件','反转兑现'].includes(section.name));
+  const normalized=stateSections.map(section=>section.text.replace(/[，,。；;：、！!？?\s]/g,''));
+  if(new Set(normalized).size!==normalized.length)
+    issues.push('候选的主动选择、必要条件和反转兑现重复同一段事实，没有不同的因果状态变化');
+  return issues;
+}
+
+/** Structural payoff bridge check. When a pool item supplies `payoffBridge`,
+ * its decisiveResult/decider/basis must each be VERBATIM text of THIS premise's
+ * storyCore and must not be the same quote. A fabricated bridge (quotes that do
+ * not exist, or a result standing in for its own cause) is rejected
+ * deterministically before paid selection. A missing bridge stays with the
+ * existing independent payoff Gate, so older pools without the field do not
+ * fail closed. This never judges whether the bridge is causally sufficient. */
+export function premisePayoffBridgeIssues(raw: Record<string, unknown>, storyCore: string): string[] {
+  const bridge = raw.payoffBridge;
+  if (bridge === undefined || bridge === null) return [];
+  if (typeof bridge !== 'object' || Array.isArray(bridge)) return ['兑现桥接结构无效'];
+  const row = bridge as Record<string, unknown>;
+  const values = ['decisiveResult', 'decider', 'basis']
+    .map(field => typeof row[field] === 'string' ? String(row[field]).trim() : '');
+  if (values.some(value => value.length < 2)) return ['兑现桥接缺少结果、决定者或依据原文'];
+  if (new Set(values).size !== values.length) return ['兑现桥接的结果、决定者与依据不能是同一句'];
+  if (values.some(value => !storyCore.includes(value))) return ['兑现桥接引文不在本题材原文中'];
+  // Deterministic section placement: the decisive result must be stated in the
+  // reversal/payoff section, and the decider/basis must sit in the necessary
+  // conditions or the reversal section — not merely in the trigger or choice
+  // sections. This is a machine-checkable placement rule, never a semantic
+  // sufficiency judgment. A premise that fails only this placement check is
+  // still rejected before paid selection.
+  let sections: ReturnType<typeof premiseSourceSections>;
+  try { sections = premiseSourceSections({ storyCore }); } catch { return []; }
+  const byName = new Map(sections.map(section => [section.name, section.text] as const));
+  const reversal = byName.get('反转兑现') || '';
+  const necessary = byName.get('必要条件') || '';
+  if (!reversal.includes(values[0])) return ['兑现桥接的决定性结果必须出自反转兑现阶段'];
+  const inNecessaryOrReversal = (quote: string) => necessary.includes(quote) || reversal.includes(quote);
+  if (!inNecessaryOrReversal(values[1])) return ['兑现桥接的决定者必须出自必要条件或反转兑现阶段'];
+  if (!inNecessaryOrReversal(values[2])) return ['兑现桥接的采纳依据必须出自必要条件或反转兑现阶段'];
+  return [];
+}
+
+/** Initial and refill candidate pools share this bounded factual deduplication.
+ * A common five-section format, genre or setting alone is NOT the same
+ * causal story. Compare only the written action, established prerequisites and
+ * realized outcome; the later independent semantic overlap Gate stays intact.
+ * Incomplete source text never earns a deduplication judgment here. */
+export function premiseSeedNearDuplicate(left:unknown,right:unknown):boolean{
+ const decode=(value:unknown)=>{
+   try{return new Map(premiseSourceSections({storyCore:String(value??'')})
+     .map(section=>[section.name,section.text] as const));}
+   catch{return null;}
+ };
+ const first=decode(left),second=decode(right);
+ if(!first||!second)return false;
+ const grams=(value:string)=>{
+   const text=value.toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu,'');
+   const tokens=new Set<string>();
+   for(let i=0;i<text.length-1;i++)tokens.add(text.slice(i,i+2));
+   return tokens;
+ };
+ const overlap=(name:string)=>{
+   const a=grams(first.get(name)||''),b=grams(second.get(name)||'');
+   if(!a.size||!b.size)return 0;
+   let shared=0;for(const token of a)if(b.has(token))shared++;
+   return shared/Math.min(a.size,b.size);
+ };
+ const scores=['主动选择','必要条件','反转兑现'].map(overlap);
+ // All three causal transitions must be substantially shared. A shared
+ // opening, section label or genre cannot evict a different decisive path.
+ return scores.every(score=>score>=0.65)
+   &&scores.reduce((total,score)=>total+score,0)/scores.length>=0.76;
+}
+
+/** Only literal authored sections become one canonical storyCore. Missing,
+ * conflicting or malformed sections are rejected by the same structural Gate.
+ * The transient JSON envelope is never saved or used as parallel story facts. */
+export function materializePremiseSeedSections(raw:Record<string,unknown>):Record<string,unknown>|null{
+ if(raw.storySections===undefined)return raw;
+ const source=raw.storySections;
+ if(!source||typeof source!=='object'||Array.isArray(source))return null;
+ const sections=source as Record<string,unknown>;
+ if(Object.keys(sections).length!==PREMISE_SOURCE_SECTIONS.length
+  ||Object.keys(sections).some(name=>!PREMISE_SOURCE_SECTIONS.includes(name as typeof PREMISE_SOURCE_SECTIONS[number])))return null;
+ const parts=PREMISE_SOURCE_SECTIONS.map(name=>sections[name]);
+ if(parts.some(part=>typeof part!=='string'||!part.trim()
+  ||/【(?:处境触发|主动选择|必要条件|反转兑现|分类流派机制)】/.test(part)))return null;
+ const storyCore=PREMISE_SOURCE_SECTIONS.map((name,i)=>'【'+name+'】'+(parts[i] as string).trim()).join('\n');
+ if(raw.storyCore!==undefined&&raw.storyCore!==storyCore)return null;
+ const {storySections:_transient,...candidate}=raw;
+ return {...candidate,storyCore};
+}
+
+/** Restore ONLY the missing array wrapper around a closed `conditions` value.
+ * Some pool batches emit every causal step after the first as:
+ *   "conditions":{"field":...}],"result":{"field":...}
+ * instead of:
+ *   "conditions":[{"field":...}],"result":{"field":...}
+ * The missing `[` is the only structural difference. Story text, quotes,
+ * field names and verdicts are untouched; anything else remains invalid.
+ * This is transport recovery, not a generated candidate. */
+function restoreClosedConditionsArray(raw:string):string {
+ let out='', index=0;
+ const key='"conditions"';
+ while(index<raw.length){
+  const at=raw.indexOf(key,index);
+  if(at<0){out+=raw.slice(index);break;}
+  out+=raw.slice(index,at+key.length);
+  let cursor=at+key.length;
+  const copySpaces=()=>{while(cursor<raw.length&&/\s/.test(raw[cursor])){out+=raw[cursor];cursor+=1;}};
+  copySpaces();
+  if(raw[cursor]!==':'){out+=raw[cursor]??'';index=cursor+1;continue;}
+  out+=':';cursor+=1;copySpaces();
+  if(raw[cursor]!=='{'){out+=raw[cursor]??'';index=cursor+1;continue;}
+  let depth=0,inString=false,escaped=false,close=-1;
+  for(let probe=cursor;probe<raw.length;probe+=1){
+   const char=raw[probe];
+   if(inString){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')inString=false;continue;}
+   if(char==='"'){inString=true;continue;}
+   if(char==='{')depth+=1;
+   else if(char==='}'){depth-=1;if(depth===0){close=probe;break;}}
+  }
+  if(close<0){out+=raw.slice(cursor);break;}
+  let after=close+1;
+  while(after<raw.length&&/\s/.test(raw[after]))after+=1;
+  if(raw[after]===']'){
+   let comma=after+1;
+   while(comma<raw.length&&/\s/.test(raw[comma]))comma+=1;
+   if(raw[comma]===','){
+    let result=comma+1;
+    while(result<raw.length&&/\s/.test(raw[result]))result+=1;
+    if(raw.startsWith('"result"',result)){
+     out+='['+raw.slice(cursor,close+1)+']';
+     index=after+1; // Consume the misplaced closing bracket.
+     continue;
+    }
+   }
+  }
+  out+=raw.slice(cursor,close+1);
+  index=close+1;
+ }
+ return out;
+}
+function parseRecoveredPoolObject(raw:string):Record<string,unknown>|null {
+ try{
+  const value=JSON.parse(raw);
+  return value&&typeof value==='object'&&!Array.isArray(value)?value:null;
+ }catch{}
+ try{
+  const value=JSON.parse(restoreClosedConditionsArray(raw));
+  return value&&typeof value==='object'&&!Array.isArray(value)?value:null;
+ }catch{return null;}
+}
+/** Recover only complete JSON objects already closed inside a truncated
+ * pool array. A JSON syntax/truncation failure must not erase seven genuinely
+ * generated candidates because the eighth object was cut off. Never invent a
+ * missing candidate entry or autoclose an unfinished candidate; the only
+ * structural repair is restoring a known array wrapper around an already
+ * closed, authored value. Recovered content still passes the unchanged
+ * structural and semantic quality Gates. The caller reports the partial
+ * transport separately in its batch audit. */
+export function recoverClosedPremisePoolObjects(raw:unknown):Record<string,unknown>[] {
+ if(typeof raw!=='string'||!raw.trim())return [];
+ const header=/"pool"\s*:\s*\[/.exec(raw);
+ if(!header)return [];
+ const result:Record<string,unknown>[]=[];
+ let start=-1,depth=0,inString=false,escapeNext=false,expectEntry=true;
+ for(let i=header.index+header[0].length;i<raw.length;i++){
+  const char=raw[i];
+  if(inString){
+   if(escapeNext)escapeNext=false;
+   else if(char==='\\')escapeNext=true;
+   else if(char==='"')inString=false;
+   continue;
+  }
+  if(char==='"'){if(depth)inString=true;else return result;continue;}
+  if(depth===0){
+   if(/\s/.test(char))continue;
+   if(char===']')return result;
+   if(char===','){if(expectEntry)return result;expectEntry=true;continue;}
+   if(char!=='{'||!expectEntry)return result;
+   start=i;depth=1;expectEntry=false;continue;
+  }
+  if(char==='{')depth++;
+  else if(char==='}'){
+   depth--;
+   if(depth===0){
+    // A malformed sibling must not discard later independently closed
+    // candidates. Only this object is skipped; the next object boundary is
+    // still scanned with the same brace/string state machine.
+    const value=parseRecoveredPoolObject(raw.slice(start,i+1));
+    if(value)result.push(value);
+    start=-1;
+   }
+  }
+ }
+ return result;
+}
+
+/** Original and refill pool transport share one recovery boundary. This only
+ * rescues fully closed authored JSON objects; all existing Gates still run. */
+export function decodePremisePoolTransport(content:unknown,label:string):{value:any;partiallyRecovered:boolean}{
+ const normalized=String(content||'').trim().replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/i,'');
+ try{return {value:JSON.parse(normalized||'{}'),partiallyRecovered:false};}catch{}
+ // jsonrepair can auto-close a half-written eighth object, turning model
+ // truncation into an invented "candidate". Only original CLOSED objects
+ // can be recovered from a pool transport. Other status envelopes retain
+ // the legacy repair compatibility.
+ const complete=recoverClosedPremisePoolObjects(normalized);
+ if(complete.length)return {value:{pool:complete},partiallyRecovered:true};
+ if(/"pool"\s*:\s*\[/.test(normalized))
+  throw new Error(label+'候选JSON不完整，没有可独立解析的完整候选条目。');
+ try{return {value:JSON.parse(jsonrepair(normalized||'{}')),partiallyRecovered:false};}
+ catch{throw new Error(label+'未返回合法JSON，且没有可独立解析的完整候选条目。');}
+}
+
+/** The server must verify every model candidate against its preallocated
+ * identity and category, including refill candidates. No silent renumbering. */
+export function claimLockedPremiseSlot(candidate:Record<string,unknown>,slots:readonly {premiseId:string;storyCategoryId:string}[],claimed:Set<string>):boolean{
+ const id=candidate?.premiseId,category=candidate?.storyCategoryId;
+ if(typeof id!=='string'||typeof category!=='string'||claimed.has(id)
+  ||!slots.some(slot=>slot.premiseId===id&&slot.storyCategoryId===category))return false;
+ claimed.add(id);return true;
+}
+
+/** Deterministic screening runs as soon as each provider batch returns.
+ * It is not a semantic review or generator self-score; all later Gates remain. */
+export function screenPremisePoolBatch(rawCandidates: readonly unknown[]): {
+ candidates: Record<string,unknown>[]; invalidShape:number; invalidFields:number; invalidNaming:number;
+ invalidFieldReasons: Record<string,number>;
+} {
+ const candidates:Record<string,unknown>[]=[],invalidFieldReasons:Record<string,number>={};
+ let invalidShape=0,invalidFields=0,invalidNaming=0;
+ const reject=(reason:string)=>{invalidFields++;invalidFieldReasons[reason]=(invalidFieldReasons[reason]||0)+1;};
+ for(const raw of rawCandidates){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)){invalidShape++;continue;}
+  const materialized=materializePremiseSeedSections(raw as Record<string,unknown>);
+  if(!materialized){reject('五节原文不完整或与另一版本冲突');continue;}
+  // Lossless transport: map Chinese section names to the English narrative
+  // fields the causal-plan schema requires, so the deterministic selection and
+  // the payoff review never reject a correct plan purely for field-name language.
+  const item=normalizeCausalPlanFieldNames(materialized);
+  const title=String(item.workingTitle||'').trim(),core=String(item.storyCore||'').trim();
+  const normalize=(v:string)=>v.replace(/[《》「」]/g,'').replace(/[，、,\s]/g,'').trim().toLowerCase();
+  // Share the SAME visible-title envelope as the final card Gate. Before
+  // this check, two-character seeds could consume paid selection and full-card
+  // work despite being unable to meet the author's 4-16-character title rule.
+  // Semantic click-worthiness still belongs to the independent reader Gate.
+  const compactTitle=normalize(title);
+  if(compactTitle.length<4||compactTitle.length>16||core.length<20||!normalize(core)){
+   reject('暂名不在4-16字内或故事正文缺失');continue;
+  }
+  const issues=premiseSeedFactIssues(core);
+  if(issues.length){reject(issues[0]);continue;}
+  const bridgeIssues=premisePayoffBridgeIssues(raw as Record<string,unknown>,core);
+  if(bridgeIssues.length){reject(bridgeIssues[0]);continue;}
+  if(prohibitedFictionNames({workingTitle:title,storyCore:core}).length){invalidNaming++;continue;}
+  candidates.push(item);
+ }
+ return {candidates,invalidShape,invalidFields,invalidNaming,invalidFieldReasons};
+}
+
 /**
- * 题材池的“广搜数量”只用于提高搜索覆盖，不是质量 Gate。
- * 未被选中的轻量胚子只需最小骨架；只有最终选中的 requestedCount 项需要完整筛选证据。
+ * 广搜候选数量只改善搜索覆盖，不能当成质量 Gate。
+ * 未选中的轻量胚子保留最小事实骨架；独立筛选通过的整组预选项
+ * （允许超过用户交付数）都须保留完整来源/因果证据并进入并发成卡，
+ * 最终交付数量只在完整卡审核之后截取。
  */
+/** The LLM may return more ranked IDs than the already-funded review slots.
+ * Bound transport only; admitted IDs still pass the unchanged identity,
+ * evidence, source, overlap and final-card review gates. */
+export function capRankedPremiseSelections(rows:unknown,limit:number):unknown {
+  if(!Number.isSafeInteger(limit)||limit<1)throw Error('选优预算数量无效');
+  return Array.isArray(rows)?rows.slice(0,limit):rows;
+}
+
+/** Read only a bounded, source-supplied candidate-generation score. Never infer
+ * a missing grade from story length, title punctuation or arbitrary keywords. */
+export function readPremiseMaturityScore(raw:unknown):number|null{
+ const value=typeof raw==='number'?raw:(typeof raw==='string'&&/^\d{1,3}$/.test(raw.trim())?Number(raw.trim()):NaN);
+ return Number.isInteger(value)&&value>=0&&value<=100?value:null;
+}
+
+/** Preserve immutable premise IDs while ranking the original pool by the scores
+ * produced IN the existing candidate-generation calls. Scores decide screening
+ * priority only: independently evidenced causal, category and appeal Gates
+ * retain full authority. Missing legacy scores sort last without rejection. */
+export function rankPremisePoolByMaturityScore<T extends { premiseId?: unknown }>(
+  pool: readonly T[], scores: ReadonlyMap<string,number>,
+): T[] {
+  return pool.map((candidate,index)=>({candidate,index,score:scores.get(String(candidate.premiseId||''))}))
+    .sort((left,right)=>(right.score??-1)-(left.score??-1)||left.index-right.index)
+    .map(row=>row.candidate);
+}
+
+/** Reuse causal references AUTHORED with the scored source pool.
+ * This is only an alternate transport into the SAME normalizer and independent
+ * source/payoff/category/genre/overlap/final-card Gates. A missing, ambiguous,
+ * unbound or undersupplied source plan falls back to the existing model
+ * selector; a model self-score is never treated as a quality verdict. */
+export function sourceReadyScoredPremiseSelection(
+  pool: readonly Record<string, unknown>[],
+  scores: ReadonlyMap<string, number>,
+  target: number,
+  poolTarget: number,
+  categoryOptions?: readonly string[],
+  previouslyVettedCategories: readonly string[] = [],
+): PremiseSelectionResult | null {
+  if (!Number.isSafeInteger(target) || target < 1 || pool.length < target
+    || !Number.isSafeInteger(poolTarget) || poolTarget < target) return null;
+  const ranked=rankPremisePoolByMaturityScore(pool,scores);
+  const ready: Array<{ row: Record<string,unknown>; category: string }>=[];
+  for (const seed of ranked) {
+    const id=String(seed.premiseId||'');
+    const question=typeof seed.readerQuestion==='string'?seed.readerQuestion.trim():'';
+    if (!scores.has(id) || question.length<8 || !Array.isArray(seed.causalPlan) || !seed.causalPlan.length) continue;
+    const row={premiseId:id,storyCategoryId:seed.storyCategoryId,
+      readerQuestion:question,causalPlan:structuredClone(seed.causalPlan)};
+    try {
+      const projected=projectPremiseSourceChoices([row],pool);
+      const sample=normalizePremiseSelectionPayload({pool,selectedPremises:projected},
+        1,poolTarget,categoryOptions,1);
+      if(sample.selected.length===1 && premiseCausalPlanIssues(sample.selected[0]).length===0)
+        ready.push({row,category:String(sample.selected[0].storyCategory||'')});
+    } catch { /* No semantic relaxation: the existing selector handles this pool. */ }
+  }
+  if(ready.length<target)return null;
+  const chosen=ready.slice(0,target);
+  // A mixed-category batch retains its original diversity contract. Swap
+  // only the lowest-ranked already selected seed; do not rewrite any label.
+  if(target>1 && categoryOptions && new Set(categoryOptions).size>1
+    && new Set([...previouslyVettedCategories,...chosen.map(item=>item.category)]).size<2){
+    const alternative=ready.slice(target).find(item=>item.category!==chosen[0].category);
+    if(!alternative)return null;
+    chosen[chosen.length-1]=alternative;
+  }
+  try {
+    return normalizePremiseSelectionPayload({
+      pool,selectedPremises:projectPremiseSourceChoices(chosen.map(item=>item.row),pool),
+    },target,poolTarget,categoryOptions,target,previouslyVettedCategories);
+  } catch { return null; }
+}
+
 export function normalizePremiseSelectionPayload(
   payload: unknown,
   requestedCount: number,
   poolTarget: number,
   categoryOptions?: readonly string[],
+  minimumSelectedCount = requestedCount,
+  // Only a supplemental selection may supply already independently vetted first-wave categories.
+  // Cross-category exploration is a property of the WHOLE discovery request, not each refill shard.
+  previouslyVettedCategories: readonly string[] = [],
 ): PremiseSelectionResult {
   if (!Number.isInteger(requestedCount) || requestedCount <= 0) {
     throw new Error('创建前题材筛选的目标数量无效。');
@@ -112,6 +510,7 @@ export function normalizePremiseSelectionPayload(
   }
   const rawPool = Array.isArray(source.pool) ? source.pool : [];
   const rawSelected = Array.isArray(source.selectedPremises) ? source.selectedPremises : [];
+  const minimumCount = Math.min(requestedCount, Math.max(1, Number.isInteger(minimumSelectedCount) ? minimumSelectedCount : requestedCount));
 
   // 未选中的池只保留最小骨架；单个额外候选写坏不能拖死已经选中的成熟题材。
   const pool: Array<Record<string, unknown>> = [];
@@ -131,11 +530,11 @@ export function normalizePremiseSelectionPayload(
     byId.set(premiseId, normalized);
   }
 
-  if (pool.length < requestedCount) {
-    throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，少于本次需要的 ${requestedCount} 个；系统不会用弱题材补数。`);
+  if (pool.length < minimumCount) {
+    throw new Error(`创建前题材筛选只有 ${pool.length} 个有效轻量题材胚子，低于最低可交付数量 ${minimumCount} 个；系统不会用弱题材补数。`);
   }
-  if (rawSelected.length !== requestedCount) {
-    throw new Error(`创建前题材筛选必须明确选出 ${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。`);
+  if (rawSelected.length < minimumCount || rawSelected.length > requestedCount) {
+    throw new Error(`创建前题材筛选须选出 ${minimumCount}-${requestedCount} 个成熟题材；当前选择数量为 ${rawSelected.length}。少于最低数量不能进入完整卡生成，超过请求数量也不能混入本批。`);
   }
 
   const selectedIds = new Set<string>();
@@ -143,7 +542,11 @@ export function normalizePremiseSelectionPayload(
     if (!raw || typeof raw !== 'object') {
       throw new Error(`创建前题材筛选的第 ${index + 1} 个已选题材缺少结构化证据。`);
     }
-    const item = bindPremiseCategory(raw as Record<string, unknown>, categoryOptions);
+    const projected=materializePremiseSourceBindings(raw,byId.get(String((raw as any).premiseId||'').trim()));
+    const item = bindPremiseCategory(projected as Record<string, unknown>, categoryOptions);
+    const allowedFields=new Set<string>([...SELECTED_PREMISE_FIELDS,'premiseId','storyCategoryId','storyCategory','workingTitle','storyCore','causalPlan','storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags']);
+    const unknownFields=Object.keys(item).filter(field=>!allowedFields.has(field));
+    if(unknownFields.length)throw new Error('已选题材包含未纳入独立来源审核的额外字段：'+unknownFields.join('、')+'；必要条件须写入既有故事字段，不能另造conditions等字段绕过审核。');
     const premiseId = String(item.premiseId || '').trim();
     if (!premiseId || selectedIds.has(premiseId)) {
       throw new Error('创建前题材筛选返回了空或重复的已选 premiseId。');
@@ -173,6 +576,7 @@ export function normalizePremiseSelectionPayload(
     return bindPremiseCausalPlan({
       ...poolItem,
       ...item,
+      ...Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>poolItem[field]!==undefined).map(field=>[field,structuredClone(poolItem[field])])),
       premiseId,
       workingTitle: String(poolItem.workingTitle).trim(),
       storyCore: String(poolItem.storyCore).trim(),
@@ -181,7 +585,7 @@ export function normalizePremiseSelectionPayload(
   });
 
   if (requestedCount > 1 && categoryOptions && new Set(categoryOptions).size > 1
-    && new Set(selected.map(item => item.storyCategory)).size < 2) {
+    && new Set([...previouslyVettedCategories, ...selected.map(item => item.storyCategory)]).size < 2) {
     throw new Error('未预选分类的发现批次全部落在同一分类，未执行跨分类题材探索；不创建同分类的整批故事卡。');
   }
 
@@ -202,51 +606,106 @@ export function ideaPremiseSelectionDirective(
   requestedCount: number,
   poolSize = Math.max(requestedCount * 3, requestedCount + 5),
   includeSharedPolicy = true,
+  minimumSelectedCount = requestedCount,
+  fixedPoolSelection = false,
 ): string {
+  const minimumCount = Math.min(requestedCount, Math.max(1, Number.isInteger(minimumSelectedCount) ? minimumSelectedCount : requestedCount));
+  const selectedCountText = minimumCount < requestedCount ? `${minimumCount}-${requestedCount}` : `恰好 ${requestedCount}`;
+  const selectionQuantityRule = minimumCount < requestedCount
+    ? `先尽可能从轻量胚子池中选出 ${requestedCount} 个成熟题材；若经过比较只有 ${selectedCountText} 个题材真正满足全部因果、差异、平台和作者条件，则只返回实际合格项，绝不为了凑数加入弱项。`
+    : `必须从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。`;
+  // Fixed-pool selection is a separate transport contract, not a regex
+  // patch over the default generation prompt. An old string replacement could
+  // silently stop matching when the canonical directive changed, leaving a
+  // contradictory instruction to generate a second pool.
+  const fixedPoolRule = '服务器已提供固定候选池，共'+poolSize+'个轻量胚子，只能选原身份和原事实，不补造新故事。筛选时先为每项填内部可证链：主角在新阻力下要有实际选择；主角主动操作→对手的真实反应→具体升级/选择→反转改变的可行局面→已实现的回报与代价；只有“职业被看轻、展示本领、众人改口”而无独特对手反制和连续得失的，优先淘汰。逐字交叉核对原池行动范围、同一人物、能力/机关作用边界、数量与时序：只操作四户不能宣称三十六户有效，复制件与原件不能无规则地有不同反应，说过的话不能再次当成尚未出口。还须核对物证取得及传递、证明范围与责任归属、知情与配合动机、权限及实际决定；旧事件证据不能自动证明新事件；临时条件被撤销后须仍有真实生效的替代条件，不同主体的申请、受理、认定和执行分别核查，排除自身或同地出现不能自动归责他人；机构或合同的真实决定者与依据；准备、提议、暂缓、调查等状态不等于最终生效；请求、调查、暂缓不等于中标、授权、处罚或权利生效。每项兑现都必须有对应前置行动和可排除反事实的条件；同一段同时写出证据查明与另行处分、升职、退亲、发放资格或财产转移时，必须分别反证后者的有权决定者、采纳依据与实际执行；证明前者不自动证明后者，未建立者不可入选。任何需要补造原池没有的桥梁才能成立的身份必须淘汰；普通直接因果不额外强加机构或手续。对手按已写性格可能采取的拒绝、拖延或反制须有真实应对；对手有既定能力与利益，不能为主角胜出突然失智或放弃反制。逐对比较人物欲望、策略、对手反制、局势变化及不可逆代价，分类/职业/道具差异及作者选定流派共性不能当独创证据。优先选择能在开篇呈现现实损失、关系压力或意外选择，且中段每次行动都改变选项或代价；配角轮流解释旧资料不算推进的成熟故事；读者记忆点必须来自实际发生的事，不接受自评新颖或完整字段冒充吸引力。只返回固定身份与既有因果索引，不增加选题或调用，不改分类、原文、结果。';
   const storyTypeRule = storyType === 'short_story'
     ? '短篇必须能在有限篇幅内形成单线闭环和明确兑现；反转少而重，不能靠不断加设定续命。'
     : '长篇必须有可持续升级的核心矛盾、人物成长/关系变化和阶段性兑现空间，不能只有一个短梗被机械拉长。';
+  if(fixedPoolSelection)return `【原池事实引用式提名】从服务器已经固定的原池选择${selectedCountText}个真实ID。
+${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同与选优淘汰标准执行。'}
+${fixedPoolRule}
+${PREMISE_READER_VALUE_POLICY}
+${selectionQuantityRule}
+先以同次原池生成的成熟度评分高低为选优顺序，再按真实因果、分类流派和实质差异剔除有证据缺陷者；不能为了高分牺牲作者条件或独立质量门；不得默认按原池编号或分类顺序排列；超额时仍只会保留已付款审核容量内的优先候选，其余留在原池备用。排名不能代替独立复审，不能给原池增加事实。
+${storyTypeRule}
+必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留。
+${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}
+${PREMISE_SOURCE_REFERENCE_DIRECTIVE}
+本次一次完成全池比较、选择已有身份及这些身份的因果引用索引，绝不重写故事。每项只输出premiseId、storyCategoryId、readerQuestion和causalPlan；readerQuestion要承接原池开局已经发生的关系冲突或关键选择，点出读者接下来最想知道的具体后果；不得写成“一个某职业的人如何逆袭”“他能不能成功”等泛化故事概要，也不允许提前泄露终局或引入新事件。不要返回sourceBindings或另一份叙事字段。
+【服务器实际字段与原池分节映射】${JSON.stringify(SOURCE_BINDING_EXAMPLE)}。映射的值是实际字段按顺序拼接的原池分节；sourceRef只定位对应分节的连续原文，由服务器还原field和quote，模型不重复推测字段名。使用更短的{field,quote}引文时才按此表选择实际字段。“必要条件”是原池分节，不存在necessaryConditions字段，应按上表引用实际承载该原文的字段。行动、条件和结果的因果角色仍由实际事件决定，不能由字段名代替判断。
+服务器先从固定原池五节原样投影事实，再逐项校验causalPlan的field和quote是否逐字指向投影后的既有行动、条件及结果；由实际故事决定环节数量，普通直接因果可以只有一环。选优响应中已有有效索引就直接进入原有独立来源、因果、分类、全部流派及同构审核，不再付费重复装配索引；仅索引缺失或引用无效才动用原有同一共享预算内的因果索引纠错，不允许新增故事事实或调用额度。原池有真实缺口必须在本次比较中淘汰，不能因后续可纠错而留待补造。
+逐对比较真实主动策略、升级、反转与代价，不因为绑定来源就跳过选优。
+只输出selectedPremises；不返回或重写pool，不输出评分、比较自评或解释。`;
   return `【题材卡创建前筛选】
 这一步发生在完整题材卡创建之前。先广泛搜寻，再比较，再选择；禁止先创建完整题材卡再交给最终 Gate 大量淘汰。
 ${includeSharedPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的生成前必要条件合同规划。'}
-已选项在展开完整卡之前先提供causalPlan：只列影响成败的状态转移，不列普通动作清单，不设固定条数。每项action、conditions、result均用{field,quote}逐字锚定本题材筛选字段；覆盖关键阶段结果及payoff。conditions可为空的只有普通直接因果，能力边界、资料取得/转交、知情、权限、到场与他人决定需要的条件须写入对应筛选字段后再引用，不能由结局倒推。计划是简短故事事件数据，不输出思考过程、自评或长篇论证；原池范围和已有调用不增加。
-原池的storyCore也须用一到两句写清“处境与触发—主动选择—选择导致的升级—改变胜负条件—兑现及代价”的因果方向，不能只列职业和开端，再把所有展开补成同一条翻案路径。严格保留用户指定的类型、关系与情节条件；共同条件之外的选择、升级机制和兑现路径仍应分别构思，不能把职业列表当成不同故事。先在内部按实际因果路径归组，再跨不同路径比较选取成熟项，不默认取pool前几项；未选候选也须提供可辨认的路径，才能真正作为原池备用。以上只在现有storyCore中表达，不新增字段、输出长篇分析或增加模型调用。
-选题必须先证明读者为什么愿意点开：暂名也应有具体利益冲突、反常关系或迫切悬念，不能全是意象与道具名。先比较不同关系与欲望、主动对手、选择和推进路径，不要把所有题材收敛为“职业发现账册/印记→追查权贵→公开证据”。遵守用户分类，在分类内部广搜不同冲突；现实两难、关系背叛、绝境求生、欲望争夺、反常身份均可按故事取舍，不是逐项配额。
+已选项在展开完整卡之前先提供causalPlan：只列影响成败的状态转移，不列普通动作清单，不设固定条数。\n${PREMISE_CAUSAL_SEQUENCE_DIRECTIVE}每项action、conditions、result均用{field,quote}逐字锚定本题材筛选字段；quote必须从所指field最终文本直接复制连续原文，原文以“；”连接分句时不得擅自改成“。”，也不得另加或省改标点，修改字段后须同步复制实际引用；覆盖关键阶段结果及payoff。conditions可为空的只有普通直接因果，能力边界、资料取得/转交、知情、权限、到场与他人决定需要的条件须写入对应筛选字段后再引用，不能由结局倒推。因果计划只保留实际决定状态转移的环节：每个quote从对应最终故事字段复制足以独立识别行动、对象或必要条件的最短连续原文，不整段复制、不复述解释、不丢掉决定性桥接；不输出思考过程、自评或长篇论证，原池和模型调用数量不变。
+${'原池的storyCore须用现有五个有序、简短的事实小节写清“处境与触发—主动选择—选择导致的升级—改变胜负条件—兑现及代价”的因果方向，不能只列职业和开端，再把所有展开补成同一条翻案路径。严格保留用户指定的类型、关系与情节条件；共同条件之外的选择、升级机制和兑现路径仍应分别构思，不能把职业列表当成不同故事。先在内部按实际因果路径归组，再跨不同路径比较选取成熟项，不默认取pool前几项；未选候选也须提供可辨认的路径，才能真正作为原池备用。以上只在现有storyCore中表达，不新增字段、输出长篇分析或增加模型调用。'}
+选优时须特别防止两类已实测高成本错误：causalPlan要把实际导致结果的行动作为action，收存证据、准备材料不能冒充导致对手行动或机构决定的原因；检查所选分类是否从核心人物关系、主动选择到结局连续驱动主线，恋爱类不能只有查案、补课、事后作证却声称恋爱关系已建立。财物取得、产权转移或官方处置要有该权利主体的实际决定和必要条件，不能把揭露真相自动当作权利转移。还须检查因果信息是否真实传递到作决定的人：改变供货、公告或制造误字不会自动让对方知道它与另一项让步条件相关；合法流程的使用也不能单凭日志证明滥用；能力触发对象与实际行动对象必须相同。原池未写这些条件就选择别的成熟题材，不靠选后反复补造因果和分类。\n候选选优必须分别核对两件事：①行动到结果的必要条件确实成立；②面对同一平台、分类与用户已选创作标签的目标读者，当前故事中实际可见的独特人物选择、对手反应、关系/利益变化和阶段回报能否形成具体点击和追读理由。前者通过不能替代后者；暂名、职业、专业取证流程和自述卖点不能作吸引力证据。相同基调、文风或流派标签组合不是必须淘汰的同构，同一流派共性不能强制另编题材；应比较共有类型机制之外真实发生的不同事件。没有要求的热血、幽默、虐心、打脸不得因标签臆测强加，更不得为争点击补造原池没有的决定性动作、权限或结局。选题必须先证明读者为什么愿意点开：暂名也应有具体利益冲突、反常关系或迫切悬念，不能全是意象与道具名。先比较不同关系与欲望、主动对手、选择和推进路径，不要把所有题材收敛为“职业发现账册/印记→追查权贵→公开证据”。遵守用户分类，在分类内部广搜不同冲突；现实两难、关系背叛、绝境求生、欲望争夺、反常身份均可按故事取舍，不是逐项配额。 已选择“扮猪吃虎”等流派时，隐藏能力、被低估、亮出本事属于应当兑现的共同类型承诺，本身不算重复；要比较这种承诺怎样引出各自不可互换的关键操作、意外升级、胜负转向和实际代价。每条入选骨架应有至少一个真实事件构成可简短转述的记忆点：行动本身、对手的反制、关系翻转或带后果的选择均可，不要求硬塞热血、搞笑、热梗，也不能仅靠标签宣称有记忆点；题材胚子没有建立的事件不得留待下游凭空制造。
 对已选项逐对比较“人物关系—主动选择—对手制约—因果升级—反转改变—结局代价”；换时代、职业、身份包装或分类标签不算实质差异。若两项共享同一营救、潜入、被利用和反设局路径，须在锁定题材前从原轻量池选择真正不同的成熟项。筛选证据必须证明故事成立，不能靠自称独特或完整字段过关；能力触发、边界与代价应前后一致，不要求解释超自然科学来源或提前揭示全部谜底。选中前须比较openingEvent、coreConflict、escalation、reversalEffect与payoff中的同一事实；临时代价不能无条件变成永久代价，物资预支不能无条件变成复活或赎回活人，同一个人不能既已死亡又等待营救。无法沿原规则成立的胚子应在锁定前淘汰，从原池选择成熟项。反转不得取消已建立的核心前提，程序或权利的兑现必须有因果条件，不能让新能力或一次公开证据无条件解决全部冲突。
 选中前先在内部逐项对照原池 storyCore 与所选 openingEvent、coreConflict、activeChoice、escalation、reversalEffect、payoff：已明确的触发动作、人物身份、到场事件、时间阶段和结局方向须保留；未明确的真实动机可经反转揭示，但人物当时提出请求这一事件不能凭动机反转被取消。原池骨架涉及代写、转交、救助等多方动作时，要写清谁实施、为谁实施、交给谁或影响谁；没有明确的对象关系不得在展开时自行定成相反事实。只在内部检查，不增加输出字段。
 合理展开可补充原池未限定且与原约束兼容的细节；不得把原有职业或专业经历升级成更高等级、冠军资历、新权限或新能力来取得胜负，也不能让新增关键证据、对手目的或新角色取代原骨架的反转和兑现依赖。展开需要的关键身份与因果条件应在本次原池骨架中先明确，不能等到筛选字段再偷偷升级。
 先固定原池中每条规则的触发动作、作用对象及适用条件，再展开选择、升级、反转与兑现。尤其核对“有/无、已经/尚未、只作用于/不作用于”等条件；后文不能把作用对象改成其排除对象，也不能用一个此前没有的例外或新能力兑现原机制做不到的结果。若原机制无法支撑拟定结局，选择符合原规则的行动与代价，或在锁定前改选原池成熟候选，不把矛盾留给完整卡修复。selectedPremises 不返回或重写storyCore、workingTitle；这两项由服务器从原池继承。
-1. 以 ${poolSize} 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。${poolSize} 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ${requestedCount} 个成熟题材，可以少于 ${poolSize}，禁止为了凑数填弱项。
-2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${requestedCount} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。
+${'1. 以 ' + poolSize + ' 个真正不同的轻量题材胚子作为广搜目标；这里只写 premiseId、暂名和一句到两句核心故事骨架，不写完整题材卡。' + poolSize + ' 是扩大搜索覆盖的目标，不是整批成功的硬门槛；若已经充分比较并能明确选出 ' + requestedCount + ' 个成熟题材，可以少于 ' + poolSize + '，禁止为了凑数填弱项。'}
+2. 未被选中的轻量胚子不需要补齐完整筛选字段；只有最终选中的 ${selectedCountText} 个题材，才必须给出人物处境、核心冲突、主角主动选择、选择后的因果升级、有效反转/兑现、生活/职业载体不可替换性、二阶后果、读者持续追问和与历史题材的差异证据。每个字段尽量用一至两句精确事实表达，严格避免重复叙述原池全文和其它字段；必要的行动主体、对象、前置能力、证据传递、实际决定及兑现条件必须完整保留，信息量不因缩短而减少，不准为缩短输出压缩掉重要因果。
 3. 必须在创建完整题材卡之前淘汰：只有噱头没有人物目标/主动选择、冲突不能升级、反转只是补充信息、职业/关系可随意替换、只有悬念没有兑现、熟悉套路只换名换皮、单层“行为→超常奖惩→调查”的寓言机制。
-4. 从轻量胚子池中明确选出恰好 ${requestedCount} 个成熟题材；选择由故事成立程度和本次平台/分类/创作设定共同决定，不按关键词数量打分，不把最终 Gate 当主要选题器。payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
+4. ${selectionQuantityRule}payoff须写出从主角行动到结果成立的必要桥接：涉及他人决定、机构认可或对手配合时，说明谁依据什么作出该决定，不能把交出证据、人情口碑、集体支持或主动请求直接当成对方必然认可。尤其是证据导致追责、翻案、查封或撤职的结局，须在原池骨架和已选字段中建立能指向责任人的具体比对依据、材料到达有权处理者的路径以及实际决定，不能只凭可疑线索直接认定责任人；已问话不等于已取得回答，证据公开不等于程序自动完成。若代价依赖对手知道主角举报或取证，须写明对手获知的途径；causalPlan同步覆盖决定性中间条件，不准只在payoff中声称已发生。普通直接因果不补无关手续或法律条文；原池没有可成立的路径时，在锁定前选择其它成熟项，不把缺口留给完整卡再编新规则。
 5. ${storyTypeRule}
-6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 只包含已经选中的 ${requestedCount} 项及其筛选证据。不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
+${'6. 输出 pool 和 selectedPremises：pool 保持轻量；selectedPremises 返回 ' + selectedCountText + ' 项，每项都必须是原池真实身份并包含完整筛选证据；不足 ' + minimumCount + ' 项时按前提/质量失败处理，不补造或弱化条件。'}不要输出完整 hook/description/scopeBreakdown，也不要写评分表、淘汰理由长文或思考过程。`;
 }
 
 /**
  * 创建前筛选完成后，只把被选中的胚子结构化为完整题材卡；不允许在这里重新选题。
  */
+/** The entire historical premise catalog was already checked at pool/selection
+ * time and is still compared by the final deterministic Gate. One locked-card
+ * structuring request needs only title collision reminders: retransmitting all
+ * historical hooks and summaries for every card cannot authorize changing its
+ * selected story and adds large repeated prompt input. */
+export function ideaCardHistoryTitleReminder(excludes: readonly { title: string; hook?: string; description?: string }[]): string {
+  if (!excludes.length) return '';
+  return '\n【历史作品与本次明确排除的标题（历史故事内容已在选优时完整比较，最终去重仍使用原始完整历史）】\n'
+    + excludes.map((item, index) => `${index + 1}. ${String(item.title || '').replace(/\s+/g, ' ').trim()}`).join('\n')
+    + '\n本阶段只结构化已经锁定的题材；不得复制排除标题，也不得为规避历史相似度改变已锁定的人物选择、机制、反转与兑现。';
+}
+
 export function ideaCardStructuringDirective(
   selectedPremise: Record<string, unknown>,
   batch: readonly Record<string, unknown>[] = [],
   includePreselectionPolicy = true,
 ): string {
   const safePremise = Object.fromEntries(
-    Object.entries(selectedPremise || {}).filter(([key]) => key !== 'premiseId'),
+    Object.entries(projectedPremisePromptView(selectedPremise || {})).filter(([key]) => key !== 'premiseId'),
   );
+  // Peers are difference boundaries, not sources to be expanded again.
+  // Keep every causal action, condition, reversal and consequence for comparison;
+  // avoid retransmitting raw storyCore, internal causalPlan and novelty self-claims
+  // in each of the other selected cards' independent structuring requests.
+  const peerDifferenceFields = new Set([
+    // Full server-owned facts were reviewed before structuring; keep the
+    // distinct causal paths here. Final review still sees all full cards.
+    'workingTitle','storyCategory','coreConflict','activeChoice','escalation',
+    'reversalEffect','payoff','irreplaceableCarrier',
+  ]);
   const references = batch.filter(item => item.premiseId !== selectedPremise.premiseId).map(item =>
-    Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'premiseId' && key !== 'causalPlan')));
+    compactRepeatedPremiseText(Object.fromEntries(Object.entries(item).filter(([key]) => peerDifferenceFields.has(key)))));
   return `【完整题材卡结构化】
+传输定位：fromSourceSections指向本项storyCore对应完整分节，sameTextAs指向同一对象内前序字段的逐字全文；原样读取，不是摘要、独立故事或通过结论。
 ${includePreselectionPolicy ? IDEA_PRESELECTION_REVIEW_POLICY : "按已注入GEN-002锁定前继承与差异规则执行。"}
 这个题材胚子已经在“完整题材卡创建前筛选”阶段被选中。现在只负责把这一项结构化成恰好 1 张完整题材卡，不再重新选题。
 ${includePreselectionPolicy ? STORY_PREREQUISITE_POLICY : '按已注入GEN-002的同一必要条件合同展开。'}
-先读取causalPlan逐项确定本卡setting、description、mainReversal、ending和scopeBreakdown各自承接的行动、条件、结果，再写展示表达。所有影响成败的已审条件须落入实际故事字段，不能只留在内部计划；可以换表达，不能删掉取得、传递、触发或决定的环节。新加人名或场景不等于获准增加新能力、权限、证据渠道或自动到场安排。不要在卡中回传causalPlan或审查自评，服务器保留内部来源，最终审核仍独立执行。
+先按causalPlan已审核的行动—条件—结果顺序分配本卡setting、description、mainReversal及scopeBreakdown的真实阶段变化，再写自然表达；每个scopeBreakdown.outcome只写本阶段已由原池行动支持的状态变化，未到期的目标继续保留为待完成，不能把下一阶段计划提前当成已完成事件。不得为凑满章节或追加爽点，另造原池未发生的新判决、处分、赔付、获权、证据归责或他人转念；中后段仍须利用原池已有不同反制、选择、失去和得到形成实际追读推进，不得把同一证据的反复解释写成两次新的反转。涉及他人改变决定须由本故事中已存在的实际动机、信息传递与行动支撑，超自然能力不能越过已设定的作用对象与有效时间。ending由服务器继承已审核的reversalEffect和payoff，不要生成另一份结局。所有影响成败的已审条件须落入实际故事字段，不能只留在内部计划；可以换表达，不能删掉取得、传递、触发或决定的环节。尤其逐项复核证据本身的物理位置和保管链：标记在钥匙柄上就不能突然成为锁芯的痕迹，已知某种材料存在也不等于取得可供比对的样本；涉及对照、鉴定或处置时，原池必须已经写明由谁、通过什么行动实际取得双方样本或原始记录，谁实施比对，谁据此作出决定。不得把“查出一致”“当场抓获”“依法处理”等最终结论倒用作样本取得、归责或权限的证明。另核对每个关键条件的有效时间：临时拦截被对手绕过后，后续复检或提交能否仍发生；不同机关的调查、受理、认定是否各有真实执行者；原始证据究竟能证明谁实际做了什么，不能从同款物品或排除自身跳到他人归责。新加人名或场景不等于获准增加新能力、权限、证据渠道或自动到场安排。原事实中的提议、同意、承诺、暂缓/中止、调查和未来目标不能在任一字段升级为已实际完成、最终失效、已生效或已取得的权利；人物指认或栽赃也不能擅自具体化为某件物品已被转移到另一地点。逐项核对人物在关键时刻有没有合理动机及条件配合主角（包括开门、交证据、改口），不能把主角提出请求写成对方必然答应；任何录音、记录或材料须严格说明它实际证明的是哪一次事件，不得用旧事件的证据证明新事件。不要在卡中回传causalPlan或审查自评，服务器保留内部来源，最终审核仍独立执行。
 - 服务器已经锁定题材身份；不要输出 premiseId、sourcePremiseId 或任何内部标识，系统会在返回后绑定原题材身份。
 - 禁止替换、合并、拆分、另造题材，禁止因为某字段难写就把故事换成更容易过 Gate 的套路。
-- 标题必须先兑现点击承诺：脱离概要也能看懂具体冲突、反常关系或未解问题；从原故事已有事件和关系中提炼，不沿用文雅暂名，不靠夸张空话和虚假设定。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
-- hook、description、setting、ending、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
-- 最终 Gate 独立验收，失败须如实拒绝；由服务器在本批原池与共享预算内处理缺额，模型不得自行换身份、补生题材、改写其它题材或使用旧批次。
+- 创作标签仅规定该卡已选择的类型期待，不是新增事件的许可证；同样标签可产生不同关系、策略、代价和阅读体验。先找本卡真实可复述的选择与局面改变，再决定标题和首屏怎样表达，不能为了标签而加不曾在原池出现的胜利、背叛、笑点或悲剧。标题竞争力和真实因果要分别成立，不得以其一代替另一项。
+- 先分别检查title与每个alternateTitles是否能被没看过本卡的目标平台普通读者独立理解：只凭标题须能知道发生了何种反常关系、涉及谁的具体利益或面临何种迫切风险，从而产生可复述的下一步追问。备选标题同样必须有点击理由，不能把空泛、需读概要才懂或只会凑长度的词句当成不合格主标题的备用品。孤立的专业物品名称、器物动作、职业行话和需要读完概要才懂的隐喻，即使与原文真实吻合，也没有完成标题点击承诺。请从本卡已确认的对手、风险、选择及局势变化中提炼明确表达，不能靠暂名、空泛反转或新增事实。hook先写命运改变的现场与人物选择，不用职业查证流程开篇。
+- protagonist 字段若已确认题材明确给出姓名，必须以“姓名：”开头；未具名只保留角色描述，不得新增姓名、姓氏或外号。
+- 【结构化前逐项自检，不留给终审】①每个独立结果必须有实际决定者、采纳依据、执行/生效动作；只有物件被改、系统显示异常或一方声称，不能直接证明具体责任人。②指认具体责任人必须有能区分其与其他可能责任人的实际经手、授权或行为证据；写不出就改成不指认具体人的结果。③标题必须让普通读者只看标题就知道谁遇到什么具体损失、反常关系或未解问题，不能只写动作、道具、职业或需读hook才懂的意象。④ending每个独立结果先列出决策者、采纳依据、执行动作；缺一项就在本次结构化内重写该段，不留给终审。
+- 【causalPlan 直接因果索引自检】每个环节的 action 只能直接产生它实际改变的结果；若它只是让下一步成为可能，就必须把下一步作为该环结果并接续行动—条件—结果，不能跳绑后续终局。conditions 必须是该环 result 实际成立所需、且已在同 ID 原池原文写出的条件，不能用结果断言、后续行动或评审新造条件。逐环自问：删掉这个 action，result 还会发生吗？不会才是直接因果；若 action 只改变下一步条件，另建一环。
+- hook、description、setting、scopeBreakdown、coreConflict、mainReversal、uniquePoint、noveltyProof 必须展开同一个已选胚子的因果链；ending与noveltyProof.readerQuestion由服务器从同一已审来源继承，不需再次生成。能力触发、持续时间、代价与同一人物状态须在所有字段一致。只能补足表达和可执行细节，不能改变胚子的核心人物处境、主动选择、升级机制、反转效果与兑现方向。
+- 重要原始证据的可用状态必须跨字段保持一致。若原池后续靠原册、日志、监控、存根或留样做决定性核验，就不能在description或scopeBreakdown新增这些证据已被完全泡毁、烧毁、遗失或无法辨识，然后仍依赖同一份原件核对成功；只有原池明确建立了可用副本、补救动作及对应权限，才可继续写该核验。其他物件、人员、时间和权限同样遵守已建立的可用条件，不允许为了情绪冲突新增会使后续因果不成立的破坏事件。
+- 最终 Gate 独立验收，失败须如实拒绝；不合格卡不得直接放行。服务器保留已合格卡，并可在原有共享预算内对真实缺额启动一次有界轻量候选补足、候选独立复核和完整卡终审；模型此轮只能忠实结构化当前已锁定身份，不得自行补生、换身份或改写其它题材。
 写完后再逐项核对原池骨架和所选胚子中的触发动作、人物身份与知情、到场事件、时间阶段、升级机制和结局方向；同一事实在所有卡片字段中保持一致。人物当时的请求可以有后来才揭露的另一层动机，但请求发生这一事实必须保留。
 原池storyCore是事实来源；其它已选字段是经过来源核查的展开，不能用重复出现的展开新规则替代原池条件。若仍发现两者互斥，不得通过新增例外或能力把错误前提圆成另一故事。
 ${IDEA_CARD_PROMISE_CLOSURE_POLICY}
@@ -275,11 +734,35 @@ export function bindStructuredIdeaCardToPremise(
   if (!rawCard || typeof rawCard !== 'object' || Array.isArray(rawCard)) {
     throw new Error(`题材“${label}”的完整题材卡不是合法对象；系统不会猜测或换题。`);
   }
-  const safeCard = Object.fromEntries(
+  const generatedCard = Object.fromEntries(
     Object.entries(rawCard as Record<string, unknown>)
       .filter(([key]) => key !== 'sourcePremiseId' && key !== 'premiseId' && key !== 'causalPlan'),
   );
-  const boundCard = bindUniqueIdeaScopeAllocation({ ...safeCard, sourcePremiseId: premiseId });
+  const owned=Object.fromEntries(PREMISE_CREATION_CHOICE_FIELDS.filter(field=>selectedPremise[field]!==undefined).map(field=>[field,structuredClone(selectedPremise[field])]));
+  const safeCard: Record<string, any>={...generatedCard,...owned,
+    ...(typeof selectedPremise.storyCategory==='string'&&selectedPremise.storyCategory.trim()
+      ? {storyCategory:selectedPremise.storyCategory}:{}),
+  };
+  // This question already passed the selected premise's source review. It is
+  // owned by that immutable identity, just like the inherited ending.
+  // Other novelty claims remain generated and independently reviewed.
+  if(typeof selectedPremise.readerQuestion==='string'&&selectedPremise.readerQuestion.trim()){
+    const novelty=generatedCard.noveltyProof;
+    safeCard.noveltyProof={...(novelty&&typeof novelty==='object'&&!Array.isArray(novelty)?novelty:{}),
+      readerQuestion:selectedPremise.readerQuestion};
+  }
+  // The conclusion is a frozen fact, not a second generation task. Keeping the
+  // reviewed state prevents formatting from turning agreement into completed
+  // registration or inventing a new terminal event. All other fields and the
+  // inherited conclusion still go through the independent semantic Gate.
+  const closure=[selectedPremise.reversalEffect,selectedPremise.payoff]
+    .filter((value):value is string=>typeof value==='string'&&!!value.trim());
+  const ending=closure.filter((value,index)=>!closure.some((other,otherIndex)=>otherIndex!==index
+    &&other.includes(value)&&(other.length>value.length||otherIndex<index))).join('\n');
+  // Existing alternate titles or the fixed seed title may correct a pure length
+  // failure without a new LLM call; no unreviewed card is marked approved.
+  const titledCard = retainValidStructuredIdeaTitle(safeCard, selectedPremise.workingTitle);
+  const boundCard = bindUniqueIdeaScopeAllocation({ ...titledCard, ...(ending?{ending}:{}), sourcePremiseId: premiseId });
   selectedPremiseEvidenceByCard.set(boundCard, structuredClone(selectedPremise));
   return boundCard;
 }
@@ -310,6 +793,60 @@ function ideaRepairRecord(value: unknown): Record<string, unknown> | null {
 function withoutIdeaInternalIdentity(value: unknown, internalField: string): Record<string, unknown> {
   const record = ideaRepairRecord(value) || {};
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== internalField));
+}
+
+/** Only discard invalid *automatic* plot labels already produced by the model.
+ * Never invent a label or rewrite a manually selected author choice. The normal
+ * dictionary Gate and all creative-semantic reviews still run on the result. */
+export function retainValidAutomaticPlotTags(card:Record<string,unknown>,
+  selected:readonly string[],dictionary:readonly string[]):Record<string,unknown>{
+ if(selected.length || !Array.isArray(card.plotTags) || !card.plotTags.length
+   || card.plotTags.some(value=>typeof value!=='string'))return card;
+ const valid=[...new Set(card.plotTags)].filter((tag):tag is string=>typeof tag==='string'&&dictionary.includes(tag));
+ if(!valid.length||valid.length===card.plotTags.length)return card;
+ const next={...card,plotTags:valid};
+ // Card-premise linkage is server-owned WeakMap evidence, not a JSON field.
+ // A plain clone would silently lose the final Gate's authoritative premise.
+ const evidence=selectedPremiseEvidenceForIdeaCard(card);
+ if(evidence)selectedPremiseEvidenceByCard.set(next,evidence);
+ return next;
+}
+
+/** Isolate invalid model patches per card instead of aborting unrelated
+ * independently repairable cards. A rejected patch returns its ORIGINAL FAILED
+ * card and cannot bypass any downstream local or semantic quality Gate. */
+export function applyIsolatedIdeaRepairPatches(
+ cards:readonly Record<string,unknown>[],rawPatches:unknown,
+ options:{
+  titleRepairPositions?:readonly number[];
+  namingRepairPositions?:readonly number[];
+  storyRepairPositions?:readonly number[];
+  dimensionRepairOptions?:readonly Record<string,readonly string[]>[];
+  dimensionOnlyPositions?:readonly number[];
+  dimensionRepairSelections?:readonly Record<string,readonly string[]>[];
+  scopeAllocationPlans?:readonly (IdeaScopeAllocationPlan|undefined)[];
+  metadataOnlyPositions?:readonly number[];
+ },
+ onRejected:(index:number,error:unknown)=>void,
+):Array<Record<string,unknown>>{
+ if(!Array.isArray(rawPatches)||rawPatches.length!==cards.length){
+  const count=Array.isArray(rawPatches)?rawPatches.length:0;
+  throw Error('修复补丁位置数量不符：收到'+count+'，期望'+cards.length+'；不能推测题材归属');
+ }
+ const selected=(indices:readonly number[]|undefined,index:number)=>indices?.includes(index)?[0]:[];
+ return cards.map((card,index)=>{
+  try{
+   return applyOrderedIdeaRepairPatches([card],[rawPatches[index]],
+    selected(options.titleRepairPositions,index),
+    selected(options.namingRepairPositions,index),
+    selected(options.storyRepairPositions,index),
+    [options.dimensionRepairOptions?.[index]||{}],
+    selected(options.dimensionOnlyPositions,index),
+    [options.dimensionRepairSelections?.[index]||{}],
+    [options.scopeAllocationPlans?.[index]],
+    selected(options.metadataOnlyPositions,index))[0];
+  }catch(error){onRejected(index,error);return card;}
+ });
 }
 
 /**
@@ -348,7 +885,7 @@ export function ideaGateLocalRepairDirective(
 1. patches 数组必须恰好 ${safeTargets.length} 项，并严格按输入 position 的顺序逐项对应；每项只写需要修改的字段。
 2. 若gateIssues明确点名标题，可额外返回title，须满足4—16字符的本地合同（标点和数字均计入），只改原故事的表达且不得换题；其它情况下标题保持原样。patches每项内部只允许 hook、description、coreConflict、uniquePoint、mainReversal；noveltyProof 内只允许 familiarShell、uncommonCombination、avoidedPatterns、irreplaceableWhy、secondOrderConsequence、readerQuestion。不要输出平台、分类、篇幅、章数或任何内部标识。仅当服务器提供dimensionRepairOptions时，可另返回dimensionPatch对象，只修其中点名的标签字段，从该字段给定候选中选择1项或实际需要的多项，不重复；dimensionRepairSelections中非空的手动选择须全部原样继承，不能只选其中一部分；未授权字段不能修改。只存在标签问题时只返回dimensionPatch，不改故事，不返回空补丁。
 3. 每项executionStandard是本卡完整的平台、分类与创作执行标准，修订后仍须全部满足；不能只修点名因果而破坏关系推进、阶段回报或其它既定阅读承诺。只修 gateIssues 点名的表达证据，让原故事已有的异常/信息差、现实压力、主角行动、关系、因果升级、反转和二阶后果更清楚；禁止新增另一套案件、能力、身份、亲属关系或结局。
-先核对premise.storyCore中的原池事实是否允许这次修复；不能把其它展开字段里重复出现的新机制当作原池授权。改变一处规则的适用对象或状态时，须同步核对hook、description、setting、反转、结局与全部阶段的同一事实依赖；不能只改规则定义而让既有事件仍按相反条件发生。无法在原池事实与锁定选择、代价下修复时，该项返回空对象保留原卡供最终门继续拒绝，不补万能例外或新能力。
+先核对premise.storyCore中的原池事实是否允许这次修复；不能把其它展开字段里重复出现的新机制当作原池授权。改变一处规则的适用对象或状态时，须同步核对hook、description、setting、反转、结局与全部阶段的同一事实依赖；不能只改规则定义而让既有事件仍按相反条件发生。无法在原池事实与锁定选择、代价下修复时，该项返回空对象保留原卡供最终门继续拒绝。尤其不得用原池没有建立的不同物证编号、排他记录、经营许可、已生效行政决定或修复完成事实来填补因果缺口；这些是决定胜负的新事实而非可自由添加的表达细节，不补万能例外或新能力。
 若storyRepairAllowed=true，必须同步修复点名问题在setting、ending与scopeBreakdown中的所有矛盾引用，不能只改description留下旧规则。这些字段不接受整对象覆盖，只能另返回storyPatches数组：{"field":"setting或ending","match":"逐字存在且唯一的短原文","replacement":"修正后片段"}，或{"field":"scopeBreakdown","stage":1,"subfield":"reason或outcome","match":"该阶段字段中逐字存在且唯一的短原文","replacement":"修正后片段"}。stage从1开始。保留原题材人物、核心困境、选择方向和结局代价，不新增能力或改变已有规则数值；存在无法沿原事实修复的真实矛盾就保持拒绝，不能靠补一条万能规则圆回。不得改arc、chapters、篇幅或平台配置。storyRepairAllowed=false时禁止此数组。
 若gateIssues点名故事命名，可另返回namingReplacements对象（原禁止名称:原创虚构名称），服务器会在全部故事文本中统一替换，包含人物/宠物名、结局与章节规划；只许更换名称，不改变行为、关系和事件。其它题材不允许此字段。
 仅当服务器给出scopeAllocationPlan时，可在该patch内返回scopeAllocation正整数数组，按原阶段顺序写每阶段占用的章节数量（不是章节序号）；长度等于原阶段数，合计严格等于冻结plannedChapters。只改数量，不改阶段文字、总章数、总字数、故事或身份。只有标签/数量问题时只返回对应dimensionPatch/scopeAllocation，不改故事，也不返回空补丁。
@@ -494,9 +1031,9 @@ export function applyOrderedIdeaRepairPatches(
 export function ideaHookRequirement(storyType: IdeaStoryType): string {
   const storyFirst = '题材已经通过完整题材卡创建前的轻量候选池筛选；这里只把该题材最有吸引力的起始事件准确压缩成 hook，不再重新选题、换题或为了命中 Gate 关键词改造故事。异常/信息差不等于超能力，可以来自现实利益冲突、关系反常、制度困境、隐藏事实或超常现象';
   if (storyType === 'short_story') {
-    return `35-80字；${storyFirst}；必须让读者看见主角正在做什么或明确选择什么，并自然给出至少一个来自本故事自身的继续阅读理由，例如现实代价、关系冲突、资源争夺、信息差、迫近后果或未解问题。不得按关键词数量或固定信号个数凑 Gate，也不能把关键行动/选择只藏在 description 里`;
+    return `35-80字；${storyFirst}；只表现真实开局的一次异常、压迫或关系反转，以及主角此刻无法回避的具体选择；让读者当场理解具体继续阅读理由，留下尚未兑现的后果。可用现实代价、关系冲突、资源争夺、信息差、迫近后果或未解问题，不预先讲完最后胜利、处罚和所有证据，不写从起因到结局的缩略梗概。必须看得见主角正在做什么或明确选择什么；不得按关键词数量或固定信号个数凑 Gate，也不能把关键行动/选择只藏在 description 里`;
   }
-  return `35-80字；${storyFirst}；直接写出现实压力或代价、主角下一步具体行动，并留下可持续追问；不能只有设定说明`;
+  return `35-80字；${storyFirst}；直接写出现实压力或代价、主角下一步具体行动，并留下可持续追问；只暴露当前必须作出的选择和下一层风险，不在钩子里概括整个长篇结局或全部底牌，不能只有设定说明`;
 }
 
 
@@ -515,4 +1052,35 @@ export function packIdeaReviewStandards(cards:Record<string,any>[],references:Re
  const encoded={standardLines,cards:packedCards,references:packedReferences};
  const plain={cards,references};
  return JSON.stringify(encoded).length<JSON.stringify(plain).length?encoded:plain;
+}
+
+export const PREMISE_CREATION_CHOICE_FIELDS=['storyTone','writingStyle','webNovelGenre','plotTags','pov','submissionTags'] as const;
+/** Bind author choices once; automatically chosen values must be produced with
+ * the candidate and pass the same dictionary contract before paid selection. */
+export function freezePremiseCreationChoices(raw:Record<string,unknown>,manual:Record<string,any>,options:Record<string,readonly string[]>,submission:{required:boolean;options:readonly string[]}){
+ const bound:Record<string,unknown>={};
+ for(const field of ['storyTone','writingStyle','webNovelGenre','plotTags'] as const){
+  const selected=Array.isArray(manual[field])?manual[field]:[];
+  const generated=raw[field];
+  // The automatic plotTags are dictionary-only metadata. A generated array
+  // with a valid authorized subset and extra typos must not erase the story:
+  // keep only the model's EXISTING valid choices, never invent a new tag.
+  // Manual choices and all narrative, genre and style Gates stay unchanged.
+  // No surviving canonical tag still fails the original nonempty requirement.
+  const canonicalPlotTags=field==='plotTags'&&!selected.length&&Array.isArray(generated)
+   ?[...new Set(generated.filter((item):item is string=>
+     typeof item==='string'&&(options.plotTags||[]).includes(item)))] :generated;
+  const value=selected.length?[...selected]:field==='plotTags'?canonicalPlotTags:generated;
+  if(discoveryDimensionSelectionIssues(value,selected,options[field]||[]).length)throw Error('候选未固定有效创作选项：'+field);
+  bound[field]=structuredClone(value);
+ }
+ const pov=manual.pov||raw.pov;
+ if(typeof pov!=='string'||!(manual.pov?pov===manual.pov:(options.pov||[]).includes(pov)))throw Error('候选未固定有效叙事视角');
+ bound.pov=pov;
+ const selected=Array.isArray(manual.submissionTags)?manual.submissionTags:[];
+ const tags=selected.length?[...selected]:submission.required?raw.submissionTags:[];
+ if(selected.length?discoveryDimensionSelectionIssues(tags,selected,submission.options).length
+  :submission.required?discoveryDimensionSelectionIssues(tags,[],submission.options).length:!Array.isArray(tags))throw Error('候选未固定有效投稿标签');
+ bound.submissionTags=structuredClone(tags);
+ return bound;
 }

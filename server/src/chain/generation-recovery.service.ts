@@ -1,8 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
 import { readConstitution } from '../modules/project/creative-constitution';
+import { generationTasks } from '../common/generation-cancellation';
+import { confirmedStoryCharacterNames, confirmedWorldProtagonistName } from './source-rule-consistency';
 
 export interface GenerationRecoveryAudit {
   projectId: string;
@@ -33,11 +35,63 @@ const RECOVERY_PROFILE_TABLES = ['world_system_profiles', 'character_extended_pr
 @Injectable()
 export class GenerationRecoveryService {
   private readonly runningProjects = new Set<string>();
+  private readonly logger = new Logger(GenerationRecoveryService.name);
 
   constructor(
     private readonly database: DatabaseService,
     private readonly vectorIndex: VectorIndexService,
   ) {}
+
+  /** Orphaned creations after a restart or a dead task otherwise show as
+   * "creating" forever with no way to close them. A `creating` project whose
+   * last generation run is no longer running and has been idle past a normal
+   * stage gap is marked failed, so it can be resumed or closed from diagnostics.
+   * Thresholds exceed the longest single model timeout (and the current
+   * process's own tasks are skipped), so an in-flight slow call is never
+   * mistaken for an orphan. */
+  async onApplicationBootstrap(): Promise<void> {
+    this.sweepOrphanedCreations();
+    const timer = setInterval(() => this.sweepOrphanedCreations(), 5 * 60 * 1000);
+    timer.unref?.();
+  }
+
+  private sweepOrphanedCreations(): void {
+    try {
+      const db = this.database.getDb();
+      const now = Date.now();
+      const idleMs = 10 * 60 * 1000;
+      const hungRunningMs = 30 * 60 * 1000;
+      const projects = db.prepare("SELECT id,created_at FROM projects WHERE status='creating'")
+        .all() as Array<{ id: string; created_at?: string }>;
+      let marked = 0;
+      for (const project of projects) {
+        if (this.runningProjects.has(project.id)) continue;
+        const last = db.prepare('SELECT status,started_at,finished_at FROM generation_runs WHERE project_id=? ORDER BY rowid DESC LIMIT 1')
+          .get(project.id) as { status?: string; started_at?: string; finished_at?: string } | undefined;
+        const lastAt = last
+          ? new Date(last.finished_at || last.started_at || 0).getTime()
+          : new Date(project.created_at || 0).getTime();
+        if (!Number.isFinite(lastAt) || lastAt <= 0) continue;
+        // A cancelled last run means the creation task itself was stopped (a
+        // user cancel, or a restart that marks every in-flight run cancelled).
+        // It will never advance again, so close it after a short grace. A
+        // failed or succeeded run may still be retried / be between stages, so
+        // those keep the longer idle window. Only a live `running` call keeps the
+        // project open up to the hung-call ceiling.
+        const cancelledMs = 60 * 1000;
+        const limit = last?.status === 'running' ? hungRunningMs
+          : last?.status === 'cancelled' ? cancelledMs
+          : idleMs;
+        if (now - lastAt < limit) continue;
+        db.prepare("UPDATE projects SET status='generation_failed', updated_at=? WHERE id=? AND status='creating'")
+          .run(new Date().toISOString(), project.id);
+        marked += 1;
+      }
+      if (marked > 0) this.logger.log('孤立创建清理：将 ' + marked + ' 个 creating 项目标记为 generation_failed（本次 creating 共 ' + projects.length + ' 个）');
+    } catch (error) { /* the sweep must never block startup */
+      this.logger.warn('孤立创建清理失败：' + String(error));
+    }
+  }
 
   isRunning(projectId: string): boolean {
     return this.runningProjects.has(projectId);
@@ -52,6 +106,16 @@ export class GenerationRecoveryService {
 
   release(projectId: string): void {
     this.runningProjects.delete(projectId);
+  }
+
+  /** Even if a task wrapper has settled, an in-flight LLM run still owns its
+   * project context. Never wipe generated facts until both are quiescent. */
+  isCreationBusy(projectId: string): boolean {
+    if (generationTasks.isRunning('creation', projectId)) return true;
+    const active = this.database.getDb().prepare(
+      "SELECT COUNT(*) AS count FROM generation_runs WHERE project_id=? AND status='running'",
+    ).get(projectId) as { count?: number } | undefined;
+    return Number(active?.count || 0) > 0;
   }
 
   async audit(projectId: string): Promise<GenerationRecoveryAudit> {
@@ -126,7 +190,8 @@ export class GenerationRecoveryService {
     const isLongNovel = String(project.type) === 'long_novel';
     const targetWords = Number(project.target_words);
 
-    // 长篇采用渐进式细纲：创建时只详细展开前 LONG_DETAIL_OUTLINE_WINDOW 章，
+    // 长篇采用渐进式细纲：创建时只详细展开配置窗口（默认 5 章，见
+    // generation-budgets.json 的 creationDetailWindow），
     // 全书规模的唯一权威在卷大纲 volumes.estimatedChapters。不能再拿当前已细化
     // 章节的 target_words 合计去等于全书 target_words，否则正常长篇必定无法激活。
     let plannedBookChapters = counts.outlineChapters;
@@ -195,7 +260,9 @@ export class GenerationRecoveryService {
     const hasConfirmedSource = Boolean(confirmedStory && typeof confirmedStory === 'object' && Object.keys(confirmedStory).length > 0);
     if (!hasConfirmedSource) consistencyIssues.push('缺少确认灵感/项目种子，无法按原配置恢复');
     const protectedHumanWork = protectionReasons.length > 0;
-    const running = this.isRunning(projectId);
+    // A failed project can still have in-flight creation calls. Recovery must
+    // not erase their source context before the owner task has settled.
+    const running = this.isRunning(projectId) || this.isCreationBusy(projectId);
     const resumableStatus = ['generation_failed', 'creating'].includes(String(project.status));
     const canResume = resumableStatus && !protectedHumanWork && hasConfirmedSource && !running;
 
@@ -230,15 +297,55 @@ export class GenerationRecoveryService {
     if (!['generation_failed', 'creating'].includes(audit.status)) {
       throw new ConflictException('只有创建失败或创建中的项目可以恢复。');
     }
+    if (this.isCreationBusy(projectId)) {
+      throw new ConflictException('原项目生成调用仍在执行，禁止同时清理和恢复生成资料。');
+    }
     if (audit.protectedHumanWork) {
       throw new ConflictException(`检测到受保护资料：${audit.protectionReasons.join('；')}。已停止自动覆盖。`);
     }
     const preserveWorld = Boolean(
       this.database.getDb().prepare('SELECT id FROM world_settings WHERE project_id=? LIMIT 1').get(projectId),
     );
-    // 普通恢复永远保留已经建立的世界观，只清理可再生的下游资料。
-    // “按题材重建”仍走 clearForExplicitSourceRebuild，并在存在世界观时明确拒绝。
-    await this.clearGeneratedAssets(projectId, { preserveWorld });
+    // A successful role batch already belongs to the same immutable world and
+    // selected idea. Recreating it on every fourth-outline transport failure
+    // changes the downstream source hashes and wastes another full model call.
+    // Preserve roles only with a complete canonical + extended-profile batch.
+    // prepareCreationCharacters rechecks protagonist identity and every role
+    // before any chapter plan can consume these saved rows.
+    const db = this.database.getDb();
+    const roles = db.prepare(
+      'SELECT * FROM characters WHERE project_id=?',
+    ).all(projectId) as Array<{ id:string; name:string; identity:string; is_pov_character:number }>;
+    const profiles = db.prepare(
+      'SELECT character_id FROM character_extended_profiles WHERE project_id=?',
+    ).all(projectId) as Array<{ character_id:string }>;
+    const profileIds = new Set(profiles.map(row => String(row.character_id)));
+    const names = roles.map(row => String(row.name || '').trim());
+    const projectRow = db.prepare('SELECT settings FROM projects WHERE id=?').get(projectId) as {settings?:string}|undefined;
+    let confirmedNames:string[]=[];
+    let confirmedLead='';
+    try{
+      const story=JSON.parse(String(projectRow?.settings||'{}'))?.creativeConstitution?.confirmedStory;
+      confirmedLead=confirmedWorldProtagonistName(story?.protagonist,story?.characters);
+      confirmedNames=[
+        confirmedLead,
+        ...confirmedStoryCharacterNames(story?.characters),
+      ].filter(Boolean);
+    }catch{
+      // A malformed source cannot authorize keeping old roles. The saved world
+      // is protected separately, and the creation preflight will report the
+      // exact malformed settings before generating new data.
+      confirmedNames=['__invalid_confirmed_story__'];
+    }
+    const preserveCharacters = preserveWorld && roles.length > 0
+      && names.every(Boolean) && new Set(names).size === roles.length
+      && confirmedNames.every(name=>names.includes(name))
+      && roles.every(row => !!String(row.identity || '').trim() && profileIds.has(String(row.id)))
+      && roles.filter(row => Number(row.is_pov_character) === 1).length === 1
+      && (!confirmedLead || String(roles.find(row=>Number(row.is_pov_character)===1)?.name||'')===confirmedLead);
+    // Normal recovery retains verified upstream Canon; it regenerates only
+    // missing/incomplete downstream data. Explicit source rebuild is separate.
+    await this.clearGeneratedAssets(projectId, { preserveWorld, preserveCharacters });
   }
 
   async clearForExplicitSourceRebuild(projectId: string): Promise<void> {
@@ -268,11 +375,13 @@ export class GenerationRecoveryService {
       )`).get(projectId, projectId, projectId, projectId, projectId) as { n: number }).n);
     if (otherManual) throw new ConflictException('世界观、角色或伏笔有作者修改，不能自动覆盖。');
     await this.clearGeneratedAssets(projectId);
+    const checkpoints = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='creation_outline_checkpoints'").get();
+    if (checkpoints) db.prepare('DELETE FROM creation_outline_checkpoints WHERE project_id=?').run(projectId);
   }
 
   private async clearGeneratedAssets(
     projectId: string,
-    options: { preserveWorld?: boolean } = {},
+    options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {},
   ): Promise<void> {
     await this.deleteProjectVectors(projectId);
     const db = this.database.getDb();
@@ -363,10 +472,11 @@ export class GenerationRecoveryService {
     }
   }
 
-  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean } = {}): void {
+  private deleteProjectRows(projectId: string, options: { preserveWorld?: boolean; preserveCharacters?: boolean } = {}): void {
     const db = this.database.getDb();
     for (const table of RECOVERY_PROFILE_TABLES) {
       if (options.preserveWorld && table === 'world_system_profiles') continue;
+      if (options.preserveCharacters && table === 'character_extended_profiles') continue;
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
         db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId);
       }
@@ -378,7 +488,7 @@ export class GenerationRecoveryService {
     db.prepare('DELETE FROM foreshadowings WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM map_points WHERE project_id=?').run(projectId);
     db.prepare('DELETE FROM organizations WHERE project_id=?').run(projectId);
-    db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
+    if (!options.preserveCharacters) db.prepare('DELETE FROM characters WHERE project_id=?').run(projectId);
     if (!options.preserveWorld) {
       db.prepare('DELETE FROM world_settings WHERE project_id=?').run(projectId);
     }

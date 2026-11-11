@@ -6,7 +6,7 @@ import { SOURCE_QUALITY_AXES, CONTINUITY_EVIDENCE_CONTRACT } from '../modules/wr
 const flags = ['pass','outlineAligned','continuityPassed','characterPassed','worldPassed','timelinePassed','prosePassed'];
 const arrays = ['requiredEvents','missingRequiredItems','contradictions','advisories','sourceConflicts','evidence'];
 const object = (v: any) => !!v && typeof v === 'object' && !Array.isArray(v);
-const citationJsonSyntax = 'JSON引文类型必须按骨架：requiredEvents[].evidence、sourceQualityAudit.checks各轴的evidence/basisEvidence、readerGoals各轴的quote、causalAudit各引文字段均为单个字符串；需要多处支撑时选最能核验的一段连续原文，其余写入已有总体evidence数组或合同允许的逐项检查数组，不拼接为一段引文。只有骨架标为[]的字段才能列多项。合法示例：{"event":"事件","covered":true,"evidence":"一段连续原文"}；禁止写成{"evidence":"引文甲","引文乙"}，对象内每个逗号后必须是带冒号的字段名，不能出现裸字符串。';
+const citationJsonSyntax = 'JSON引文类型必须按骨架：requiredEvents[].evidence、sourceQualityAudit.checks各轴的evidence/basisEvidence、readerGoals各轴的quote、causalAudit各引文字段均为单个字符串；需要多处支撑时选最能核验的一段连续原文，其余写入已有总体evidence数组或合同允许的逐项检查数组，不拼接为一段引文。只有骨架标为[]的字段才能列多项。合法示例：{"event":"事件","covered":true,"evidence":"一段连续原文"}；禁止写成{"evidence":"引文甲","引文乙"}，对象内每个逗号后必须是带冒号的字段名，不能出现裸字符串。sourceQualityAudit.checks 的每个轴必须是单个对象；同一轴需要多条 claim 时放进 claimChecks 数组，禁止在对象后追加匿名 {...}。';
 
 export function parseChapterAlignmentReview(raw: string): {value: any; errors: string[]; invalidPaths: string[]} {
   let value: any;
@@ -30,8 +30,12 @@ export function parseChapterAlignmentReview(raw: string): {value: any; errors: s
   for(const key of arrays) if(!Array.isArray(value[key])) paths.push(key);
   if(!object(value.sourceQualityAudit) || value.sourceQualityAudit.version !== 1 || !object(value.sourceQualityAudit.checks)) paths.push('sourceQualityAudit');
   else for(const axis of SOURCE_QUALITY_AXES) if(!object(value.sourceQualityAudit.checks[axis])) paths.push('sourceQualityAudit.checks.'+axis);
-  if(!object(value.readerGoals)) paths.push('readerGoals');
-  else for(const key of ['click','completion','sharing','immersion']) if(!object(value.readerGoals[key])) paths.push('readerGoals.'+key);
+  // readerGoals 是阅读倾向的辅助轴，unknown 本身是合同允许的结论。
+  // 模型偶尔整项漏返；把缺失项按 unknown 保留，而不是把整章判成评审未完成。
+  if(!object(value.readerGoals)) value.readerGoals={};
+  for(const key of ['click','completion','sharing','immersion']) {
+    if(!object(value.readerGoals[key])) value.readerGoals[key]={status:'unknown',quote:'',reason:'评审未提供该项阅读倾向判断，保留未验证'};
+  }
   if(!object(value.causalAudit)) paths.push('causalAudit');
   return {value,invalidPaths:paths,errors:[...ownershipErrors,...paths.map(key=>key==='prosePassed'?'正文语言验收缺少prosePassed明确结论':key+'缺少必要结构，章节评审合同未完成')]};
 }
@@ -87,10 +91,38 @@ export function chapterObligationCatalog(outline:string) {
   for(let i=0;i<text.length;i++){const c=text[i];if(quoted){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')quoted=false;continue;}if(c==='"'){quoted=true;continue;}if(c==='{'){if(!depth)start=i;depth++;}if(c==='}'&&depth){depth--;if(!depth){const raw=text.slice(start,i+1);try{const value=JSON.parse(raw);if(typeof value.action==='string'&&typeof value.result==='string')rows.push(raw);}catch{}}}}
   sources.push(...(rows.length?rows:[text]));
  }
- return [...new Set(sources)].map((source,index)=>({ref:'M'+(index+1),source}));
+ // 有效剧情点同样是本章的固定义务：章纲已经写明 point/trigger/setup，
+ // 正文不能只推进事件而漏掉这个真正落地的情绪/剧情点。
+ // 复用同一份 obligationChecks 合同，不新增第二套验收。
+ const lines=outline.split('\n');
+ for(let index=0;index<lines.length;index++){
+  const header=lines[index].match(/^(高光场景|爽点设置|爽点|亮点)[:：][ \t]*(.*)$/);
+  if(!header)continue;
+  const inline=header[2].trim();
+  if(inline)sources.push(...inline.split('；').map(item=>item.trim()).filter(Boolean));
+  for(let next=index+1;next<lines.length;next++){
+   const row=lines[next].trim();
+   if(!row)continue;
+   if(/^[-•]/.test(row)){sources.push(row.replace(/^[-•]\s*/,''));continue;}
+   break;
+  }
+ }
+ // 同一高光会在“爽点设置/高光场景/爽点”多个视图里重复出现；
+ // 去重只看 point 主干（去掉括号里的触发说明），保留第一次出现的完整来源。
+ // 否则同一个剧情点会生成多个 M 编号，白增评审输出与耗时。
+ const deduped=new Map<string,string>();
+ for(const source of sources){
+  const trimmed=String(source||'').trim();
+  if(!trimmed)continue;
+  const key=trimmed.startsWith('{')
+    ? trimmed
+    : trimmed.replace(/[（(].*$/,'').replace(/[\s\p{P}\p{S}]/gu,'').slice(0,30);
+  if(key&&!deduped.has(key))deduped.set(key,trimmed);
+ }
+ return [...deduped.values()].map((source,index)=>({ref:'M'+(index+1),source}));
 }
 export function chapterObligationReviewDirective(catalog:ReturnType<typeof chapterObligationCatalog>) {
- return '服务端固定的必需行动与结果清单：'+JSON.stringify(catalog)+'。这份清单不能由requiredEvents摘要替代、合并或删项。每条仅按该条实际指定的行动主体、地点、先后与结果核对，不把其它条目的限定条件移过来。仅在该条章纲明确指定到达某楼层时，到门口、准备上楼、他人上楼不能证明指定角色已到达；未指定楼层的条目不得凭空加本人到达楼层的条件。计划和意愿不当作实际完成。正文可以自然口语化，不要求照抄章纲或解释流程。额外返回obligationChecks，每个M编号恰一条：{"ref":"固定M编号","status":"covered|missing|unknown","evidence":["正文连续逐字证据，可用多条真实原文共同证明完整行动与结果"],"reason":"至少12字说明全条已发生或缺了什么"}。missing允许无引文但必须指出具体缺失，unknown保留审查未完成；covered证据须覆盖关键地点和结果限定，不能只证明同一条中的另一半。';
+ return '服务端固定的必需行动、结果与有效剧情点清单：'+JSON.stringify(catalog)+'。这份清单不能由requiredEvents摘要替代、合并或删项。每条仅按该条实际指定的行动主体、地点、先后、结果或剧情点是否实际发生核对，不把其它条目的限定条件移过来。仅在该条章纲明确指定到达某楼层时，到门口、准备上楼、他人上楼不能证明指定角色已到达；未指定楼层的条目不得凭空加本人到达楼层的条件。计划和意愿不当作实际完成。正文可以自然口语化，不要求照抄章纲或解释流程。额外返回obligationChecks，每个M编号恰一条：{"ref":"固定M编号","status":"covered|missing|unknown","evidence":["正文连续逐字证据，可用多条真实原文共同证明完整行动与结果"],"reason":"至少12字说明全条已发生或缺了什么"}。missing允许无引文但必须指出具体缺失，unknown保留审查未完成；covered证据须覆盖关键地点和结果限定，不能只证明同一条中的另一半。';
 }
 function floorValues(text:string) {
  const number=(value:string)=>temporalNumbers(value+'分钟').durations[0]?.minutes;
@@ -135,7 +167,7 @@ export function validateChapterObligationReview(rows:any,catalog:ReturnType<type
 
 export function chapterObligationWritingContext(outline:string) {
  const catalog=chapterObligationCatalog(outline);
- return catalog.length?'\n\n【本章已确认行动数据·生成与验收共用】\n'+JSON.stringify(catalog):'';
+ return catalog.length?'\n\n【本章已确认行动与高光数据·生成与验收共用】\n'+JSON.stringify(catalog):'';
 }
 export function chapterObligationRepairTargets(rows:any,errors:string[],catalog:ReturnType<typeof chapterObligationCatalog>) {
  if(!Array.isArray(rows))return catalog.map(row=>row.ref);
@@ -155,14 +187,33 @@ export function chapterMissingItemTexts(rows:any[]) {
  }).filter(Boolean);
 }
 
-export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string) {
- return '\n原正文证据目录：'+JSON.stringify(causalEvidenceAnchors(body,{}))+'\n禁止重写或转录引文，只选择目录body段落编号，用evidenceAnchorIds数组返回，可多段共同支持。简短应答和结果段可与实际行动上下文共同选择，不能只用孤立短句证明完整行动。仅引文定位错误时保留该行原status与reason，不重新评判其它行。错误：'+JSON.stringify(errors)+'\n原检查：'+JSON.stringify(rows)+'\n只返回JSON:{"obligationChecks":[{"ref":"点名M编号","status":"covered|missing|unknown","reason":"实际语义依据","evidenceAnchorIds":["body:p原文编号"]}]}';
+/** One stable, paragraph-only address catalog for the fixed-action receipt.
+ * The general causal catalog also contains clauses and sentence anchors;
+ * exposing them while asking for paragraph IDs made the model invent
+ * unsupported body:p locations. Do not use a second numbering system. */
+function chapterObligationParagraphAnchors(body:string){
+ return causalEvidenceAnchors(body,{}).filter(row=>/^body:p[1-9]\d*$/.test(row.id))
+   .map(({id,text})=>({id,text}));
+}
+export function chapterObligationEvidencePrompt(rows:any,targets:string[],errors:string[],body:string,
+ catalog:ReturnType<typeof chapterObligationCatalog>=[]) {
+ const anchors=chapterObligationParagraphAnchors(body);
+ const targetSources=catalog.filter(row=>targets.includes(row.ref));
+ return '\n【仅纠正证据定位，不重新审判固定行动或改正文】本次章纲目标：'+JSON.stringify(targetSources)
+   +'\n原正文段落证据目录（唯一可引用的编号）：'+JSON.stringify(anchors)
+   +'\n【合法编号全集】'+JSON.stringify(anchors.map(row=>row.id))
+   +'\n禁止重写或转录引文、编造段落编号或使用句子/子句编号，只能从合法编号全集逐字选取body:p数字形式，用evidenceAnchorIds数组返回。对无法从原文证明的行动保留missing或unknown，不能杜撰证据升级covered。简短应答和结果段须连同真实行动上下文选择；仅引文定位错误时保留原status与reason，其它已成立结论不重判。错误：'+JSON.stringify(errors)
+   +'\n原检查：'+JSON.stringify(Array.isArray(rows)?rows.filter(row=>targets.includes(row?.ref)):[])
+   +'\n只返回JSON:{"obligationChecks":[{"ref":"点名M编号","status":"covered|missing|unknown","reason":"实际语义依据","evidenceAnchorIds":["body:p1"]}]}';
 }
 export function materializeChapterObligationEvidence(rows:any,original:any,errors:string[],body:string) {
  if(!Array.isArray(rows))throw new Error('固定行动纠错没有返回检查行');
- const anchors=new Map(causalEvidenceAnchors(body,{}).map(row=>[row.id,row.text]));
+ const anchors=new Map(chapterObligationParagraphAnchors(body).map(row=>[row.id,row.text]));
  return rows.map(row=>{
-  if(!Array.isArray(row?.evidenceAnchorIds)||row.evidenceAnchorIds.some((id:any)=>!anchors.has(id)))throw new Error('固定行动纠错包含不存在的正文证据编号');
+  if(!Array.isArray(row?.evidenceAnchorIds))throw new Error('固定行动纠错缺少正文段落编号');
+  const unknown=row.evidenceAnchorIds.filter((id:any)=>typeof id!=='string'||!anchors.has(id));
+  if(unknown.length)throw new Error('固定行动纠错包含不存在的正文证据编号：'
+   +JSON.stringify(unknown.slice(0,6))+'；合法编号仅有 '+JSON.stringify([...anchors.keys()].slice(0,100)));
   const old=Array.isArray(original)?original.find(old=>old.ref===row.ref):undefined;
   const ownErrors=errors.filter(error=>error.includes(row.ref));
   const quoteOnly=old&&ownErrors.length&&ownErrors.every(error=>error===row.ref+'行动证据不能定位实际正文');

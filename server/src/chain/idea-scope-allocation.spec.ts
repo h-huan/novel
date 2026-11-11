@@ -50,13 +50,15 @@ it('the existing patch path accepts authorized metadata corrections and keeps st
  expect(()=>apply([{scopeAllocation:[1,1,1,1],description:'借数量问题另改故事'}])).toThrow('仅标签或数量');
  expect(()=>applyOrderedIdeaRepairPatches([raw],patches)).toThrow('未获得');
 });
-it('creation audit keeps the complete fact inventory and never auto-converts a semantic gap into a pass',()=>{
+it('creation audit keeps every externally verifiable result and never auto-converts a semantic gap into a pass',()=>{
  const chapters=[{content:'她说明只有自己担责，表舅和其他签字人不担。',highlights:[{point:'“表舅在这行字里，是其他人。”一句话讲清责任。'}],characterActions:[{action:'她说明合同责任',result:'亲戚明白责任只落在她身上'}]}];
  const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{}),results=causalChapterResultAnchors(anchors,0);
- expect(results.some(row=>row.path==='0.highlights.0.point')).toBe(true);
+ // The highlight is a narrative beat; its factual projection is owned by the
+ // fact review, not re-proved as an independent action/result obligation.
+ expect(results.some(row=>row.path==='0.highlights.0.point')).toBe(false);
  expect(results.some(row=>row.path==='0.characterActions.0.result')).toBe(true);
  const audit={status:'evaluated',transitions:[{status:'gap',reason:'旧评审只因台词措辞不同判缺失'}]},before=structuredClone(audit);
  const prompt=causalAuditRepairPrompt(audit,[],body,{});
- expect(prompt.prompt).toContain(OUTLINE_PROJECTION_POLICY);expect(prompt.prompt).toContain('要求重报不等于已调整');
+ expect(prompt.prompt).toContain(OUTLINE_PROJECTION_POLICY);expect(prompt.prompt).toContain('要求、交代、安排只证明发起');
  expect(audit).toEqual(before);
 });

@@ -154,8 +154,12 @@ export class ForeshadowingService {
   remind(id: string): ForeshadowingResponse {
     const existing = this.repo.findById(id);
     if (!existing) throw new NotFoundException(`Foreshadowing ${id} not found`);
+    // A long-running thread can be recalled in several chapters. Once in
+    // reminder state, another chapter-level reminder is not an invalid
+    // transition and must not record a duplicate canonical state change.
+    if (existing.status === 'reminder') return this.toResponse(existing);
     if (!['active', 'pending'].includes(existing.status)) {
-      throw new Error('Only active foreshadowings can enter reminder status');
+      throw new Error('Only open foreshadowings can enter reminder status');
     }
     this.repo.update(id, { status: 'reminder', updated_at: new Date().toISOString() });
     const response = this.toResponse(this.repo.findById(id)!);

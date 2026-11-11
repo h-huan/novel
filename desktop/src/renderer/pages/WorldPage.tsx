@@ -26,7 +26,7 @@ const WORLD_FIELD_LABELS: Record<string, string> = {
   factions: '势力分布（主要势力 / 组织 / 目标与关系）',
   scale_plan: '全文规模 / 数据规划（人口 / 势力 / 资源等量化）',
   ending: '结局设定（结局类型 / 走向 / 收束方式）',
-  hierarchy_rules: '核心层级规则（最高优先级：世界观 > 大纲 > 正文）',
+  hierarchy_rules: '核心层级与事实保护（已确认世界规则和既成正文事实优先于未来规划）',
   supplementary: '补充说明',
   custom_settings: '自定义设定（按本书补充的键值对，如金手指规则、专有名词表）',
 };

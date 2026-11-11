@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const SCHEMA_DESCRIPTION =
-  'Single execution standard, versioned creative authority, bounded dependency context and terminal generation invariants';
+  'Single execution standard, versioned creative authority, canonical chapter outlines, bounded dependency context and terminal generation invariants';
 
 type ColumnRow = { name: string };
 
@@ -66,6 +66,68 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       actions.push('quality_benchmark_samples.chapter_index');
     }
 
+    if (hasTable(db, 'generation_step_metrics')) {
+      if (!hasColumn(db, 'generation_step_metrics', 'discovery_request_id')) {
+        db.exec('ALTER TABLE generation_step_metrics ADD COLUMN discovery_request_id TEXT');
+        actions.push('generation_step_metrics.discovery_request_id');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generation_step_metrics_discovery_request ON generation_step_metrics(discovery_request_id,created_at)');
+    }
+
+    // Pre-project idea calls must be attributable even before any step metric
+    // finishes. Existing databases are reconciled without losing old runs.
+    if (hasTable(db, 'generation_runs')) {
+      if (!hasColumn(db, 'generation_runs', 'discovery_request_id')) {
+        db.exec('ALTER TABLE generation_runs ADD COLUMN discovery_request_id TEXT');
+        actions.push('generation_runs.discovery_request_id');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_discovery_request ON generation_runs(discovery_request_id,started_at)');
+    }
+
+    // 章纲规范化：活动列只保留规范版本；旧副本原文进审计表，不再参与生成。
+    if (hasTable(db, 'outlines')) {
+      for (const [name, definition] of [
+        ['outline_revision', 'INTEGER NOT NULL DEFAULT 0'],
+        ['canonical_hash', 'TEXT'],
+        ['normalized_at', 'TEXT'],
+      ] as Array<[string, string]>) {
+        if (!hasColumn(db, 'outlines', name)) {
+          db.exec(`ALTER TABLE outlines ADD COLUMN ${name} ${definition}`);
+          actions.push(`outlines.${name}`);
+        }
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS outline_normalization_log (
+          id TEXT PRIMARY KEY,
+          outline_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          field TEXT NOT NULL,
+          old_value TEXT NOT NULL DEFAULT '',
+          new_value TEXT NOT NULL DEFAULT '',
+          reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_outline_normalization_outline
+          ON outline_normalization_log(outline_id,created_at);
+      `);
+    }
+
+    // 旧生成稿只保留审计，不再作为复评/生成候选。
+    if (hasTable(db, 'generation_runs')) {
+      for (const [name, definition] of [
+        ['superseded_at', 'TEXT'],
+        ['superseded_by_run_id', 'TEXT'],
+      ] as Array<[string, string]>) {
+        if (!hasColumn(db, 'generation_runs', name)) {
+          db.exec(`ALTER TABLE generation_runs ADD COLUMN ${name} ${definition}`);
+          actions.push(`generation_runs.${name}`);
+        }
+      }
+      if (['project_id', 'chapter_index', 'started_at'].every(column => hasColumn(db, 'generation_runs', column))) {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_chapter_version ON generation_runs(project_id,chapter_index,started_at)');
+      }
+    }
+
     // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，
     // 生成在进入质量评估前失败时会永久留下 failed + not_evaluated，界面和恢复逻辑
     // 无法分辨“没评审”与“已经失败”。把这个约束下沉到数据库边界，避免每个调用点
@@ -107,6 +169,39 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
       db.exec('DROP TRIGGER IF EXISTS trg_projects_confirmed_story_insert; DROP TRIGGER IF EXISTS trg_projects_confirmed_story_update;');
       for (const column of ['confirmed_idea','idea_seed','idea_status','creation_source']) {
         if (hasColumn(db, 'projects', column)) { db.exec(`ALTER TABLE projects DROP COLUMN ${column}`); actions.push(`drop_legacy_column.projects.${column}`); }
+      }
+    }
+
+    // Initial creation and resumed creation insert the same canonical world/profile
+    // fields. Historical databases may already have migration 001 recorded but
+    // still predate these columns; CREATE TABLE IF NOT EXISTS cannot add them.
+    // Reconcile only required write/read fields, never replace either table or
+    // the persisted story facts. Keep the source-review/transaction Gate intact.
+    const worldCreationColumns: Array<{table:string;columns:Array<[string,string]>}> = [
+      {table:'world_settings',columns:[
+        ['rules',"TEXT DEFAULT '[]'"],['atmosphere',"TEXT DEFAULT ''"],
+        ['story_premise',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT '[]'"],
+        ['social_rules',"TEXT DEFAULT ''"],['special_settings',"TEXT DEFAULT ''"],
+        ['setting_type',"TEXT DEFAULT 'full'"],
+      ]},
+      {table:'world_system_profiles',columns:[
+        ['synopsis',"TEXT DEFAULT ''"],['basic_info',"TEXT DEFAULT ''"],
+        ['era',"TEXT DEFAULT ''"],['locations',"TEXT DEFAULT ''"],
+        ['atmosphere_tone',"TEXT DEFAULT ''"],['rules',"TEXT DEFAULT ''"],
+        ['social_structure',"TEXT DEFAULT ''"],['tech_supernatural',"TEXT DEFAULT ''"],
+        ['system_mechanics',"TEXT DEFAULT ''"],['culture_customs',"TEXT DEFAULT ''"],
+        ['naming_rules',"TEXT DEFAULT ''"],['scale_plan',"TEXT DEFAULT ''"],
+        ['ending',"TEXT DEFAULT ''"],['hierarchy_rules',"TEXT DEFAULT ''"],
+        ['supplementary',"TEXT DEFAULT ''"],
+      ]},
+    ];
+    for (const {table,columns} of worldCreationColumns) {
+      if (!hasTable(db,table)) continue;
+      for (const [name,definition] of columns) {
+        if (!hasColumn(db,table,name)) {
+          db.exec(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${definition}`);
+          actions.push(`creation_world_column.${table}.${name}`);
+        }
       }
     }
 

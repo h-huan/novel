@@ -1,11 +1,54 @@
 import { expect, it, vi } from 'vitest';
-import { reviewChapterDependencies, chapterActionRepairEvidence } from './chapter-dependency-review';
-import { causalEvidenceAnchorOptions } from '../modules/writing-quality/causal-review';
+import { reviewChapterDependencies, chapterActionRepairEvidence, changedOutlineActionResultPaths, currentResultAnchorIdsForPaths, planningChapterForCausalReview } from './chapter-dependency-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog } from '../modules/writing-quality/causal-review';
 
 const chapter = { content: '提出新的处理方案', foreshadowingRecover: [{ method: '争议已经解除' }] };
 const factPass = { consistent: true, contradictions: [], ledger: ['既有事实'] };
 const actionGap = () => Object.assign(new Error('行动不足以支持已解决的结果'), {
   gateRejection: true as const, report: { status: 422, topic: 'outline_alignment', sections: ['只有提出方案，没有对方接受或状态改变的证据'] },
+});
+it('local patch evidence uses precisely the same numbered body as the independent action audit',()=>{
+ const raw={chapterFunction:null,content:'进店后她问老板谁放的药，老板一直没有回答。',
+  characterActions:[{character:'老板',action:'他没有回应',result:'当场亲口承认药是他放的'}]};
+ const normalized=planningChapterForCausalReview(raw,3,'climax');
+ const anchors=causalEvidenceAnchorOptions(JSON.stringify([normalized]),{});
+ const result=anchors.find(item=>item.path==='0.characterActions.0.result');
+ const action=anchors.find(item=>item.path==='0.characterActions.0.action');
+ expect(result?.id).toBeTruthy();
+ expect(action?.id).toBeTruthy();
+ const failure=Object.assign(actionGap(),{planningActionAudit:{transitions:[{
+   status:'gap',resultAnchorId:result?.id,actionAnchorId:action?.id,
+   resultEvidence:result?.text,actionEvidence:action?.text,reason:'沉默不能作为承认'}]}});
+ const correct=chapterActionRepairEvidence(normalized,failure);
+ expect(correct.gaps).toEqual([expect.objectContaining({
+   actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+   resultEvidence:result?.text})]);
+ // A raw, non-canonical body is NOT guaranteed to share its serialized
+ // evidence IDs: the server-inserted chapterFunction can change indexes.
+ const wrong=chapterActionRepairEvidence(raw,failure);
+ expect(wrong.gaps[0].resultPath).not.toBe('characterActions.0.result');
+ expect(raw.chapterFunction).toBeNull();
+ expect(normalized.chapterFunction).toBe('climax');
+});
+it('scopes a post-repair action re-audit by stable paths and resolves current IDs after text edits',()=>{
+ const before={characterActions:[{action:'提出方案',result:'对方接受'}]};
+ const after={characterActions:[{action:'提出方案',result:'对方明确拒绝'}]};
+ const evidence={gaps:[{resultPath:'characterActions.0.result'}],resultFields:['characterActions.0.result']};
+ expect(changedOutlineActionResultPaths({'characterActions.0.result':'对方明确拒绝'},evidence)).toEqual(['characterActions.0.result']);
+ expect(changedOutlineActionResultPaths({content:'重写后的正文'},evidence)).toEqual([]);
+ const afterAnchors=causalEvidenceAnchorOptions(JSON.stringify([after]),{});
+ const currentId=afterAnchors.find(a=>a.path==='0.characterActions.0.result')?.id;
+ expect(currentResultAnchorIdsForPaths(after,['characterActions.0.result'])).toEqual([currentId]);
+ expect(currentResultAnchorIdsForPaths(after,['characterActions.9.result'])).toEqual([]);
+});
+it('post-repair scoped IDs resolve duplicate-text aliases to the audit catalog representative',()=>{
+ const chapter={scenes:[{outcome:'对方当场接受方案'}],characterActions:[{action:'提出方案',result:'对方当场接受方案'}]};
+ const anchors=causalEvidenceAnchorOptions(JSON.stringify([chapter]),{});
+ const catalog=causalChapterEvidenceCatalog([chapter],anchors.filter(anchor=>anchor.source==='body')).entries[0].resultAnchorIds;
+ const ids=currentResultAnchorIdsForPaths(chapter,['characterActions.0.result','scenes.0.outcome']);
+ expect(ids.length).toBeGreaterThan(0);
+ expect(new Set(ids).size).toBe(1);
+ expect(ids.every(id=>catalog.includes(id))).toBe(true);
 });
 it('同一候选的两项独立审核并行启动，仍须全部结束才能返回', async () => {
   let releaseFacts!: () => void, releaseActions!: () => void;
@@ -43,8 +86,24 @@ it('从原因果账目定位具体结果字段和全部结果索引，不猜测�
   const result = chapterActionRepairEvidence(candidate, failure);
   expect(result.gaps).toEqual([expect.objectContaining({ actionPath: 'characterActions.0.action', resultPath: 'characterActions.0.result', reason: '提出不等于对方接受' }),
     expect.objectContaining({ resultPath: null, resultEvidence: '未知位置' })]);
-  expect(result.resultFields).toEqual(expect.arrayContaining(['characterActions.0.result', 'characterStates.0.stateAfter', 'foreshadowingRecover.0.method']));
+  expect(result.resultFields).toEqual(expect.arrayContaining(['characterActions.0.result', 'characterStates.0.stateAfter']));
+  expect(result.resultFields).not.toContain('foreshadowingRecover.0.method');
   expect(candidate.characterActions[0].result).toBe('纠纷已解除');
+});
+it('flattens server result shards instead of losing every gap path to an array audit', () => {
+  const candidate = { content: '主角提出调解，被对方明确拒绝。', characterActions: [{ action: '提出调解', result: '纠纷已解除' }] };
+  const anchors = causalEvidenceAnchorOptions(JSON.stringify([candidate]), {});
+  const actionId = anchors.find(a => a.path === '0.characterActions.0.action')!.id;
+  const resultId = anchors.find(a => a.path === '0.characterActions.0.result')!.id;
+  const failure = Object.assign(actionGap(), { planningActionAudit: [
+    { transitions: [{ status: 'supported', actionAnchorId: actionId, resultAnchorId: resultId, reason: '另一分片已通过' }] },
+    { transitions: [{ status: 'gap', actionAnchorId: actionId, resultAnchorId: resultId,
+      actionEvidence: '提出调解', resultEvidence: '纠纷已解除', reason: '提出不等于对方接受' }] },
+  ] });
+  expect(chapterActionRepairEvidence(candidate, failure).gaps).toEqual([
+    expect.objectContaining({ actionPath: 'characterActions.0.action', resultPath: 'characterActions.0.result',
+      reason: '提出不等于对方接受' }),
+  ]);
 });
 it('事实通过不能盖过行动缺口：完整拒绝作为同一章局部修复依据', async () => {
   const facts = vi.fn().mockResolvedValue(factPass);

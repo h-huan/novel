@@ -14,10 +14,11 @@ import {
   dialog,
   nativeImage,
   globalShortcut,
+  screen,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+
 
 // 当前桌面运行环境的 Chromium GPU 子进程可能因图形运行库不可用而
 // 连续崩溃并直接终止整个应用。小说编辑器不依赖 GPU 渲染，启动前关闭
@@ -56,9 +57,9 @@ let tray: Tray | null = null;
 let isQuitting = false;
 const SERVER_PORT = 3100;
 let lastServerStatus: { running: boolean; port: number; error?: string } = { running: false, port: SERVER_PORT };
-let serverCheckPromise: Promise<boolean> | null = null;
-let managedServerProcess: ChildProcess | null = null;
-let managedServerOutput: string[] = [];
+
+
+
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 function getWindowStatePath(): string {
@@ -68,7 +69,9 @@ function getWindowStatePath(): string {
 // ---------- 窗口状态持久化 ----------
 
 function saveWindowBounds(): void {
-  if (!mainWindow) return;
+  // Windows can emit move/resize while minimizing to the taskbar. Never
+  // persist that temporary lower-right placement as the next editor launch.
+  if (!mainWindow || mainWindow.isMinimized() || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
   try {
     const bounds = mainWindow.getBounds();
     fs.writeFileSync(getWindowStatePath(), JSON.stringify(bounds, null, 2), 'utf-8');
@@ -84,7 +87,18 @@ function loadWindowBounds(): WindowBounds {
       const saved = JSON.parse(data) as WindowBounds;
       // 验证保存的坐标在屏幕范围内
       if (typeof saved.width === 'number' && typeof saved.height === 'number') {
-        return saved;
+        // A monitor may have been unplugged or Windows may have persisted
+        // minimized coordinates. Only reuse visible, usable bounds.
+        const displays = screen.getAllDisplays();
+        if (Number.isFinite(saved.width) && Number.isFinite(saved.height)
+          && saved.width >= 1024 && saved.height >= 680
+          && Number.isFinite(saved.x) && Number.isFinite(saved.y)
+          && displays.some(display => {
+            const area = display.workArea;
+            const overlapWidth = Math.min(saved.x! + saved.width, area.x + area.width) - Math.max(saved.x!, area.x);
+            const overlapHeight = Math.min(saved.y! + saved.height, area.y + area.height) - Math.max(saved.y!, area.y);
+            return overlapWidth >= 200 && overlapHeight >= 150;
+          })) return saved;
       }
     }
   } catch {
@@ -138,15 +152,7 @@ function createTray(): void {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示窗口',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        } else if (launcherWindow) {
-          launcherWindow.show();
-          launcherWindow.focus();
-        }
-      },
+      click: () => restoreApplicationWindow(),
     },
     {
       label: '最小化到托盘',
@@ -168,27 +174,37 @@ function createTray(): void {
   tray.setContextMenu(contextMenu);
 
   // 双击托盘图标恢复窗口
-  tray.on('double-click', () => {
-    // 优先恢复主窗口，否则恢复引导窗口
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.focus();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    } else if (launcherWindow) {
-      if (launcherWindow.isVisible()) {
-        launcherWindow.focus();
-      } else {
-        launcherWindow.show();
-        launcherWindow.focus();
-      }
-    }
-  });
+  tray.on('double-click', restoreApplicationWindow);
 }
 
 // ---------- 窗口管理 ----------
+
+/** ready-to-show is not guaranteed when Chromium does not paint a hidden
+ * window (including some Windows GPU / Vite startup paths). Show once the
+ * document is ready as a second route; neither path creates another window.
+ * Never force always-on-top: normal launches should not cover fullscreen games. */
+function revealLoadedWindow(window: BrowserWindow): void {
+  let revealed = false;
+  const reveal = () => {
+    if (revealed || window.isDestroyed()) return;
+    revealed = true;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  };
+  window.once('ready-to-show', reveal);
+  window.webContents.once('did-finish-load', reveal);
+  window.webContents.once('dom-ready', reveal);
+  window.webContents.once('did-fail-load', (_event, _errorCode, _description, _url, isMainFrame) => {
+    if (isMainFrame) reveal();
+  });
+  // Headless Windows/Xvfb and certain GPU startup paths can create an invisible
+  // Chromium window without ever delivering ready-to-show or did-finish-load.
+  // A single bounded fallback makes an ordinary launch visible even then.
+  const fallback = setTimeout(reveal, 1500);
+  window.once('closed', () => clearTimeout(fallback));
+}
+
 
 /**
  * 创建引导窗口（欢迎窗口）
@@ -197,13 +213,14 @@ function createTray(): void {
  */
 function createLauncherWindow(): void {
   launcherWindow = new BrowserWindow({
+    center: true,
     width: 900,
     height: 680,
     minWidth: 700,
     minHeight: 500,
     title: 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -212,9 +229,7 @@ function createLauncherWindow(): void {
     },
   });
 
-  launcherWindow.once('ready-to-show', () => {
-    launcherWindow?.show();
-  });
+  revealLoadedWindow(launcherWindow);
 
   launcherWindow.on('closed', () => {
     launcherWindow = null;
@@ -224,9 +239,7 @@ function createLauncherWindow(): void {
     }
   });
 
-  launcherWindow.webContents.once('did-finish-load', () => {
-    setTimeout(() => { void ensureServerRunning(); }, 100);
-  });
+
 
   // 加载引导页
   if (VITE_DEV_SERVER_URL) {
@@ -254,7 +267,7 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
     minHeight: 680,
     title: projectTitle ? `${projectTitle} - AI写作平台` : 'AI写作平台',
     backgroundColor: '#1a1a2e',
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -264,9 +277,7 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
   });
 
   // 窗口准备好后再显示，避免白屏闪烁
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-  });
+  revealLoadedWindow(mainWindow);
 
   // 保存窗口位置/大小（移动/调整时）
   mainWindow.on('resize', saveWindowBounds);
@@ -277,9 +288,7 @@ function createMainWindow(projectId?: string, projectTitle?: string, subPath = '
     mainWindow = null;
   });
 
-  mainWindow.webContents.once('did-finish-load', () => {
-    setTimeout(() => { void ensureServerRunning(); }, 100);
-  });
+
 
   // 加载应用（带 project 参数，方便直接跳转）
   let url: string;
@@ -349,157 +358,31 @@ function setupAutoUpdater(): void {
 
 // ---------- NestJS 服务连接（服务端固定 3100） ----------
 
-const SERVER_START_TIMEOUT_MS = 30_000;
-const SERVER_HEALTH_INTERVAL_MS = 250;
-const SERVER_OUTPUT_TAIL = 40;
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function rememberServerOutput(chunk: unknown): void {
-  const lines = String(chunk ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (!lines.length) return;
-  managedServerOutput.push(...lines);
-  if (managedServerOutput.length > SERVER_OUTPUT_TAIL) {
-    managedServerOutput = managedServerOutput.slice(-SERVER_OUTPUT_TAIL);
-  }
-}
-
+// 仅检查外部独立启动的 3100 服务。Electron 不拥有服务端生命周期。
 function broadcastServerStatus(status: { running: boolean; port: number; error?: string }): void {
   lastServerStatus = status;
   mainWindow?.webContents.send('server-status', status);
   launcherWindow?.webContents.send('server-status', status);
 }
 
-async function tryConnectPort(port: number): Promise<boolean> {
+async function checkServerConnection(port = SERVER_PORT): Promise<boolean> {
   try {
-    const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
-    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return false;
-    const body = await res.json() as { status?: string };
-    return body.status === 'ok';
-  } catch { /* 服务未起或端口不可达 */ }
-  return false;
-}
-
-async function connectToServer(port: number = SERVER_PORT): Promise<boolean> {
-  if (!(await tryConnectPort(port))) return false;
-  const status = { running: true, port };
-  broadcastServerStatus(status);
-  console.log(`[server] backend ready at http://127.0.0.1:${port}`);
-  return true;
-}
-
-function reportServerUnavailable(port: number, detail?: string): void {
-  const msg = detail || `服务端启动失败或端口 ${port} 不可用。`;
-  broadcastServerStatus({ running: false, port, error: msg });
-  console.warn(`[server] backend unavailable on port ${port}: ${msg}`);
-}
-
-function stopManagedServer(): void {
-  const child = managedServerProcess;
-  managedServerProcess = null;
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    if (child.connected) {
-      child.send?.({ type: 'shutdown' }, () => {
-        try { child.disconnect?.(); } catch { /* already disconnected */ }
-      });
-    } else {
-      child.kill('SIGTERM');
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (response.ok) {
+      const health = await response.json() as { status?: string };
+      if (health.status === 'ok') {
+        broadcastServerStatus({ running: true, port });
+        return true;
+      }
     }
   } catch {
-    try { child.kill('SIGTERM'); } catch { /* already stopped */ }
+    // 未启动、启动失败或端口被占用时不创建任何进程。
   }
-}
-
-function managedServerSpec(port: number): { executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } | null {
-  if (!app.isPackaged) return null;
-  const serverRoot = path.join(process.resourcesPath, 'server');
-  const nodeExecutable = path.join(serverRoot, process.platform === 'win32' ? 'node.exe' : 'node');
-  const entry = path.join(serverRoot, 'src', 'main.js');
-  if (!fs.existsSync(nodeExecutable)) throw new Error(`内置服务端 Node 运行时不存在：${nodeExecutable}`);
-  if (!fs.existsSync(entry)) throw new Error(`内置服务端入口不存在：${entry}`);
-  const dataDir = path.join(app.getPath('userData'), 'server-data');
-  fs.mkdirSync(dataDir, { recursive: true });
-  return {
-    executable: nodeExecutable,
-    args: [entry],
-    cwd: serverRoot,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      SERVER_PORT: String(port),
-      DATA_DIR: dataDir,
-      NOVEL_MANAGED_SERVER: '1',
-      NODE_ENV: 'production',
-    },
-  };
-}
-
-async function startManagedServer(port: number): Promise<boolean> {
-  const spec = managedServerSpec(port);
-  if (!spec) {
-    reportServerUnavailable(port, '开发模式后端未启动；请从 desktop 目录运行 npm run dev，由启动器自动拉起服务端。');
-    return false;
-  }
-
-  managedServerOutput = [];
-  const child = spawn(spec.executable, spec.args, {
-    cwd: spec.cwd,
-    env: spec.env,
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    windowsHide: true,
-    shell: false,
-  });
-  managedServerProcess = child;
-  child.stdout?.on('data', chunk => {
-    rememberServerOutput(chunk);
-    process.stdout.write(`[server] ${String(chunk)}`);
-  });
-  child.stderr?.on('data', chunk => {
-    rememberServerOutput(chunk);
-    process.stderr.write(`[server] ${String(chunk)}`);
-  });
-  child.once('error', error => rememberServerOutput(`spawn error: ${error.message}`));
-  child.once('exit', (code, signal) => {
-    if (managedServerProcess === child) managedServerProcess = null;
-    if (!isQuitting && code !== 0) {
-      reportServerUnavailable(port, `受管服务端异常退出（code=${code ?? 'null'}, signal=${signal ?? 'none'}）`);
-    }
-  });
-
-  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await connectToServer(port)) return true;
-    if (child.exitCode !== null || child.signalCode !== null) break;
-    await delay(SERVER_HEALTH_INTERVAL_MS);
-  }
-
-  const tail = managedServerOutput.slice(-8).join(' | ');
-  stopManagedServer();
-  reportServerUnavailable(port, `内置服务端未在 ${SERVER_START_TIMEOUT_MS / 1000} 秒内就绪${tail ? `：${tail}` : ''}`);
+  const error = `端口 ${port} 的后端未就绪；请在 server 目录单独运行 npm run start:dev。`;
+  broadcastServerStatus({ running: false, port, error });
   return false;
-}
-
-function ensureServerRunning(port = SERVER_PORT): Promise<boolean> {
-  if (!serverCheckPromise) {
-    serverCheckPromise = (async () => {
-      // 已有健康服务可能是开发者单独启动的后端；直接复用且不接管生命周期。
-      if (await connectToServer(port)) return true;
-      if (managedServerProcess && managedServerProcess.exitCode === null) {
-        const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
-        while (Date.now() < deadline) {
-          if (await connectToServer(port)) return true;
-          if (!managedServerProcess || managedServerProcess.exitCode !== null) break;
-          await delay(SERVER_HEALTH_INTERVAL_MS);
-        }
-      }
-      return startManagedServer(port);
-    })().finally(() => { serverCheckPromise = null; });
-  }
-  return serverCheckPromise;
 }
 
 // ---------- IPC 处理器 ----------
@@ -777,33 +660,22 @@ function registerIpcHandlers(): void {
   // ===== 独立 NestJS 服务连接状态 =====
 
   ipcMain.handle('get-server-status', async (): Promise<IpcResult> => {
-    await ensureServerRunning(SERVER_PORT);
+    await checkServerConnection(SERVER_PORT);
     return { success: true, data: lastServerStatus };
   });
 
-  ipcMain.handle(
-    'start-server',
-    async (): Promise<IpcResult> => {
-      try {
-        const targetPort = SERVER_PORT;
-        const running = await ensureServerRunning(targetPort);
-        return running
-          ? { success: true, data: { port: targetPort, status: 'connected' } }
-          : { success: false, error: lastServerStatus.error || `服务端未运行 (http://127.0.0.1:${targetPort})` };
-      } catch (error) {
-        return { success: false, error: String(error) };
-      }
-    },
-  );
-
-  ipcMain.handle('stop-server', async (): Promise<IpcResult> => {
-    if (!managedServerProcess) {
-      return { success: false, error: '当前服务端不是由桌面应用启动，不能由桌面应用关闭。' };
-    }
-    stopManagedServer();
-    broadcastServerStatus({ running: false, port: SERVER_PORT });
-    return { success: true, data: { port: SERVER_PORT, status: 'stopped' } };
+  // 保留现有 IPC 合同供状态按钮调用，但绝不从桌面端拉起服务端。
+  ipcMain.handle('start-server', async (): Promise<IpcResult> => {
+    const connected = await checkServerConnection(SERVER_PORT);
+    return connected
+      ? { success: true, data: { port: SERVER_PORT, status: 'connected' } }
+      : { success: false, error: lastServerStatus.error };
   });
+
+  ipcMain.handle('stop-server', async (): Promise<IpcResult> => ({
+    success: false,
+    error: '服务端独立运行；请从原服务端终端停止，桌面端不会结束后端进程。',
+  }));
 
   // ===== 项目事件发送 (渲染进程通过 IPC 触发) =====
   // 这些通道由渲染进程调用，向其他渲染进程广播事件
@@ -843,6 +715,8 @@ function restoreApplicationWindow(): void {
     return;
   }
   if (target.isMinimized()) target.restore();
+  // A visible window may still be behind the Vite terminal; bring the
+  // original single instance to the foreground instead of a tray-only launch.
   target.show();
   target.focus();
 }
@@ -860,9 +734,9 @@ if (!gotTheLock) {
     registerShortcuts();
     setupAutoUpdater();
 
-    // 窗口创建前先完成服务端启动/复用判定，避免渲染层一启动就请求一个尚不存在的 3100。
-    await ensureServerRunning();
+    // 启动窗口不依赖后端就绪；连接状态通过只读健康检查提供。
     createWindow();
+    void checkServerConnection();
 
     app.on('activate', restoreApplicationWindow);
   });
@@ -875,10 +749,9 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 退出时只关闭由桌面应用自己启动的受管服务端；外部复用的 3100 不受影响。
+// Electron 只负责自己的窗口，不接管独立后端的停止。
 app.on('before-quit', () => {
   isQuitting = true;
-  stopManagedServer();
 
   // 保存窗口状态
   saveWindowBounds();

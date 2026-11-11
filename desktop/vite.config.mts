@@ -24,13 +24,15 @@ function stopElectronChild(): void {
   electronChild = null;
 }
 
-function startElectronHidden(): void {
+function startElectronApp(): void {
   const electronExecutable = require('electron') as string;
   stopElectronChild();
   const child = spawn(electronExecutable, ['.', '--no-sandbox'], {
     cwd: configDirectory,
     stdio: 'inherit',
-    windowsHide: true,
+    // GUI Electron must be allowed to create and foreground its window.
+    // Hiding the console of taskkill.exe is separate from hiding this app.
+    windowsHide: false,
     shell: false,
     env: process.env,
   });
@@ -67,9 +69,9 @@ export default defineConfig({
           },
         },
       },
-      // vite-plugin-electron 默认热重启使用 shell taskkill；Windows 下会反复闪现 CMD。
-      // 这里直接启动 electron.exe，并用隐藏的 taskkill.exe 管理热重启。
-      onstart: () => startElectronHidden(),
+      // Vite 的主进程构建完成后恢复 Electron 窗口及热重启。
+      // 仅启动 Electron；后端 3100 由独立进程管理，主进程只检查连接状态。
+      onstart: () => startElectronApp(),
     }),
     renderer(),
   ],

@@ -66,11 +66,11 @@ export interface HardlineFinding {
  * 排版、白描风格的标点窗口更长），不是「查不查」：没有任何规则会因为平台或风格而完全不检查。
  */
 export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
-  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、量词错误和叠用标点。
+  // 只保留可确定验证的硬伤：明确元叙述、物理排版错误、实质重复、残句链、量词错误和明显超规范的问叹号连串。
   // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
   '15c', '15d', '33', '35', '35b', '42', '44',
   '54-measure-word-mismatch', '56-punct-stacking',
-  'literal-character-count',
+  'meta-narration',
 ];
 
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
@@ -125,6 +125,18 @@ export function detectForbiddenTells(
       snippet:finding.evidence,position:`offset ${finding.start}-${finding.end}`,
       hitCharOffsets:[finding.start],occurrenceCount:1,
     });
+    // Half-width punctuation between two Han characters is a Chinese-prose
+    // typo, not a style choice. English, numbers, URLs and code never have Han
+    // on both sides, so they are untouched.
+    for(const match of content.matchAll(/([㐀-䶿一-鿿])([,;:?!])([㐀-䶿一-鿿])/g)) {
+      const offset=match.index!+1;
+      findings.push({
+        ruleId:'punctuation-width',
+        message:`中文叙述中夹用半角标点“${match[2]}”；改为对应全角标点，英文、数字和代码内部不处理`,
+        snippet:`${match[1]}${match[2]}${match[3]}`,position:`offset ${offset}`,
+        hitCharOffsets:[offset],occurrenceCount:1,
+      });
+    }
 
     // ===== 平台化排版/节奏策略（关键：各平台是各平台风格，扫描器不得一刀切） =====
     // 番茄/抖音/七猫/小红书/规则怪谈等"短段落、快节奏"平台，短段独立成段、人名/称谓短句起段
@@ -258,6 +270,35 @@ export function detectForbiddenTells(
           });
           break;
         }
+      }
+    }
+
+    // ===== meta-narration：章节编号/创作术语漏进正文（硬红线） =====
+    // 章纲、合同来源里本来就有“第1章/第2章/本章”，模型会把它当成故事内事实照抄。
+    // 只在叙述层检查，引号内对白可能是故事内人物在说书名/章节，不误报。
+    const metaTells: Array<{ pattern: RegExp; message: string }> = [
+      { pattern: /第\s*[0-9一二三四五六七八九十百零〇两]+\s*章/, message: '正文出现章节编号（如“第一章”）；这是创作元叙述，必须改成故事内时间/场景表述' },
+      { pattern: /(?:本|这一|上|下|前|后)章/, message: '正文出现“本章/上一章/下一章”等章节元叙述；必须改成故事内表述' },
+      { pattern: /读者(?:们)?/, message: '正文出现“读者”这一创作元叙述；必须改成故事内人物/旁人视角' },
+      { pattern: /(?:作者|笔者|编者)/, message: '正文出现“作者/笔者/编者”这一创作元叙述；必须改成故事内表述' },
+      { pattern: /(?:大纲|剧情)(?:里|中|上|外|要求|安排)?/, message: '正文出现“大纲/剧情”等创作术语；必须改成故事内表述' },
+    ];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const narrative = p.replace(/“[^”]*”|「[^」]*」|『[^』]*』|"[^"]*"/g, '');
+      for (const tell of metaTells) {
+        const match = narrative.match(tell.pattern);
+        if (!match) continue;
+        const offset = content.indexOf(match[0], paraSpans[i]?.start ?? 0);
+        findings.push({
+          ruleId: 'meta-narration',
+          message: tell.message,
+          snippet: slice(p),
+          position: `第 ${i + 1} 段`,
+          hitCharOffsets: offset >= 0 ? [offset] : [],
+          occurrenceCount: 1,
+        });
+        break;
       }
     }
 
@@ -641,17 +682,23 @@ export function detectForbiddenTells(
       findings.push(firstNarrationFinding);
     }
 
-    // ===== 56 标点连用滥用（！！！/？？/！？/？！，叠用标点非规范用法） =====
-    // GB/T 15834 规定感叹号/问号不得叠用；网络 AI 输出常用"！！""？？""！？"渲染色调，
-    // 是机器情绪化的物理指纹。任何一处叠用即阻断。
-    const stackedPunct = content.match(/[！？!?]{2,}/g) || [];
+    // ===== 56 明显超规范的问叹号连串 =====
+    // GB/T 15834-2011 4.3.3.3 允许强烈语气时最多三叹号；
+    // 4.2.3.2 对强烈疑问也允许叠问号，4.3.3.4 允许“？！”。
+    // 因而“！！”“？？”“？！”本身既非违规，也非AI证据。
+    // 只有四符及以上连串或三符混合连串可无语境地明确识别为异常，
+    // 不为偶发强调支付一次自动局部精修；其它语气滥用仍由同一语义Gate审查。
+    const stackedPunct = [...content.matchAll(/[！？!?]{2,}/g)]
+      .filter(m => m[0].length > 3 ||
+        (m[0].length === 3 && new Set([...m[0]].map(ch => ch === '！' || ch === '!' ? '!' : '?')).size > 1));
     if (stackedPunct.length > 0) {
       findings.push({
         ruleId: '56-punct-stacking',
-        message: `标点叠用 ${stackedPunct.length} 处（"！！""？？""！？"等，感叹号/问号叠用非规范用法，是 AI 情绪渲染指纹）。全部改单标点，用句子本身传达情绪`,
-        snippet: slice(stackedPunct[0] ?? '', 20),
+        message: `明显超规范的连续问叹号 ${stackedPunct.length} 处；保留有情绪依据的正常问号、感叹号及适度连用，只修无必要的异常标点串，不修改人物语气或故事事实`,
+        snippet: slice(stackedPunct[0][0], 20),
         position: '全文',
-        hitCharOffsets: charOffsetsOf([stackedPunct[0]]),
+        occurrenceCount: stackedPunct.length,
+        hitCharOffsets: stackedPunct.map(m => m.index!).filter(i => i >= 0),
       });
     }
 

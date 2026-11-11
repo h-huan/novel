@@ -453,6 +453,7 @@ CREATE TABLE IF NOT EXISTS generation_lessons (
 CREATE TABLE IF NOT EXISTS generation_runs (
       id TEXT PRIMARY KEY,
       project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      discovery_request_id TEXT,
       stage TEXT NOT NULL,
       scenario TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -470,7 +471,9 @@ CREATE TABLE IF NOT EXISTS generation_runs (
       started_at TEXT NOT NULL,
       finished_at TEXT,
       duration_ms INTEGER,
-      gate_status TEXT NOT NULL DEFAULT 'not_evaluated'
+      gate_status TEXT NOT NULL DEFAULT 'not_evaluated',
+      superseded_at TEXT,
+      superseded_by_run_id TEXT
     );
 
 -- [table] generation_repairs
@@ -569,6 +572,7 @@ CREATE TABLE IF NOT EXISTS quality_execution_schema (
 CREATE TABLE IF NOT EXISTS generation_step_metrics (
       id TEXT PRIMARY KEY,
       project_id TEXT,
+      discovery_request_id TEXT,
       chapter_index INTEGER,
       step_key TEXT NOT NULL,
       scenario TEXT,
@@ -590,6 +594,8 @@ CREATE TABLE IF NOT EXISTS generation_step_metrics (
       created_at TEXT NOT NULL,
       run_id TEXT REFERENCES generation_runs(id) ON DELETE SET NULL
     );
+CREATE INDEX IF NOT EXISTS idx_generation_step_metrics_discovery_request
+  ON generation_step_metrics(discovery_request_id,created_at);
 
 -- [table] import_export_logs
 CREATE TABLE IF NOT EXISTS import_export_logs (
@@ -724,9 +730,26 @@ CREATE TABLE IF NOT EXISTS "outlines" (
     timeline TEXT,
     location_summary TEXT,
     conflict_design TEXT,
+    outline_revision INTEGER NOT NULL DEFAULT 0,
+    canonical_hash TEXT,
+    normalized_at TEXT,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES outlines(id) ON DELETE SET NULL
   );
+
+-- [table] outline_normalization_log
+CREATE TABLE IF NOT EXISTS outline_normalization_log (
+    id TEXT PRIMARY KEY,
+    outline_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    old_value TEXT NOT NULL DEFAULT '',
+    new_value TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outline_normalization_outline
+  ON outline_normalization_log(outline_id,created_at);
 
 -- [table] plot_progress
 CREATE TABLE IF NOT EXISTS plot_progress (

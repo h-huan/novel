@@ -27,6 +27,11 @@ export class ChainWritingController {
     return generationTasks.run('chapter', dto.projectId, dto.chapterId || '', () => this.chain.streamGenerate(dto, res));
   }
 
+  @Post('validate-book')
+  validateBook(@Body() dto: { projectId: string }) {
+    return this.chain.validateBook(dto.projectId);
+  }
+
   @Post('cancel-chapter/:projectId/:chapterId')
   cancelChapter(@Param('projectId') projectId: string, @Param('chapterId') chapterId: string) {
     return generationTasks.cancel('chapter', projectId, chapterId);

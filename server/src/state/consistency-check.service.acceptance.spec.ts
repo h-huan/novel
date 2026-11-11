@@ -44,6 +44,22 @@ describe('ConsistencyCheckService native SQLite acceptance', () => {
     ]));
     expect((localDb.prepare("SELECT COUNT(*) AS count FROM writing_quality_issues WHERE issue_type LIKE 'consistency.%'").get() as any).count).toBe(result.length);
   });
+
+  it('uses the existing recovery window instead of reporting a planned chapter as already overdue', async () => {
+    const localDb = new DatabaseSync(':memory:');
+    db = localDb;
+    await new Migrator(localDb).runMigrations();
+    localDb.prepare("INSERT INTO projects(id,title,type,status,settings,created_at,updated_at) VALUES ('p1','测试','short_story','active','{}',datetime('now'),datetime('now'))").run();
+    localDb.prepare("INSERT INTO outlines(id,project_id,level,title,created_at,updated_at) VALUES ('o1','p1','chapter','第一章',datetime('now'),datetime('now'))").run();
+    localDb.prepare('INSERT INTO chapters(id,project_id,chapter_index,content,outline_id,title,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'),datetime(\'now\'))').run('c3', 'p1', 3, '主角继续追查', 'o1', '三', 'draft');
+    localDb.prepare(`INSERT INTO foreshadowings(id,project_id,content,status,buried_chapter_index,
+      planned_recovery_chapter_index,recovery_window_end,created_at,updated_at)
+      VALUES ('fs2','p1','母亲的声音','reminder',1,2,4,datetime('now'),datetime('now'))`).run();
+    const service = new ConsistencyCheckService({ getDb: () => localDb } as any);
+    const result = await service.checkConsistency('p1', { checkTypes: ['plot_logic'] });
+    expect(result.some((row: any) => row.checkType === 'plot_logic'
+      && row.details?.some((detail: any) => detail.sourceId === 'fs2'))).toBe(false);
+  });
 });
 
 it('migrates legacy contradiction rows into QualityIssue and removes old tables', async () => {

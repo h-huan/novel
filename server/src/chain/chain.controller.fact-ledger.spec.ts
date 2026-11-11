@@ -22,10 +22,14 @@ const conflict = {
 describe('outline fact review pipeline', () => {
   it('passes the complete persisted world, including constraints and social rules, to framework audits', async () => {
     const controller=controllerFixture(),world={era:'现代',rules:'许可仅对持有人生效',constraints:'许可不保证设备持续打开',social_rules:'他人必须各自取得许可',rule_system_json:'{"revoke":"过期失效"}'},outlines=[{order:1,content:'持有人刷卡进入'}];
-    const prepare=vi.fn((sql:string)=>sql.includes('world_settings')?{get:()=>world}:{all:()=>outlines});
+    const prepare=vi.fn((sql:string)=>({
+      get:()=>sql.includes('world_settings')?world:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }));
     controller.db={getDb:()=>({prepare})};controller.assertOutlineCandidateFacts=vi.fn().mockResolvedValue(undefined);
     await controller.assertOutlineFactLedger('p','故事目标','执行标准');
-    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledWith('p','故事目标','执行标准',world,outlines);
+    expect(controller.assertOutlineCandidateFacts).toHaveBeenCalledWith('p','故事目标','执行标准',
+      {world,worldProfile:undefined,characters:[]},outlines,expect.any(Function));
     expect(prepare.mock.calls.some(([sql])=>sql.includes('SELECT * FROM world_settings'))).toBe(true);
   });
   it('keeps wrong-chapter quotations in review correction and never calls candidate repair', async () => {
@@ -89,6 +93,41 @@ describe('outline fact review pipeline', () => {
     expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(2);
   });
 
+  it('applies one bounded local repair at activation and persists only re-audited content', async () => {
+    const controller = controllerFixture();
+    const outlines = [{ order: 0, title: '第一章', content: '时间快一小时', scenes: '{}' }];
+    const updates: any[] = [];
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'时间倒退一小时'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+      run:(...args:any[])=>{updates.push([sql,args]);return {changes:1};},
+    }) }) };
+    const repair = vi.fn(async () => ({ candidates: [{ ...outlines[0], content: '时间倒退一小时' }] }));
+    controller.repairPendingOutlineFacts = repair;
+    controller.reviewOutlineFacts = vi.fn()
+      .mockResolvedValueOnce({ consistent: false, contradictions: ['同一触发方向相反'], ledger: [] })
+      .mockResolvedValueOnce({ consistent: true, contradictions: [], ledger: [] });
+    await expect(controller.assertOutlineFactLedger('project', '{}', '标准')).resolves.toBeUndefined();
+    expect(repair).toHaveBeenCalledTimes(1);
+    expect(controller.reviewOutlineFacts).toHaveBeenCalledTimes(2);
+    const update = updates.find(([sql]) => String(sql).includes('UPDATE outlines'));
+    expect(update).toBeTruthy();
+    expect(update[1][0]).toBe('时间倒退一小时');
+  });
+
+  it('still blocks activation when the re-audit keeps the evidenced conflict', async () => {
+    const controller = controllerFixture();
+    const outlines = [{ order: 0, title: '第一章', content: '时间快一小时', scenes: '{}' }];
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'时间倒退一小时'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+      run:()=>({changes:1}),
+    }) }) };
+    controller.repairPendingOutlineFacts = vi.fn(async () => ({ candidates: outlines }));
+    controller.reviewOutlineFacts = vi.fn().mockResolvedValue({ consistent: false, contradictions: ['同一触发方向相反'], ledger: [] });
+    await expect(controller.assertOutlineFactLedger('project', '{}', '标准')).rejects.toThrow('已举证的事实矛盾');
+  });
+
   it('audits all merged candidate fields without opening a database write path', async () => {
     const controller = controllerFixture();
     const first = '第一次使用已产生损失';
@@ -131,18 +170,24 @@ describe('outline fact review pipeline', () => {
   ])('keeps original evidence across batches when the ledger is empty: %s', async (_genre, before, after) => {
     const controller = controllerFixture();
     const outlines = Array.from({ length: 5 }, (_, order) => ({ order, content: order === 0 ? before : order === 4 ? after : '经过' }));
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '故事世界规则' }) } : { all: () => outlines } }) };
-    controller.llmCallWithRetry.mockResolvedValueOnce({ data: { consistent: true, contradictions: [], ledger: [] }, warnings: [] })
-      .mockImplementationOnce(async (_label: string, prompt: string) => {
-        const rawSources = prompt.split('【已确认前章原始资料】')[1].split('【前批事实台账】')[0].trim();
-        const sources = JSON.parse(rawSources);
-        expect(sources).toHaveLength(4);
-        expect(sources[0]).toEqual({ chapterNumber: 1, content: before });
-        expect(prompt).toContain(after);
-        return { data: { consistent: false, contradictions: [{ location1: '前章原始资料[0].content', quote1: before,
-          location2: '本批完整章纲[0].content', quote2: after, conflict: '同一事实互斥且无变更事件' }], ledger: [] }, warnings: [] };
-      });
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'故事世界规则'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }) }) };
+    const pass = { data: { consistent: true, contradictions: [], ledger: [] }, warnings: [] };
+    const fail = async (_label: string, prompt: string) => {
+      const rawSources = prompt.split('【已确认前章原始资料】')[1].split('【前批事实台账】')[0].trim();
+      const sources = JSON.parse(rawSources);
+      expect(sources).toHaveLength(4);
+      expect(sources[0]).toEqual({ chapterNumber: 1, content: before });
+      expect(prompt).toContain(after);
+      return { data: { consistent: false, contradictions: [{ location1: '前章原始资料[0].content', quote1: before,
+        location2: '本批完整章纲[0].content', quote2: after, conflict: '同一事实互斥且无变更事件' }], ledger: [] }, warnings: [] };
+    };
+    // Activation first attempts one bounded local repair, then re-audits from
+    // the first batch; the re-audit keeps the real evidenced conflict.
+    controller.repairPendingOutlineFacts = vi.fn(async () => ({ candidates: [] }));
+    controller.llmCallWithRetry.mockResolvedValueOnce(pass).mockImplementation(fail);
     await expect(controller.assertOutlineFactLedger('any-project', '{}', '公共执行标准')).rejects.toThrow('已举证的事实矛盾');
     const evidence = JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]);
     expect(evidence.kind).toBe('fact_conflict');
@@ -167,6 +212,12 @@ describe('outline fact review pipeline', () => {
     expect(review.ledger[0]).toEqual(previous[0]);
     expect(review.ledger[1].baseline).toBe(previous[1].baseline);
     expect(review.ledger[1].history).toEqual([previous[1].current]);
+    expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
+    // Identical inputs under a different audit label must reuse the verified
+    // review; the label is logging metadata, not fact semantics.
+    const reused = await controller.reviewOutlineFacts('project', '复核同批', '{}', {}, previous,
+      [{ order: 1, content: '她看见发票' }], '标准', 2);
+    expect(reused).toEqual(review);
     expect(controller.llmCallWithRetry).toHaveBeenCalledTimes(1);
     expect(controller.generationMetrics.finishRun).not.toHaveBeenCalled();
   });
@@ -199,8 +250,10 @@ describe('outline fact review pipeline', () => {
   it('inherits history across activation batches with no changes', async () => {
     const controller = controllerFixture();
     const outlines = Array.from({ length: 5 }, (_, order) => ({ order, title: '章' + (order + 1), content: '事件' }));
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '已保存规则' }) } : { all: () => outlines } }) };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'已保存规则'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:outlines,
+    }) }) };
     controller.llmCallWithRetry
       .mockResolvedValueOnce({ data: { consistent: true, contradictions: [], ledger: [{ current: '门后时间：倒退一小时' }] }, warnings: [] })
       .mockImplementationOnce(async (_label: string, prompt: string, options: any) => {
@@ -218,8 +271,11 @@ describe('outline fact review pipeline', () => {
 
   it('blocks actual activation contradictions and persists both quoted evidence and failure category', async () => {
     const controller = controllerFixture();
-    controller.db = { getDb: () => ({ prepare: (sql: string) => sql.includes('world_settings')
-      ? { get: () => ({ rules: '时间倒退一小时' }) } : { all: () => [{ order: 0, content: '时间快一小时' }] } }) };
+    controller.db = { getDb: () => ({ prepare: (sql: string) => ({
+      get:()=>sql.includes('world_settings')?{rules:'时间倒退一小时'}:undefined,
+      all:()=>sql.includes('FROM characters')?[]:[{order:0,content:'时间快一小时'}],
+    }) }) };
+    controller.repairPendingOutlineFacts = vi.fn(async () => ({ candidates: [] }));
     controller.llmCallWithRetry.mockResolvedValue({ data: { consistent: false, contradictions: [conflict], ledger: [] }, warnings: [] });
     await expect(controller.assertOutlineFactLedger('project', '{}', '标准')).rejects.toThrow('已举证的事实矛盾');
     const record = JSON.parse(controller.generationMetrics.finishRun.mock.calls[0][3]);

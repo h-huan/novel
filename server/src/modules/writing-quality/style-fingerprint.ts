@@ -38,6 +38,110 @@ export function styleFingerprint(input: {
     quote: uniqueFragments[0], content: compact,
     message: `与已有章节重复 ${uniqueFragments.length} 个连续长片段，需检查模板复用或误复制` }));
 
+  // Heuristic prose-rhythm advisories. These are not hard gates: they flag
+  // patterns that readers perceive as "AI-flat" so the existing local repair
+  // can decide. Thresholds are measured per 1,000 Han characters / sentence.
+  const plainChars = input.content.replace(/\s/g, '').length;
+  const particleCount = (input.content.match(/了/g) || []).length;
+  if (plainChars >= 1000 && particleCount / plainChars * 1000 >= 19) {
+    risk('ai_trace.particle_overuse', input.content.match(/[^。！？\n]{0,30}了[^。！？\n]{0,30}/)?.[0] || '了',
+      `“了”出现 ${particleCount} 次（约 ${(particleCount / plainChars * 1000).toFixed(1)} 次/千字），过去时标记过密`);
+  }
+  const allSentences = input.content.split(/[。！？!?]+/)
+    .map(sentence => sentence.replace(/[“”「」『』\s]/g, '')).filter(Boolean);
+  const shortSentences = allSentences.filter(sentence => sentence.length <= 5).length;
+  if (allSentences.length >= 50 && shortSentences / allSentences.length >= 0.22) {
+    risk('ai_trace.short_sentence_ratio', allSentences.find(sentence => sentence.length <= 5) || '',
+      `${shortSentences}/${allSentences.length} 句不超过 5 字，句长过碎、缺少长短交错`);
+  }
+  const sentenceEndLe = (input.content.match(/了[。！？]/g) || []).length;
+  if (plainChars >= 1000 && sentenceEndLe / plainChars * 1000 >= 5) {
+    risk('ai_trace.le_sentence_end_overuse', input.content.match(/[^。！？\n]{0,20}了[。！？]/)?.[0] || '了。',
+      `${sentenceEndLe} 句以“了”收尾（约 ${(sentenceEndLe / plainChars * 1000).toFixed(1)} 次/千字），过去时句式过密`);
+  }
+  const contrastCount = (input.content.match(/不是[^。！？\n]{0,24}?(?:而是|是)/g) || []).length;
+  const parallelNegation = (input.content.match(/没有[^。！？\n]{0,16}?也没有|不[^。！？\n]{0,12}?也不/g) || []).length;
+  if (contrastCount >= 3 || parallelNegation >= 3) {
+    risk('ai_trace.parallel_contrast', input.content.match(/不是[^。！？\n]{0,24}?(?:而是|是)/)?.[0] || '不…也不…',
+      `“不是…是…” ${contrastCount} 处、“不…也不…” ${parallelNegation} 处，机械对比句式偏多`);
+  }
+  const density = (count: number) => plainChars > 0 ? count / plainChars * 1000 : 0;
+  const zheCount = (input.content.match(/着/g) || []).length;
+  if (plainChars >= 1000 && density(zheCount) >= 9) {
+    risk('ai_trace.zhe_density', input.content.match(/[^。！？\n]{0,20}着[^。！？\n]{0,20}/)?.[0] || '着',
+      `“着”出现 ${zheCount} 次（约 ${density(zheCount).toFixed(1)} 次/千字），持续动作句过密`);
+  }
+  const baCount = (input.content.match(/把/g) || []).length;
+  if (plainChars >= 1000 && density(baCount) >= 8) {
+    risk('ai_trace.ba_density', input.content.match(/[^。！？\n]{0,20}把[^。！？\n]{0,20}/)?.[0] || '把',
+      `“把”字句 ${baCount} 处（约 ${density(baCount).toFixed(1)} 次/千字），动作句式单一`);
+  }
+  const softAdverbs = [...input.content.matchAll(/微微|轻轻|慢慢|缓缓|一点一点|一下一下|一小块|一小截/g)];
+  if (plainChars >= 1000 && density(softAdverbs.length) >= 3) {
+    risk('ai_trace.soft_adverb_density', softAdverbs[0]?.[0] || '慢慢',
+      `软化词 ${softAdverbs.length} 处（约 ${density(softAdverbs.length).toFixed(1)} 次/千字），动作和情绪被磨平`);
+  }
+  const glances = [...input.content.matchAll(/看了(?:我|他|她)一眼|看了一眼/g)];
+  if (glances.length >= 4) {
+    risk('ai_trace.glance_repetition', glances[0]?.[0] || '看了一眼',
+      `“看了一眼”类动作 ${glances.length} 次，人物反应单一`);
+  }
+  const noVerbStarts = [...input.content.matchAll(/(?:^|\n)(?:我|他|她)没[^。！？\n]{0,10}[。！？]/g)];
+  if (noVerbStarts.length >= 4) {
+    risk('ai_trace.no_verb_start', noVerbStarts[0]?.[0]?.trim() || '我没说话。',
+      `“我没/他没/她没…”短句起段 ${noVerbStarts.length} 次，用否定短句代替反应`);
+  }
+  const speechTags = [...input.content.matchAll(/(?:他|她|我)(?:说|问|道|答|喊)/g)];
+  if (plainChars >= 1000 && density(speechTags.length) >= 5) {
+    risk('ai_trace.speech_tag_repetition', speechTags[0]?.[0] || '他说',
+      `对话标签 ${speechTags.length} 处（约 ${density(speechTags.length).toFixed(1)} 次/千字），缺少动作/停顿替代`);
+  }
+  const timeScaffolds = [...input.content.matchAll(/然后|接着|过了一会儿|没一会儿|后半夜|天亮|上午|中午|下午/g)];
+  if (plainChars >= 1000 && density(timeScaffolds.length) >= 2.5) {
+    risk('ai_trace.time_scaffold_density', timeScaffolds[0]?.[0] || '过了一会儿',
+      `时间推进词 ${timeScaffolds.length} 处（约 ${density(timeScaffolds.length).toFixed(1)} 次/千字），用时间词代替事件因果`);
+  }
+  const similes = [...input.content.matchAll(/像|仿佛|如同/g)];
+  if (plainChars >= 1000 && density(similes.length) >= 2) {
+    risk('ai_trace.simile_density', input.content.match(/[^。！？\n]{0,20}(?:像|仿佛|如同)[^。！？\n]{0,20}/)?.[0] || '像',
+      `比喻 ${similes.length} 处（约 ${density(similes.length).toFixed(1)} 次/千字），意象密度偏高`);
+  }
+  const oneOne = [...input.content.matchAll(/一([一-龥])一\1/g)];
+  if (oneOne.length >= 10) {
+    risk('ai_trace.one_one_parallel', oneOne[0]?.[0] || '一层一层',
+      `“一X一X”式排比 ${oneOne.length} 处，数量/动作表达过于模板化`);
+  }
+  const clicheEmotion = [...input.content.matchAll(/心里(?:咯噔|一沉|发闷|发紧|不是滋味)|后背(?:发凉|一凉)|心口(?:一紧|发闷)/g)];
+  if (clicheEmotion.length >= 2) {
+    risk('ai_trace.cliche_emotion', clicheEmotion[0]?.[0] || '心里一沉',
+      `老套情绪标签 ${clicheEmotion.length} 处，应改为动作、生理反应或沉默`);
+  }
+  const allParagraphs = input.content.split(/\n+/).map(p => p.trim()).filter(Boolean);
+  const oneSentenceParagraphs = allParagraphs.filter(paragraph => {
+    const stripped = paragraph.replace(/[“”「」『』\s]/g, '');
+    return stripped.length <= 40 && (stripped.match(/[。！？!?]/g) || []).length <= 1;
+  }).length;
+  if (allParagraphs.length >= 50 && oneSentenceParagraphs / allParagraphs.length >= 0.5) {
+    risk('ai_trace.one_sentence_paragraph_ratio', allParagraphs.find(paragraph => paragraph.length <= 40) || '',
+      `${oneSentenceParagraphs}/${allParagraphs.length} 段是单句短段，段落节奏被切得过碎`);
+  }
+  // Adjacent echo: a response that repeats the previous line instead of
+  // reacting to it. Only literal containment, never fuzzy similarity.
+  const echoParas = input.content.split(/\n+/).map(p => p.trim()).filter(Boolean);
+  for (let index = 1; index < echoParas.length; index++) {
+    // A dialogue echo needs at least one spoken line; repeated narration has
+    // its own cross-paragraph rules and must not be mislabeled as dialogue.
+    if (!/[“「]/.test(echoParas[index - 1]) && !/[“「]/.test(echoParas[index])) continue;
+    const previous = echoParas[index - 1].replace(/[“”「」『』\s，。！？!?、：:；;]/g, '');
+    const current = echoParas[index].replace(/[“”「」『』\s，。！？!?、：:；;]/g, '');
+    if (previous.length < 3 || current.length < 3) continue;
+    if (previous === current || (previous.length >= 4 && current.includes(previous))
+      || (current.length >= 4 && previous.includes(current))) {
+      risk('ai_trace.dialogue_echo', echoParas[index], '相邻段落重复上一句内容，像回声；应改用动作、沉默、潜台词或新信息回应');
+      break;
+    }
+  }
+
   const paragraphs = input.content.split(/\n+/).map(p => p.trim()).filter(p => p.length >= 20);
   const starts = new Map<string, string[]>();
   for (const p of paragraphs) {
@@ -102,7 +206,17 @@ export function styleFingerprint(input: {
   }));
   const functionGroups = new Map<string, string[]>();
   for (const item of functions) functionGroups.set(item.signature, [...(functionGroups.get(item.signature) || []), item.paragraph]);
-  for (const [signature, group] of functionGroups) if (group.length >= 5 && group.length / paragraphs.length >= 0.7) {
+  // A mostly-narration chapter is normal. The risk is a long uninterrupted run
+  // of one coarse function with almost no other narrative function, not the
+  // base rate of "narration:steady:show" in ordinary prose.
+  let longestRun = 0, run = 0, previousSignature = '';
+  for (const item of functions) {
+    run = item.signature === previousSignature ? run + 1 : 1;
+    previousSignature = item.signature;
+    longestRun = Math.max(longestRun, run);
+  }
+  for (const [signature, group] of functionGroups) if (group.length >= 5 && group.length / paragraphs.length >= 0.7
+    && longestRun >= 8 && functionGroups.size >= 3) {
     risk('ai_trace.paragraph_function_homology_risk', group[0], `${group.length} 段呈现相同的“${signature}”粗粒度功能结构`);
   }
   const profiles = [...attributed.entries()].filter(([, quotes]) => quotes.length >= 5 && quotes.join('').length >= 80)

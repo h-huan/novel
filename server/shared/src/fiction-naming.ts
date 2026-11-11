@@ -12,6 +12,21 @@ export function prohibitedFictionNames(value: Record<string, any>): string[] {
   return FICTION_NAMING_POLICY.prohibitedNames.filter(name => content.includes(name.toLowerCase()));
 }
 
+/** Normalize known prohibited names in a GENERATED, not-yet-confirmed idea.
+ * Never rewrite platform/model metadata or identity; the ordinary naming Gate
+ * verifies the result. Unknown names have no guessed automatic substitute. */
+export function normalizeGeneratedFictionNames(value: Record<string, any>): Record<string, any> {
+  const present=prohibitedFictionNames(value);
+  if(!present.length)return value;
+  const aliases=FICTION_NAMING_POLICY.fictionalAliases as Record<string,string>;
+  const mapping=Object.fromEntries(present.map(name=>{
+    const alias=aliases[name];
+    if(!alias)throw Error('禁止名称缺少经统一规则授权的虚构替换名：'+name);
+    return [name,alias];
+  }));
+  return applyFictionNamingReplacements(value,mapping);
+}
+
 /** Literal name-only edits of narrative values; identifiers and settings stay intact. */
 export function applyFictionNamingReplacements(value: Record<string, any>, replacements: unknown): Record<string, any> {
   if (!replacements || typeof replacements !== 'object' || Array.isArray(replacements) || !Object.keys(replacements).length)

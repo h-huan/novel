@@ -35,6 +35,55 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(crossStageRepairDiagnosticPositions(anchors,targets,findings)[0].anchorIds).toEqual([anchors.find(a=>a.path?.[0]==='hook')!.id]);
     expect(crossStageRepairFocusedAnchors(anchors,[{id:'c-B-unknown-0',chapterId:'c',content:'无法定位'}],['c-B-unknown-0'])).toEqual(anchors);
   });
+  it('keeps directly cited relationship and profile projections when a chapter source unit narrows other repair anchors',()=>{
+    const old='每日到值房照陈默口述抄写';
+    const bundle={
+      chapters:Array.from({length:4},(_,i)=>({id:'chapter-'+i,chapterIndex:i+1,
+        content:i===3?'裴砚隔一天来一回，抄了三个月。':'无关的章节内容。'})),
+      characters:Array.from({length:21},(_,i)=>({id:'character-'+i,name:'人物'+i,
+        relationships:JSON.stringify([{relation:old}]),
+        profile_json:JSON.stringify({relationships:[{relation:old}]}),
+        notes:'其它人物资料字段不该因源定位而扩大'})),
+    };
+    const finding='chapter-3-B-content-0 事实频次不一致：chapters.3.content（S837）隔一天来一回；'
+      +'characters.2.relationships.0.relation（S170）及characters.2.profile_json.relationships.0.relation（S188）每日到值房';
+    const request=crossStageRepairRequests(bundle,[finding])[0];
+    expect(request.targetIds).toEqual(['chapter-3','character-2']);
+    const anchors=crossStageRepairAnchors(request.context,request.targetIds);
+    const sourceTargets=[{id:'chapter-3-B-content-0',chapterId:'chapter-3',content:'裴砚隔一天来一回，抄了三个月。'}];
+    const focused=crossStageRepairFocusedAnchors(anchors,sourceTargets,request.findings,bundle);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='relationships'&&a.path?.join('.')==='0.relation')).toBe(true);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='profile_json'&&a.path?.join('.')==='relationships.0.relation')).toBe(true);
+    expect(focused.some(a=>a.entityId==='chapter-3'&&a.field==='content')).toBe(true);
+    expect(focused.some(a=>a.entityId==='character-2'&&a.field==='notes')).toBe(false);
+    expect(focused.some(a=>a.entityId==='character-20')).toBe(false);
+    const relational=focused.find(a=>a.entityId==='character-2'&&a.field==='relationships')!;
+    const profile=focused.find(a=>a.entityId==='character-2'&&a.field==='profile_json')!;
+    const edits=materializeCrossStageRepairEdits({edits:[
+      {anchorId:relational.id,replacement:'隔一天到值房照陈默口述抄写'},
+      {anchorId:profile.id,replacement:'隔一天到值房照陈默口述抄写'},
+    ]},anchors,request.context);
+    expect(edits.patches.map(p=>p.field).sort()).toEqual(['profile_json','relationships']);
+    expect(bundle.characters[2].profile_json).toContain(old);
+  });
+  it('focuses exact dotted character fields even when no chapter source unit was emitted',()=>{
+    const original='每日到值房照原口述抄写';
+    const bundle={characters:Array.from({length:21},(_,index)=>({
+      id:'character-'+index,name:'人物'+index,
+      relationships:JSON.stringify([{relation:original}]),
+      profile_json:JSON.stringify({relationships:[{relation:original}]}),
+      notes:'无需修改的其它资料',
+    }))};
+    const findings=['characters.2.relationships.0.relation 与 characters.2.profile_json.relationships.0.relation 频次冲突'];
+    const anchors=crossStageRepairAnchors(bundle,['character-2']);
+    const focused=crossStageRepairFocusedAnchors(anchors,[],findings,bundle);
+    expect(focused.map(anchor=>anchor.field).sort()).toEqual(['profile_json','relationships']);
+    const view=crossStageRepairContext(bundle,findings);
+    expect(view.characters.map(character=>character.id)).toEqual(['character-2']);
+    expect(view.characters[0].relationships).toContain(original);
+    const unrelated=crossStageRepairContext(bundle,['characters.20.profile_json 另有问题']);
+    expect(unrelated.characters.map(character=>character.id)).toEqual(['character-20']);
+  });
   it('includes a named actors differently worded mechanism projection without routing unrelated characters or rule examples', () => {
     const bundle={world:[{id:'world',rules:'规则示例：推出唯一通道'}],chapters:[{id:'c',content:'陈甲比较记录后锁定唯一时间窗口。',scenes:JSON.stringify({characterActions:[{character:'陈甲',action:'比较记录',result:'锁定唯一时间窗口'}]})}],characters:[
       {id:'a',name:'陈甲',profile_json:JSON.stringify({skills:['凭职业经验反推出楼里唯一的无记录窗口']})},
@@ -101,6 +150,58 @@ describe('cross-stage Canon mutation boundary', () => {
     expect(unknown).toHaveLength(1);
     expect(unknown[0].findings).toContain('未定位的真实错误');
     expect(bundle.chapters).toHaveLength(3);
+  });
+  it('binds dotted review indexes to the exact chapter and both character relationship projections', () => {
+    const original='每日到值房照陈默口述抄写';
+    const chapters=Array.from({length:5},(_,i)=>({id:'chapter-'+i,chapterIndex:i+1,
+      content:i===3?'裴砚隔一天来一回，抄了三个月。':'其它章节事实。'}));
+    const characters=Array.from({length:21},(_,i)=>({id:'character-'+i,name:'人物'+i,
+      relationships:JSON.stringify([{relation:original}]),
+      profile_json:JSON.stringify({relationships:[{relation:original}]})}));
+    const bundle={chapters,characters};
+    const finding=JSON.stringify({canonicalSource:'chapters.3.content',
+      conflictingSource:'characters.2.relationships.0.relation；characters.2.profile_json.relationships.0.relation',
+      evidence:'章节写隔日，关系重复字段仍为每日'});
+    const requests=crossStageRepairRequests(bundle,[finding]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].targetIds).toEqual(expect.arrayContaining(['chapter-3','character-2']));
+    expect(requests[0].targetIds).toHaveLength(2);
+    expect(requests[0].targetIds).not.toContain('character-20');
+    expect(requests[0].context.characters.map(row=>row.id)).toEqual(['character-2']);
+    const anchors=crossStageRepairAnchors(requests[0].context,requests[0].targetIds);
+    const relation=anchors.find(item=>item.entityId==='character-2'&&item.field==='relationships'
+      &&item.path?.join('.')==='0.relation');
+    const profile=anchors.find(item=>item.entityId==='character-2'&&item.field==='profile_json'
+      &&item.path?.join('.')==='relationships.0.relation');
+    expect(relation).toBeDefined();expect(profile).toBeDefined();
+    const result=materializeCrossStageRepairEdits({edits:[
+      {anchorId:relation!.id,replacement:'隔一天到值房照陈默口述抄写'},
+      {anchorId:profile!.id,replacement:'隔一天到值房照陈默口述抄写'},
+    ]},anchors,bundle);
+    expect(result.patches).toHaveLength(2);
+    expect(result.patches.map(item=>item.field).sort()).toEqual(['profile_json','relationships']);
+    expect(result.patches.every(item=>item.replacement.includes('隔一天到值房'))).toBe(true);
+    expect(characters[2].relationships).toContain('每日到值房');
+    expect(chapters[3].content).toContain('隔一天来一回');
+  });
+  it('resolves equivalent dotted indexes for all mutable collection types without changing unrelated entities', () => {
+    const bundle={
+      characters:[{id:'person-0',name:'甲'},{id:'person-1',name:'乙'}],
+      organizations:[{id:'org-0',name:'甲方'},{id:'org-1',name:'乙方'}],
+      mapPoints:[{id:'place-0',name:'前门'},{id:'place-1',name:'后门'}],
+      foreshadowings:[{id:'hint-0',content:'真实伏笔'},{id:'hint-1',content:'另一个伏笔'}],
+    };
+    const findings=['organizations.1.name有冲突','mapPoints.0.name有冲突','foreshadowings.0.content有冲突'];
+    const batches=crossStageRepairRequests(bundle,findings);
+    expect(batches).toHaveLength(3);
+    expect(batches.map(item=>item.targetIds.join(',')).sort()).toEqual(['hint-0','org-1','place-0']);
+    expect(batches.every(item=>!item.targetIds.includes('person-1'))).toBe(true);
+    // Unlocatable evidence must still fall back to the full mutable scope,
+    // rather than inventing an out-of-range field owner or ignoring the Gate.
+    const unmatched=crossStageRepairRequests(bundle,['characters.12.abilities有冲突']);
+    expect(unmatched).toHaveLength(1);
+    expect(unmatched[0].targetIds).toContain('person-0');
+    expect(unmatched[0].targetIds).toContain('person-1');
   });
   it('opens the actual previous knowledge producer for a stateBefore repair instead of forcing downstream dilution', () => {
     const bundle={world:[{id:'world',rules:'既有世界能力不变'}],chapters:[

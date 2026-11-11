@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeCrossStagePathDesign } from './cross-stage-review';
-import { crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, bindCrossStagePromiseEvidence, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, crossStageAdvisories, crossStageBlockingIssues, describeCrossStageReviewValidation } from './cross-stage-review';
+import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, bindCrossStagePromiseEvidence, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, crossStageAdvisories, crossStageBlockingIssues, describeCrossStageReviewValidation, crossStageReviewDirective, crossStageFindingIsDirectChapterConflict } from './cross-stage-review';
 
 const verdict = { consistent: true, contradictions: [], unrelatedInventions: [] };
 describe('provisional upstream path design',()=>{
@@ -26,6 +26,36 @@ describe('cross-module review classification and protocol', () => {
     expect(crossStageRepairObligations(brief,['人物资料中的取得条件不足'],rows,['chapter-dependent']).map(row=>row.ref)).toEqual(['P2']);
     expect(crossStageRepairObligations(brief,['book-B-content.scenes.1.outcome-0：来源条件不足'],[...rows,{id:'book',chapterIndex:null}],['book','chapter-risk']).map(row=>row.ref)).toEqual(['P2']);
     expect(crossStageRepairObligations(brief,['【阶段兑现 P1 chapter-before】取得失败']).map(row=>row.ref)).toEqual(['P1']);
+    const direct=JSON.stringify({location1:'本批·第2章.content',quote1:'他已经回到住处',
+      location2:'本批·第3章.content',quote2:'他没有回住处',conflict:'已完成动作被写成未发生'});
+    expect(crossStageFindingIsDirectChapterConflict(direct)).toBe(true);
+    // A direct pair of chapter quotes is repaired locally; it must not become
+    // a stage-outcome path-design obligation merely because it names a chapter.
+    expect(crossStageRepairObligations(brief,[direct],rows,rows.map(row=>row.id))).toEqual([]);
+    expect(crossStageFindingIsDirectChapterConflict('【阶段兑现 P1 chapter-before】'+direct)).toBe(false);
+  });
+  it('binds only an unambiguous verbatim action in an actual edited position, then applies the unchanged strict plan gate',()=>{
+    const obligations=[{ref:'P1',path:'scopeBreakdown[0].outcome',outcome:'有权限机构完成取得和核验'}];
+    const source=JSON.stringify({world:[{rules:'机构按合法程序可取得副本并交付核验结果'}]});
+    const evidence='机构实际拿到副本，核验之后交给主角。';
+    const base=()=>({repairPlans:[{ref:'P1',status:'feasible',mechanismRefs:['S1'],
+      actions:[{evidence}],remainingCounterexamples:[]}],
+      edits:[{anchorId:'E2',replacement:'先登记。'+evidence,reason:'替代只申请的旧路径'}]});
+    const bound=bindCrossStageRepairActionCoordinates(base());
+    expect(bound.repairPlans[0].actions[0].anchorId).toBe('E2');
+    expect(describeCrossStageRepairPlanValidation(bound,obligations,source)).toEqual([]);
+    const ambiguous=base();ambiguous.edits.push({anchorId:'E3',replacement:evidence});
+    expect(bindCrossStageRepairActionCoordinates(ambiguous).repairPlans[0].actions[0].anchorId).toBeUndefined();
+    expect(describeCrossStageRepairPlanValidation(ambiguous,obligations,source).join()).toContain('没有落实');
+    const fabricated=base();fabricated.repairPlans[0].actions[0].evidence='机构早已调取全部过去记录并锁定元凶';
+    expect(bindCrossStageRepairActionCoordinates(fabricated).repairPlans[0].actions[0].anchorId).toBeUndefined();
+    expect(describeCrossStageRepairPlanValidation(fabricated,obligations,source).join()).toContain('没有落实');
+    const explicit=base();explicit.repairPlans[0].actions[0].anchorId='E999';
+    expect(bindCrossStageRepairActionCoordinates(explicit).repairPlans[0].actions[0].anchorId).toBe('E999');
+    expect(describeCrossStageRepairPlanValidation(explicit,obligations,source).join()).toContain('没有落实');
+    const vague=base();vague.repairPlans[0].actions[0].evidence='待机构回复';
+    expect(bindCrossStageRepairActionCoordinates(vague).repairPlans[0].actions[0].anchorId).toBeUndefined();
+    expect(describeCrossStageRepairPlanValidation(vague,obligations,source).join()).toContain('没有落实');
   });
   it('requires an achieved-outcome repair plan to be grounded in source mechanisms and actual edited actions', () => {
     const brief=JSON.stringify({confirmedStory:{scopeBreakdown:[{outcome:'取得原始材料并查明责任人。'}]}});
@@ -34,6 +64,11 @@ describe('cross-module review classification and protocol', () => {
     expect(obligations.map(item=>item.ref)).toEqual(['P1']);
     expect(crossStageRepairObligations(brief,['c的普通字段有误'])).toEqual([]);
     expect(crossStageRepairPlanDirective(obligations,mechanism)).toContain('诊断是待解决的缺口，不是降低成果的指令');
+    // The initial path designer has no edits or E-coordinates yet; its
+    // instructions must not be contaminated by implementation-only rules.
+    const directive=crossStageRepairPlanDirective(obligations,mechanism);
+    expect(directive.split('在同一次回复的edits之前')[0]).not.toContain('edits.replacement');
+    expect(directive).toContain('唯一实际修订位置');
     const value={repairPlans:[{ref:'P1',status:'feasible',mechanismRefs:['S1'],actions:[{anchorId:'E1',evidence:'机构实际调取原件，核验后将结论告知主角。'}],remainingCounterexamples:[]}],edits:[{anchorId:'E1',replacement:'主角报备；机构实际调取原件，核验后将结论告知主角。'}]};
     expect(describeCrossStageRepairPlanValidation(value,obligations,mechanism)).toEqual([]);
     const byPosition={...value,repairPlans:[{...value.repairPlans[0],actions:[{anchorId:'E1'}]}]};
@@ -83,6 +118,24 @@ describe('cross-module review classification and protocol', () => {
     expect(bindCrossStagePromiseEvidence(referenced,candidate).promiseChecks[0].candidateEvidence).toBe('甲只有猜测，仍不能采取行动。');
     expect(describeCrossStageReviewValidation({...referenced,promiseChecks:referenced.promiseChecks.map(item=>({...item,candidateEvidenceRef:'S9999'}))},brief,candidate).join('；')).toContain('编号不存在');
   });
+  it('rejects a whole-chapter evidence dump in the cross-stage review', () => {
+    const finding={canonicalSource:'chapters[0].content',conflictingSource:'chapters[1].content',evidence:'长'.repeat(5000),impact:'物证位置互斥'};
+    expect(describeCrossStageReviewValidation({...verdict,consistent:false,contradictions:[finding]}).join('；'))
+      .toContain('必要连续短句');
+    const concise={...finding,evidence:'三份单子留在值班室。'};
+    expect(describeCrossStageReviewValidation({...verdict,consistent:false,contradictions:[concise]})).toEqual([]);
+  });
+  it('lets the whole-story review omit promiseChecks while the dedicated stage review owns fulfillment', () => {
+    const brief=JSON.stringify({confirmedStory:{scopeBreakdown:[{outcome:'甲查明真相并取得主动权。'}]}});
+    const core={consistent:true,contradictions:[],unrelatedInventions:[],warnings:[]};
+    expect(describeCrossStageReviewValidation(core,brief,'{}',{requirePromises:false})).toEqual([]);
+    expect(describeCrossStageReviewValidation(core,brief,'{}').join('；')).toContain('全部固定阶段');
+    expect(crossStageReviewDirective(true,false)).not.toContain('另含promiseChecks');
+    expect(crossStageReviewDirective(true,false)).toContain('固定阶段兑现由独立阶段审查负责');
+    expect(crossStageReviewDirective(true,true)).toContain('另含promiseChecks');
+    expect(crossStageReviewDirective(true,true)).toContain('标签兑现强度');
+    expect(crossStageReviewDirective(true,true)).toContain('不触发 path design');
+  });
   it('retains complete structured diagnoses without dropping evidence or requiring a model rewrite', () => {
     const finding={canonicalSource:'总纲.ending 原方法',conflictingSource:'细纲.ending 新方法',evidence:'两处方法尚未同步',impact:'后续状态无法接上'};
     const value={...verdict,consistent:false,contradictions:[finding]};
@@ -121,4 +174,18 @@ describe('cross-module review classification and protocol', () => {
   ])('rejects incomplete or internally contradictory judgments: %j', value => {
     expect(describeCrossStageReviewValidation(value).length).toBeGreaterThan(0);
   });
+});
+
+it('does not use a later chapter action or unchanged earlier prose to repair an explicitly missing stage result',()=>{
+ const brief=JSON.stringify({confirmedStory:{scopeBreakdown:[{chapters:1,outcome:'客户当场确认既有权利'},{chapters:1,outcome:'正式交付函件'}]}});
+ const chapters=[{id:'early',chapterIndex:1,content:'主角单向说明条款，客户没有回应。'},{id:'later',chapterIndex:2,content:'后章才正式回应。'}];
+ const obligations=crossStageRepairObligations(brief,['early【关键结果】客户没有确认，只有主角单向说明'],chapters,['early','later']);
+ expect(obligations[0]).toMatchObject({chapterIds:['early'],requiresStageActionEdit:true});
+ const source=JSON.stringify({world:[{rules:'合同已有该条权利，双方均有权查看并当场确认。'}]});
+ const anchors=[{id:'E1',entityType:'chapter',entityId:'early',value:chapters[0].content},{id:'E2',entityType:'chapter',entityId:'later',value:chapters[1].content}];
+ const value={repairPlans:[{ref:'P1',status:'feasible',mechanismRefs:['S1'],actions:[{anchorId:'E1'},{anchorId:'E2'}],remainingCounterexamples:[]}],edits:[{anchorId:'E2',replacement:'客户在后章实际查看合同并确认条款。'}]};
+ expect(describeCrossStageRepairPlanValidation(value,obligations,source,anchors).join()).toContain('本阶段章节 early');
+ const fixed={...value,edits:[{anchorId:'E1',replacement:'主角说明条款，客户当场查看原合同并明确确认该权利。'}]};
+ expect(describeCrossStageRepairPlanValidation(fixed,obligations,source,anchors)).toEqual([]);
+ expect(anchors[0].value).toBe(chapters[0].content);
 });

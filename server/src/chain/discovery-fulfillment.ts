@@ -1,49 +1,244 @@
-import {presentationGateIssues} from './idea-presentation-review';
-/** Only independently verified reduction in blocked dimensions justifies
- * another patch to the same card. Wording changes are not progress. */
-export function discoveryFailureDimensions(assessment:any):string[]{
- const review=assessment?.presentationReview,dimensions:string[]=[];
- for(const key of ['titleCompelling','openingCompelling','distinctFromBatch','storyCoherent','payoffCredible','platformFit'])
-  if(review?.[key]===false)dimensions.push(key);
- for(const [key,value] of Object.entries(review?.readerGoals||{}))if((value as any)?.status!=='supported')dimensions.push('readerGoals.'+key);
- // Keep deterministic failures too; do not call a card improved by hiding a
- // configuration/shape failure behind an otherwise positive semantic review.
- const semanticIssues=new Set(presentationGateIssues(review));
- for(const issue of assessment?.issues||[])if(typeof issue==='string'&&!semanticIssues.has(issue))dimensions.push(issue);
- return [...new Set(dimensions)].sort();
-}
-export function discoveryFailureImproved(before:any,after:any){
- if(after?.passed===true)return true;
- const prior=discoveryFailureDimensions(before),next=discoveryFailureDimensions(after);
- return prior.length>0&&next.length<prior.length&&next.every(key=>prior.includes(key));
+/** An early refill can use the EXISTING wave only after settled final reviews
+ * prove that the remaining first-wave slots cannot meet the request. */
+export function provenFullCardDeficit(requested:number,selected:number,accepted:number,settled:number):number {
+ if(![requested,selected,accepted,settled].every(Number.isSafeInteger)
+   ||requested<1||selected<0||accepted<0||settled<accepted||settled>selected)
+  throw Error('已确定完整卡缺额的请求数量或状态无效');
+ return Math.max(0,requested-accepted-(selected-settled));
 }
 
-/** Completion is governed by remaining work and shared allowances, not rounds.
- * The caller owns all model calls and immutable accepted cards. */
-export async function fulfillDiscoveryGaps(options:{
- missing:()=>string[];hasCard:(id:string)=>boolean;canRepair:(ids:string[])=>boolean;
- repair:(ids:string[])=>Promise<string[]>;canReplace:()=>boolean;
- replace:(id:string)=>Promise<'replaced'|'rejected'|'unavailable'>;
- fingerprint:()=>string;repairScope?:(id:string)=>string;
-}){
- const stalled=new Set<string>();
- const key=(id:string)=>JSON.stringify([id,options.repairScope?.(id)||'story']);
- let replacementCursor=0;
- while(options.missing().length){
-  const before=options.fingerprint(),stalledBefore=stalled.size,missing=options.missing();
-  const patchable=missing.filter(id=>!stalled.has(key(id))&&options.hasCard(id));
-  if(patchable.length&&options.canRepair(patchable)){
-   const repairKeys=new Map(patchable.map(id=>[id,key(id)]));
-   const improved=new Set(await options.repair(patchable));
-   for(const id of patchable)if(!improved.has(id))stalled.add(repairKeys.get(id)!);
-  }else{
-   if(!options.canReplace())return 'budget_or_original_pool_exhausted';
-   const outcome=await options.replace(missing[replacementCursor++%missing.length]);
-   if(outcome==='unavailable')return 'budget_or_original_pool_exhausted';
-   // A rejected preselection consumes its identity/allowance but never creates
-   // a complete card. Try a different original-pool candidate if affordable.
-  }
-  if(options.missing().length&&before===options.fingerprint()&&stalled.size===stalledBefore)return 'no_material_progress';
- }
- return 'requested_quantity_verified';
+/** Lend initial preselection only its share of the EXISTING review calls.
+ * Keep enough credits for a potential final-card deficit. Both stages still
+ * use independent semantic/source/overlap Gates; credits are never cloned.
+ * A live getter ensures nested partition reservations/refunds hit the parent.
+ * releaseReserve exposes the held-back refill credits to a DELIVERY-gap
+ * reselection: the preselection shortfall is audited first and is cheaper than
+ * a post-card refill, so the same real remaining calls (never more) may fund
+ * it. The reserve is not cloned or increased; once released the final refill
+ * sees only what the reselection did not spend. */
+export function reserveFinalRefillReviewCapacity(
+ parent:{remaining:number},initialReviewFloor:number,requiredRefillFloor:number,
+):{remaining:number; refundReservedCalls:(amount:number)=>void; releaseReserve:()=>void; reserved:number} {
+ if(!Number.isInteger(parent.remaining)||parent.remaining<0
+   ||![initialReviewFloor,requiredRefillFloor].every(Number.isInteger)
+   ||initialReviewFloor<0||requiredRefillFloor<0)
+  throw Error('预选与补足审核额度无效');
+ let reserve=parent.remaining>=initialReviewFloor+requiredRefillFloor
+   ?requiredRefillFloor:0;
+ let debited=0;
+ return {
+  get remaining(){return parent.remaining-reserve;},
+  set remaining(value:number){
+   const available=this.remaining;
+   if(!Number.isSafeInteger(value)||value<0||value>available)
+     throw Error('预选审核额度不能透支或重置');
+   const used=available-value;
+   parent.remaining-=used;
+   debited+=used;
+  },
+  refundReservedCalls(amount:number){
+   if(!Number.isSafeInteger(amount)||amount<0||amount>debited)
+     throw Error('审核归还额度无效或超过已使用额度');
+   parent.remaining+=amount;
+   debited-=amount;
+  },
+  releaseReserve(){reserve=0;},
+  get reserved(){return reserve;},
+ };
 }
+
+/** Delivery slots are bounded by the user's request, never by the number of
+ * independently vetted or fully generated candidate cards. */
+/** The generation and final review share one non-increasing budget. Reserve
+ * enough for one independent review per presentation batch before offering
+ * new candidates to paid screening. Never allocate from a delivery shortfall
+ * alone: a missing 3/5 and only 2 affordable reviews cannot complete 5/5. */
+/** A preparation overlap knows a lower-bound deficit while initial final
+ * reviews are pending. Preserve enough optional source capacity for their
+ * possible failures; only the later actual gap controls full-card dispatch.
+ * This is a count request, never a new call allowance or a quality verdict. */
+/** Spend the already-generated unused pool before buying ANY new seeds.
+ * Optional screening surplus may only use already available originals;
+ * it cannot force speculative model generation ahead of the actual delivery
+ * gap. Once originals cannot cover the mandatory gap, the existing bounded
+ * refill call may generate up to its already affordable reviewed capacity.
+ * This decides seed GENERATION only, never candidate qualification. */
+export function neededFreshPremiseSeeds(mandatoryGap:number,unusedOriginalCount:number,reviewedCapacity:number):number{
+ if(![mandatoryGap,unusedOriginalCount,reviewedCapacity].every(Number.isSafeInteger)
+   ||mandatoryGap<0||unusedOriginalCount<0||reviewedCapacity<mandatoryGap)
+   throw Error('原池优先补位的实际缺额或可审核容量无效');
+ if(!mandatoryGap||unusedOriginalCount>=mandatoryGap)return 0;
+ return Math.max(0,reviewedCapacity-unusedOriginalCount);
+}
+
+export function plannedFullCardRefillCount(knownMissing:number,requested:number,accepted:number,preparing=false):number{
+ if(![knownMissing,requested,accepted].every(Number.isInteger)||requested<1||knownMissing<0
+  ||accepted<0||accepted>requested||knownMissing>requested-accepted)throw Error('补位准备的已知缺额或请求数量无效');
+ if(!knownMissing)return 0;
+ return Math.max(knownMissing+Math.ceil(knownMissing/2),preparing?requested-accepted:knownMissing);
+}
+
+export function affordableFullCardRefillCount(
+ availableSeeds: number, physicalCredits: number, reviewBatchSize: number, groupingMode=0,
+): number {
+ if (![availableSeeds,physicalCredits,reviewBatchSize,groupingMode].every(Number.isInteger)
+  || availableSeeds < 0 || physicalCredits < 0 || reviewBatchSize < 1 || ![0,1].includes(groupingMode))
+  throw Error('完整卡补足容量参数无效');
+ let count=Math.min(availableSeeds,physicalCredits);
+ while(count>0) {
+   // Default mode audits <=3 full cards in one aggregate call. Larger
+   // groups must reserve the bounded split capacity: relying on an unfunded
+   // oversized aggregate risks a token-cap failure without recovery credits.
+   // Both modes still independently review every actual card.
+   const reviewCalls=groupingMode===0&&count<4?1:Math.ceil(count/reviewBatchSize);
+   if(count+reviewCalls<=physicalCredits)return count;
+   count--;
+ }
+ return 0;
+}
+
+/** Minimum independent source/payoff and overlap calls required to vet
+ * a fixed number of newly selected premises. Never borrow credits from
+ * selection or presentation budgets to fabricate an approved result. */
+export function premiseReviewCallFloor(count:number, sourceBatchSize:number, groupingMode=0):number {
+ if(!Number.isInteger(count)||count<0||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1
+   ||!Number.isInteger(groupingMode)||![0,1].includes(groupingMode))
+  throw Error('题材独立复核预算参数无效');
+ if(!count)return 0;
+ // Every mode respects the configured source batch ceiling. Fine-grained
+ // concurrency may spend extra calls only when the shared allowance funds it.
+ const sourceCalls=Math.ceil(count/sourceBatchSize);
+ return sourceCalls+(count>1?1:0);
+}
+
+/** Trim only optional refill hedges when source review cannot cover them.
+ * The mandatory delivery gap remains a hard requirement at the call site.
+ * No review is skipped for any candidate actually returned. */
+export function affordableReviewedPremiseCount(
+ availableCount:number,sourceCredits:number,sourceBatchSize:number,groupingMode=0,
+ mandatoryCount=0,
+):number {
+ if(!Number.isInteger(availableCount)||availableCount<0||!Number.isInteger(sourceCredits)||sourceCredits<0
+   ||!Number.isInteger(mandatoryCount)||mandatoryCount<0||mandatoryCount>availableCount)
+  throw Error('补充题材审核额度无效');
+ let count=availableCount;
+ while(count>0&&premiseReviewCallFloor(count,sourceBatchSize,groupingMode)>sourceCredits)count--;
+ // Demand never creates credits. Report a real deficit rather than buying
+ // an unpartitioned review outside the admission planner's capacity model.
+ return count;
+}
+
+export function missingRequestedIdeaSlots(slotIds:readonly string[],acceptedIds:ReadonlySet<string>,requestedCount:number):string[] {
+  if (!Number.isInteger(requestedCount) || requestedCount < 0) throw Error('请求交付数量无效');
+  const uniqueSlots = [...new Set(slotIds.filter(id => !!id))];
+  // Only approved identities belonging to this reviewed batch satisfy its delivery demand.
+  // Unknown or duplicate IDs must not hide a genuine shortfall.
+  const approvedInBatch = uniqueSlots.filter(id => acceptedIds.has(id)).length;
+  return uniqueSlots.filter(id => !acceptedIds.has(id)).slice(0, Math.max(0, requestedCount - approvedInBatch));
+}
+
+/** Lower bound for the NEXT independently reviewed original-pool correction.
+ * A changed/new narrative needs source/payoff review; replacing an identity
+ * in a multi-card shortlist also changes pairs and needs overlap review.
+ * This is an admission check, never a quality pass or a new call allowance.
+ */
+export function minimumReselectionReviewCalls(
+ selectedCount:number,forcesNewIdentity:boolean,changedCount=1,sourceBatchSize=3,groupingMode=0,
+):number {
+ if(!Number.isInteger(selectedCount)||selectedCount<1
+   ||!Number.isInteger(changedCount)||changedCount<1||changedCount>selectedCount
+   ||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1||![0,1].includes(groupingMode))
+  throw Error('重选复核的已选数量或来源分组无效');
+ // Use the same source partition floor as execution in BOTH modes.
+ const sourceCalls=premiseReviewCallFloor(changedCount,sourceBatchSize,groupingMode)
+   -(changedCount>1?1:0);
+ return sourceCalls+(forcesNewIdentity&&selectedCount>1?1:0);
+}
+
+/** Largest number of replacement slots the REAL remaining source budget can
+ * independently vet (source batches + the single overlap call). Used to keep a
+ * partial delivery-gap reselection instead of abandoning the whole gap when
+ * only some positions are affordable. Returns 0 when even one slot is not
+ * affordable; the caller must then report the shortfall honestly. */
+export function affordableReselectionSlotCount(
+ slotCount:number,selectedCount:number,remaining:number,sourceBatchSize:number,groupingMode=0,
+):number {
+ if(!Number.isInteger(slotCount)||slotCount<0
+   ||!Number.isInteger(selectedCount)||selectedCount<1
+   ||!Number.isInteger(remaining)||remaining<0
+   ||!Number.isInteger(sourceBatchSize)||sourceBatchSize<1||![0,1].includes(groupingMode))
+  throw Error('原池补位可负担数量参数无效');
+ let count=Math.min(slotCount,selectedCount);
+ while(count>0&&minimumReselectionReviewCalls(selectedCount,true,count,sourceBatchSize,groupingMode)>remaining)count--;
+ return count;
+}
+
+/** Replenish the already-funded screened shortlist before slow full cards.
+ * A reviewed 5/5 preselection is not 5/5 independently accepted full cards.
+ * Reuse one existing original-pool correction wave; the caller trims optional
+ * candidates against remaining source/pair review credits and real identities.
+ * Never increase call budgets, promise weak approval or add a second wave. */
+export function preselectionRecoveryTarget(deliveryCount:number,retainedApproved:number,screeningTarget=deliveryCount):{mandatory:number;hedge:number;total:number}{
+ if(!Number.isInteger(deliveryCount)||deliveryCount<1||!Number.isInteger(retainedApproved)||retainedApproved<0
+   ||!Number.isInteger(screeningTarget)||screeningTarget<deliveryCount)
+   throw Error('预选交付容量参数无效');
+ const mandatory=Math.max(0,deliveryCount-retainedApproved);
+ // The original screening capacity was funded to absorb final semantic
+ // rejections. Do not throw away its unused positions merely because the
+ // minimum delivery count is reached. Optional positions require the SAME
+ // existing independent source and overlap credits, checked at the call site.
+ const remainingScreeningSlots=Math.max(0,screeningTarget-retainedApproved);
+ const hedge=screeningTarget>deliveryCount
+   ?Math.max(0,remainingScreeningSlots-mandatory)
+   :mandatory>0?Math.min(2,Math.max(1,Math.ceil(mandatory*3/4))):0;
+ return {mandatory,hedge,total:mandatory+hedge};
+}
+
+/** Reuse authored title options before paying for another card. Never invent a
+ * title or relax the original length Gate: the resulting card still goes
+ * through duplicate, appeal and independent presentation checks. */
+export function retainValidStructuredIdeaTitle<T extends {title?:unknown;alternateTitles?:unknown}>(
+ card:T,originalWorkingTitle:unknown,
+):T {
+ const valid=(value:unknown):value is string=>typeof value==='string'
+   &&((value.replace(/[《》「」]/g,'').trim().replace(/[，、,\s]/g,'').length)>=4)
+   &&((value.replace(/[《》「」]/g,'').trim().replace(/[，、,\s]/g,'').length)<=16);
+ if(valid(card.title))return card;
+ const alternatives=Array.isArray(card.alternateTitles)?card.alternateTitles:[];
+ const replacement=[...alternatives,originalWorkingTitle].find(valid);
+ return replacement?{...card,title:replacement}:card;
+}
+
+/** Optional screening surplus must fit the entire original review allowance.
+ * Never reduce the actual user demand or borrow from the final refill reserve. */
+export function plannedPreselectionCount(requested:number,desired:number,credits:number,batchSize:number,groupingMode:number,concurrency:number):number{
+ if(!Number.isInteger(requested)||requested<1||!Number.isInteger(concurrency)||concurrency<1)throw Error('选优容量参数无效');
+ const mandatory=Math.min(requested,desired);
+ const count=affordableReviewedPremiseCount(desired,credits,batchSize,groupingMode,mandatory);
+ if(count<mandatory)return 0;
+ // Screening surplus must not be traded for unaffordable extra partitions.
+ // The scheduler keeps an independently audited response for each actual premise.
+ return count;
+}
+export function fundedSourceReviewGroups(count:number,batchSize:number,credits:number,concurrency:number,groupingMode=0):number{
+ const minimum=premiseReviewCallFloor(count,batchSize,groupingMode)-(count>1?1:0);
+ if(!Number.isInteger(credits)||credits<0||!Number.isInteger(concurrency)||concurrency<1)throw Error('来源审核容量无效');
+ if(!count||credits<minimum)return 0;
+ // Never spend the last correction credits merely to make the first audit
+ // narrower. An independently rejected premise still needs replacement and
+ // a new source/overlap verdict inside the same allowance.
+ // Each independently justified candidate must pass ALL original source,
+ // payoff, category and genre rows. Spend only the funded minimum number of
+ // source batches, distributing them across the available concurrency.
+ // The former "fine" mode automatically spent spare calls on more (often
+ // singleton) partitions, then re-ran further partition waves for rejected
+ // candidates: in real runs those calls dominated discovery latency and
+ // depleted credits needed to replace weak candidates. More partitions are
+ // NOT more independent evidence; every check already has its own identity.
+ // The existing output-capacity fallback may still partition a genuinely
+ // oversized response using the original shared correction allowance.
+ return minimum;
+}
+
+/** Full-card fulfillment is governed by real quality gates and the unchanged
+ * physical-call budget, never by an elapsed-time cancellation. */

@@ -2,6 +2,7 @@ import { defaultRepairStrategy, repairStrategies } from '../writing-quality/repa
 import { ACTIVE_ISSUE_SQL, retireStaleIssues } from '../writing-quality/issue-lifecycle';
 import { aggregateArtifactScores, aggregateProjectScore, type StageScore } from '../writing-quality/stage-score';
 import { qualityGate, qualityIssue } from '../writing-quality/quality-issue';
+import { canonical } from '../writing-quality/character-contract';
 import { readConstitution } from '../project/creative-constitution';
 import { loadCharacterNames } from '../character/character-names';
 import { qualityStage } from '../../routing/scenario-taxonomy';
@@ -74,6 +75,7 @@ export function chapterResponsibilityIssueSignature(issues: string[]): string {
 /** 一次 LLM 调用的遥测输入 */
 export interface StepMetricInput {
   runId?: string;
+  discoveryRequestId?: string | null;
   projectId?: string | null;
   chapterIndex?: number | null;
   stepKey?: string | null;
@@ -163,13 +165,18 @@ const BOTTLENECK_MIN_CALLS = 2;
 export function generationRulesetSnapshotIsCurrent(
   rawSnapshot: unknown,
   currentRulesetVersion: number,
-  currentRegistryDigest: string,
+  currentScenarioDigest: string,
 ): boolean {
   if (typeof rawSnapshot !== 'string' || !rawSnapshot.trim()) return false;
   try {
-    const snapshot = JSON.parse(rawSnapshot) as { rulesetVersion?: number; registryDigest?: string };
+    // Staleness is judged by the *scenario-level* directive digest (the exact
+    // rules a run was generated under), not the global registry digest. A global
+    // digest changes whenever any unrelated rule text changes, which would
+    // falsely expire a valid cached run whose own directive is unchanged. The
+    // idempotent cache already keys reuse on this same scenario-level digest.
+    const snapshot = JSON.parse(rawSnapshot) as { rulesetVersion?: number; digest?: string };
     return snapshot.rulesetVersion === currentRulesetVersion
-      && snapshot.registryDigest === currentRegistryDigest;
+      && snapshot.digest === currentScenarioDigest;
   } catch {
     return false;
   }
@@ -202,7 +209,7 @@ export class GenerationMetricsService implements OnModuleInit {
     return Number(result.changes || 0);
   }
 
-  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true) {
+  beginRun(projectId: string | undefined, scenario: string, prompt: string, systemPrompt?: string, stepKey?: string | null, chapterIndex?: number | null, injectStandard = true, discoveryRequestId?: string | null) {
     const db = this.databaseService.getDb();
     // 项目内场景缺 projectId 一律阻断：以前这里静默取 constitution=null、runId 不注入 systemPrompt、
     // 记录退化成平台级，等于「没有执行标准的链路」照常跑完却看着正常（review/summary 判定失标的真因）。
@@ -216,9 +223,10 @@ export class GenerationMetricsService implements OnModuleInit {
     const id = crypto.randomUUID();
     const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
     const stage = qualityStage(scenario, stepKey);
-    db.prepare(`INSERT INTO generation_runs (id, project_id, stage, scenario, status, constitution_revision,
-      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-      id, projectId ?? null, stage, scenario, 'running', constitution?.revision ?? null,
+    db.prepare(`INSERT INTO generation_runs (id, project_id, discovery_request_id, stage, scenario, status, constitution_revision,
+      constitution_json, prompt_version, context_version, started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, projectId ?? null, scenario === 'idea_generate' ? discoveryRequestId ?? null : null,
+      stage, scenario, 'running', constitution?.revision ?? null,
       constitution ? JSON.stringify(constitution) : null, digest(systemPrompt || ''), digest(prompt), new Date().toISOString());
     const compiled = row ? compileContext(db, { projectId: projectId!, stage, chapterIndex }) : null;
     const context = compiled?.snapshot || '';
@@ -248,16 +256,62 @@ export class GenerationMetricsService implements OnModuleInit {
 
   runIsCurrent(runId: string, projectId: string): boolean {
     const db = this.databaseService.getDb();
-    const run = db.prepare('SELECT constitution_json,context_snapshot,standards_snapshot,stage,chapter_index FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
+    const run = db.prepare('SELECT constitution_json,context_snapshot,standards_snapshot,stage,chapter_index,scenario FROM generation_runs WHERE id=? AND project_id=?').get(runId, projectId) as any;
     const row = db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) as any;
-    return !!run && !!row
-      && run.constitution_json === JSON.stringify(readConstitution(row))
-      && run.context_snapshot === this.qualityContext(projectId, run.stage, run.chapter_index)
-      && generationRulesetSnapshotIsCurrent(
-        run.standards_snapshot,
+    // Compare canonical story facts so a storage/key-order rewrite or volatile
+    // timestamp update of the same canon does not falsely expire a valid run.
+    // Actual story/world/character changes still alter the stable value.
+    const volatileContextKey=/(^|_)(created_at|updated_at|started_at|finished_at)$/i;
+    const stableContext=(value:any):any=>{
+      if(!value||typeof value!=='object')return value;
+      if(Array.isArray(value))return value.map(stableContext);
+      const out:Record<string,any>={};
+      for(const [key,item] of Object.entries(value)){
+        if(!volatileContextKey.test(key))out[key]=stableContext(item);
+      }
+      return out;
+    };
+    const sameCanonical=(left:string,right:string)=>{
+      if(left===right)return true;
+      try{return canonical(stableContext(JSON.parse(left)))===canonical(stableContext(JSON.parse(right)));}catch{return false;}
+    };
+    const currentContext=this.qualityContext(projectId, run?.stage, run?.chapter_index);
+    const contextIsCurrent=()=>{
+      if(run.context_snapshot===currentContext)return true;
+      let before:any,after:any;
+      try{before=JSON.parse(run.context_snapshot);after=JSON.parse(currentContext);}catch{return false;}
+      // A stage must only be invalidated by the canon sections it actually
+      // consumes. Outline/previous-chapter metadata changing after a character
+      // run must not expire the character credential; real world/character
+      // changes still do.
+      const dependencySections:Record<string,string[]>={
+        character:['worldRules','characters','characterContracts','organizations','locations'],
+        world:['worldRules'],
+        outline:['worldRules','characters','characterContracts','outline'],
+      };
+      const keys=dependencySections[String(run.stage||'')];
+      if(keys?.length)return keys.every(key=>JSON.stringify(stableContext(before?.[key]??null))===JSON.stringify(stableContext(after?.[key]??null)));
+      return sameCanonical(run.context_snapshot,currentContext);
+    };
+    const standardsIsCurrent = () => {
+      let snap: { scenario?: string; stepKey?: string | null; enabled?: boolean } = {};
+      try { snap = JSON.parse(String(run?.standards_snapshot || '{}')); } catch {}
+      const scenario = typeof snap.scenario === 'string' && snap.scenario.trim()
+        ? snap.scenario
+        : String(run?.scenario || '');
+      const enabled = snap.enabled !== false;
+      const stepKey = snap.stepKey ?? null;
+      const currentScenarioDigest = standardDirectiveCache.snapshot(scenario, enabled, stepKey).digest;
+      return generationRulesetSnapshotIsCurrent(
+        run?.standards_snapshot,
         standardDirectiveCache.getRulesetVersion(),
-        standardDirectiveCache.getRulesetDigest(),
+        currentScenarioDigest,
       );
+    };
+    return !!run && !!row
+      && sameCanonical(run.constitution_json, JSON.stringify(readConstitution(row)))
+      && contextIsCurrent()
+      && standardsIsCurrent();
   }
 
   finishRun(id: string, status: 'success' | 'failed' | 'cancelled', started: number, output?: string, error?: string, model?: string) {
@@ -313,7 +367,12 @@ export class GenerationMetricsService implements OnModuleInit {
         severity: 'blocking', message: '生成期间创作宪法或前序资料已变化，必须基于最新上下文重新生成', source: 'version_gate' }));
       score.overallScore = null;
     }
-    const gate = qualityGate(score.issues, score.status === 'evaluated');
+    // 维度覆盖完整时，建议级问题不应因为 aggregate status=partial 再次把 Gate
+    // 打成 not_evaluated。这里与 real-llm 的最终 gate 使用同一口径，避免两套
+    // 重算路径互相覆盖（此前正是这里把已判定为建议级的 AI 痕迹重新判死）。
+    const dimensionsComplete = Object.values(score.dimensions).every(dimension =>
+      dimension.status === 'evaluated' || dimension.status === 'not_applicable');
+    const gate = qualityGate(score.issues, score.status === 'evaluated' || dimensionsComplete);
     const now = new Date().toISOString();
     // A physical model call is a generation_run. A quality report belongs to the
     // current artifact scope and is updated in place across retries/regenerations.
@@ -366,8 +425,7 @@ export class GenerationMetricsService implements OnModuleInit {
     // fallback executor see the whole open issue cluster so it can choose the
     // structural repair that is capable of fixing every occurrence together.
     const structuralCompanions = issues.filter(i => i.status === 'open'
-      && (i.ruleId.includes('structure') || i.ruleId.includes('pacing')
-        || i.ruleId.includes('timeline.repetition') || i.ruleId.startsWith('ai_trace.')));
+      && defaultRepairStrategy([i.ruleId]) === 'scene_structure_patch');
     const focus = blocking.length
       ? [...blocking, ...structuralCompanions.filter(i => !blocking.includes(i))]
       : severe.length ? severe : issues.filter(i => i.status === 'open');
@@ -384,7 +442,8 @@ export class GenerationMetricsService implements OnModuleInit {
     // 实测 unique_local_replacement / platform_metric_patch 在多个规则轴上 0% 接受率，
     // 却因为候选池里只剩它们而持续被选中，累计白烧数千秒与数百万 token。
     // 全部候选都不合格时返回确定性默认策略，而不是继续挑一个已知无效的策略。
-    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r));
+    const eligible = rows.filter(r => r.strategy_id in repairStrategies && isRepairStrategyEligible(r)
+      && (fallback !== 'scene_structure_patch' || r.strategy_id === 'scene_structure_patch'));
     eligible.sort((a,b) => repairStrategyUtility(b) - repairStrategyUtility(a) || a.strategy_id.localeCompare(b.strategy_id));
     return eligible[0]?.strategy_id || fallback;
   }
@@ -719,15 +778,16 @@ export class GenerationMetricsService implements OnModuleInit {
       this.databaseService.getDb()
         .prepare(
           `INSERT INTO generation_step_metrics
-            (id, project_id, chapter_index, step_key, scenario, model_version, attempt, phase,
+            (id, project_id, discovery_request_id, chapter_index, step_key, scenario, model_version, attempt, phase,
              status, fail_reason, duration_ms, prompt_chars, output_chars, output_words,
              target_words, deficit_words, prompt_tokens, completion_tokens, total_tokens,
              internal_retries, created_at, run_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
           id,
           input.projectId ?? null,
+          input.discoveryRequestId ?? null,
           input.chapterIndex ?? null,
           stepKey,
           scenario,

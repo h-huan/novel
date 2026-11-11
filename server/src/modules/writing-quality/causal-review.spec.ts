@@ -1,20 +1,162 @@
-import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt} from './causal-review';
+import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions,coerceUnprovenSupportedCausalRows,isInternalStateResult,buildCausalPromptTransport,mapCausalPromptAnchorIds} from './causal-review';
+import { LLM_TUNABLES } from '../../config/llm-tunables';
 import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
 import { preserveCausalCountercheckAnchors } from './causal-review';
-import { causalChapterResultAnchors } from './causal-review';
+import { causalChapterResultAnchors, causalChapterResultReviewGroups, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceCatalog, causalChapterEvidenceAddressIssues } from './causal-review';
 
-it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
- const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
+it('compacts external source citations without omitting any literal clause or address',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她递交了材料。',
+   scenes:[{outcome:'管理人已收到材料，产权人尚未批准。'}]}];
+ const sources={project_context:JSON.stringify({
+  worldRules:'因为管理人只有收件权限，最终批准仍需产权人签名，申请必须等待签字。'
+ }),chapter_plan:JSON.stringify({priorLedger:
+  '收件人核对了原始记录，保管人保留第一份副本，产权人尚未核查。'})};
+ const full=causalEvidenceAnchorOptions(JSON.stringify(chapters),sources);
+ const compact=compactCausalProofSourceCatalog(full);
+ expect(compact.map(row=>row.id)).toEqual(full.map(row=>row.id));
+ expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length);
+ expect(compact.some(row=>row.source==='project_context'&&row.text?.includes('申请必须等待签字'))).toBe(true);
+ const originalById=new Map(full.map(row=>[row.id,row]));
+ for(const row of compact.filter(row=>row.text===undefined)){
+  const original=originalById.get(row.id)!;
+  const children=compact.filter(child=>child.id.startsWith(row.id+':')
+    &&!child.id.slice(row.id.length+1).includes(':')
+    &&child.text!==undefined);
+  expect(children.length).toBeGreaterThan(1);
+  expect(children.map(child=>child.text).join('')).toBe(original.text);
+ }
+ const prompt=causalAuditRepairPrompt(null,[],JSON.stringify(chapters),sources,false,false,true);
+ expect(prompt.prompt).toContain('产权人尚未核查');
+ expect(prompt.prompt).toContain('申请必须等待签字');
+ const after=causalEvidenceAnchorOptions(JSON.stringify(chapters),sources);
+ expect(after).toEqual(full);
+});
+
+it('carries source evidence once through reversible transport aliases',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她把材料交给管理人。',
+   scenes:[{outcome:'管理人收下材料并登记，产权人尚未批准。'}],
+   characterActions:[{character:'她',action:'把材料交给管理人',result:'管理人收下材料'}]}];
+ const body=JSON.stringify(chapters);
+ const sources={project_context:JSON.stringify({worldRules:'只有登记之后才算受理，批准仍需产权人签字。'}),
+   chapter_plan:JSON.stringify({priorChapters:[
+     {content:'管理人此前只收过副本，产权人从未签字。'},
+     {content:'产权人上次拒绝批准，要求补齐原始记录。'}],
+     priorLedger:'管理人保留第一份副本，产权人尚未核查。'})};
+ const full=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
+ const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true,undefined,undefined,true);
+ expect(compact.transport).toBeDefined();
+ // Source anchors are aliased, body result addresses stay unchanged.
+ expect(compact.prompt).toContain('"id":"src1"');
+ expect(full.prompt).toMatch(/chapter_plan:v\d+/);
+ expect(compact.prompt).not.toMatch(/chapter_plan:v\d+/);
+ expect(compact.prompt).toContain('产权人尚未核查');
+ expect(compact.prompt).toContain('批准仍需产权人签字');
+ expect(compact.prompt.length).toBeLessThan(full.prompt.length);
+ // The full server catalog still exists; aliases only change the transport.
+ const aliasEntry=[...compact.transport!.aliasToReal.entries()][0];
+ expect(aliasEntry[1]).toMatch(/^(chapter_plan|project_context):v\d+/);
+ const restored=mapCausalPromptAnchorIds({transitions:[{
+   actionAnchorId:aliasEntry[0],bridgeAnchorId:aliasEntry[0],resultAnchorId:aliasEntry[0],
+   actionAnchorIds:[aliasEntry[0]],beforeStateAnchorId:aliasEntry[0],reason:aliasEntry[0],
+ }]},compact.transport!.aliasToReal);
+ expect(restored.transitions[0].actionAnchorId).toBe(aliasEntry[1]);
+ expect(restored.transitions[0].bridgeAnchorId).toBe(aliasEntry[1]);
+ expect(restored.transitions[0].actionAnchorIds).toEqual([aliasEntry[1]]);
+ // Free-text reasons are not silently rewritten as addresses.
+ expect(restored.transitions[0].reason).toBe(aliasEntry[0]);
+ expect(buildCausalPromptTransport(causalEvidenceAnchorOptions(body,sources)).catalog
+   .filter(row=>row.source==='body').every(row=>row.id.startsWith('body:'))).toBe(true);
+});
+
+it('requires a gap reason to name the missing condition instead of contradicting the verdict',()=>{
+ const body=JSON.stringify([{chapterNumber:1,chapterFunction:'conflict',content:'民警问遗物登记没有，我答没登。'}]);
+ const prompt=causalAuditRepairPrompt(null,[],body,{});
+ expect(prompt.systemPrompt).toContain('reason与status必须一致');
+ expect(prompt.systemPrompt).toContain('不得把已成立的结果标成gap');
+ expect(prompt.systemPrompt).toContain('问答链/交付链已完成');
+});
+
+it('keeps prose anchor ids in the p/s namespace and forbids invented clause suffixes',()=>{
+ const body=JSON.stringify([{chapterNumber:1,chapterFunction:'conflict',content:'她把耳机塞进袖口。'}]);
+ const prompt=causalAuditRepairPrompt(null,[],body,{});
+ expect(prompt.systemPrompt).toContain('body:pN:sM');
+ expect(prompt.systemPrompt).toContain('不得猜测、补齐或改写编号后缀');
+});
+
+it('validates a proof that cites transport aliases after restoring them',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她把材料交给管理人。',
+   scenes:[{outcome:'管理人收下材料并登记。'}],
+   characterActions:[{character:'她',action:'把材料交给管理人',result:'管理人收下材料'}]}];
+ const body=JSON.stringify(chapters);
+ const sources={project_context:JSON.stringify({worldRules:'只有登记之后才算受理。'})};
+ const prompt=causalAuditRepairPrompt(null,[],body,sources,true,false,true,undefined,undefined,true);
+ const transport=prompt.transport!;
+ const anchors=causalEvidenceAnchors(body,sources);
+ const catalog=causalChapterEvidenceCatalog(chapters,anchors.filter(a=>a.source==='body'),undefined,{allowInternalStates:true});
+ const expected=catalog.entries.flatMap(e=>e.resultAnchorIds.map(id=>({chapterNumber:e.chapterNumber,resultAnchorId:id})));
+ const action=anchors.find(a=>a.source==='body'&&a.path==='0.characterActions.0.action')!;
+ const ruleAlias=[...transport.realToAlias.entries()].find(([real])=>real.startsWith('project_context:'))![1];
+ const response={causalAudit:{status:'evaluated',reason:'已逐项核对结果、行动与成立条件',proofRows:expected.map((_,index)=>
+   [index+1,action.id,ruleAlias,'supported','管理人实际收下并登记，规则要求登记后才算受理'] as [number,string,string,string,string])}};
+ const decoded=decodePlanningProofRows(response.causalAudit,expected);
+ const restored=mapCausalPromptAnchorIds(decoded,transport.aliasToReal);
+ expect(restored.transitions[0].bridgeAnchorId).toBe(transport.aliasToReal.get(ruleAlias));
+ const audit=materializeCausalAuditAnchors(restored,body,sources);
+ const checked=validateCausalAudit(audit,body,sources,{allowInternalStates:true});
+ expect(checked.verified,checked.errors.join('；')).toBe(true);
+});
+
+it('compact chapter proofs keep existing action text visible without deciding the causal verdict',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',
+  content:'她先核对了文件上的签名，再到窗口办理交接。',
+  characterActions:[{action:'她把原件当面交给窗口。',result:'窗口已收到原件。'}],
+  scenes:[{event:'工作人员查验了实际递交的原件。',outcome:'原件完成交接。'}]}];
+ const prompt=causalAuditRepairPrompt(null,[],JSON.stringify(chapters),{},false,false,true).prompt;
+ expect(prompt).toContain('"text":"她把原件当面交给窗口。"');
+ expect(prompt).toContain('"text":"工作人员查验了实际递交的原件。"');
+ expect(prompt).toContain('"text":"窗口已收到原件。"');
+ expect(prompt).toContain('真实gap须完整解释缺失条件');
+});
+
+it('逐项目录只审计可外部核验的结果，导演性高光与伏笔投影交给事实/阶段审查', () => {
+ const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],highlights:[{point:'登记本上的编号被当场核对'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
  const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
  const results=causalChapterResultAnchors(anchors,0);
  expect(results.some(row=>row.text.includes('老人手里'))).toBe(true);
  expect(results.filter(row=>row.path==='0.scenes.0.outcome')).toHaveLength(2);
  expect(results.map(row=>row.path)).not.toContain('0.scenes.0.goal');
  expect(results.map(row=>row.path)).not.toContain('0.characterStates.0.stateBefore');
- expect(results.map(row=>row.path)).toContain('0.foreshadowingRecover.0.method');
+ // Narrative metadata is not an independent causal obligation: its event is
+ // already audited in scenes/actions/states, while factual consistency and
+ // fixed-stage fulfillment stay with their own gates.
+ expect(results.map(row=>row.path)).not.toContain('0.foreshadowingRecover.0.method');
+ expect(results.map(row=>row.path)).not.toContain('0.highlights.0.point');
 });
+it('causal source splitter binds dependent antecedents to their consequence without dropping independent outcomes', () => {
+ const cases=[
+  ['因为档案解封，管理员才同意复制，证据随后封存。','因为档案解封，管理员才同意复制，','证据随后封存。'],
+  ['由于名单未核准，申请仍被退回，负责人随后重新签字。','由于名单未核准，申请仍被退回，','负责人随后重新签字。'],
+  ['虽然她已递交资料，窗口仍未批准，翌日才安排复核。','虽然她已递交资料，窗口仍未批准，','翌日才安排复核。'],
+  ['为了保留追回机会，律师先提出异议，法院随后登记。','为了保留追回机会，律师先提出异议，','法院随后登记。'],
+  ['即使对手否认记录，申诉仍被受理，决定仍未生效。','即使对手否认记录，申诉仍被受理，','决定仍未生效。'],
+ ] as const;
+ for (const [outcome,first,second] of cases) {
+   const chapter=[{chapterNumber:1,scenes:[{outcome}]}];
+   const anchors=causalEvidenceAnchors(JSON.stringify(chapter),{});
+   const results=causalChapterResultAnchors(anchors,0);
+   expect(results.map(row=>row.text)).toEqual([first,second]);
+   expect(results.map(row=>row.text).join('')).toBe(outcome);
+   expect(results.every(row=>row.path==='0.scenes.0.outcome')).toBe(true);
+   expect(causalChapterEvidenceCatalog(chapter,anchors).entries[0].resultAnchorIds).toEqual(results.map(row=>row.id));
+ }
+ const trulyDistinct=[{chapterNumber:1,characterActions:[{result:'取得钥匙，打开门锁，转交给保管员。'}]}];
+ const distinct=causalChapterResultAnchors(causalEvidenceAnchors(JSON.stringify(trulyDistinct),{}),0);
+ expect(distinct).toHaveLength(3);
+ expect(distinct.map(row=>row.text).join('')).toBe('取得钥匙，打开门锁，转交给保管员。');
+});
+
 it('补齐遗漏结果只继承服务器章号，不允许借协议修复改章号或沿用旧桥接', () => {
  const original={transitions:[{chapterNumber:4,resultAnchorId:'body:v2'}]};
  const errors=['第1项因果审查缺少行动及成立条件'];
@@ -81,6 +223,20 @@ it('有行动与结果仍不能用伪造的命令证据证明因果完整', () =
   expect(validateCausalAudit(audit({ status: 'supported', actionEvidence: '她把公开通知改成暂缓处置。',
     resultEvidence: '他获救了。', basisSource: 'body', bridgeEvidence: '法院判他无罪。', reason: '命令撤回所以停止处置' }), content, {}).verified).toBe(false);
 });
+it('把“引用结果自身段落”的自证降为真实缺口，而不是让评审永远未完成', () => {
+  const body='她发出了通知。\n\n“撤回命令。”他说，“先复核。”\n\n他暂缓执行。';
+  // The reviewer cites the result's own paragraph as the bridge; it does not
+  // contain the cited action, so it is self-proof, not an independent condition.
+  const row={status:'supported',reason:'执行人收到命令才暂缓执行',
+    actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p3'};
+  const raw=materializeCausalAuditAnchors(audit(row),body,{});
+  expect(validateCausalAudit(raw,body,{}).verified).toBe(false);
+  const coerced=coerceUnprovenSupportedCausalRows(raw,body,{},true);
+  expect(coerced.transitions[0].status).toBe('gap');
+  expect(validateCausalAudit(coerced,body,{}).verified).toBe(true);
+  // Before the last attempt the citation is left for the correction pass.
+  expect(coerceUnprovenSupportedCausalRows(raw,body,{}).transitions[0].status).toBe('supported');
+});
 it('漏掉账目不能以高分或空问题宣称完成审查', () => {
   expect(validateCausalAudit(undefined, content, {}).verified).toBe(false);
   expect(validateCausalAudit({ status: 'evaluated', reason: '因果完整没有任何问题', transitions: [] }, content, {}).verified).toBe(false);
@@ -100,6 +256,8 @@ it('corrects only invalid causal evidence while retaining a different valid chai
  expect(causalAuditRepairTargets(original,errors)).toEqual([0]);expect(causalAuditRepairPrompt(original,errors,body,{}).prompt).toContain('本次仅纠正编号[0]');
  expect(causalAuditRepairPrompt(original,errors,body,{}).systemPrompt).toContain('只修复因果审查的引用合同');
  expect(causalAuditRepairPrompt(null,[],body,{}).systemPrompt).toContain('独立审查行动');
+ expect(causalAuditRepairPrompt(original,errors,body,{}).prompt).not.toContain('"actionAnchorId":"目录中的真实行动编号"');
+ expect(causalAuditRepairPrompt(null,[],body,{}).prompt).not.toContain('"resultAnchorId":"目录中的真实结果编号"');
  expect(causalAuditRepairPrompt(null,[],body,{}).systemPrompt).not.toContain('只修复因果审查的引用合同');
  const repaired=applyCausalAuditRepair(original,errors,{repairs:[{index:0,actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p2',status:'supported',reason:'实际收到命令后停止执行，无需新增事件'}]});const materialized=materializeCausalAuditAnchors(repaired,body,{});
  expect(materialized.transitions[1]).toEqual(valid);expect(materialized.transitions[2]).toEqual(gap);expect(validateCausalAudit(materialized,body,{})).toMatchObject({verified:true,issues:[{issueType:'causality_gap'}]});
@@ -127,4 +285,745 @@ it('retains and repairs decisive outcomes beyond the former six-row sample ceili
  expect(repaired.transitions).toHaveLength(7);
  expect(repaired.transitions.slice(0, 6)).toEqual(original.transitions.slice(0, 6));
  expect(validateCausalAudit(repaired, content, {})).toMatchObject({ verified: true, issues: [] });
+});
+
+it('requires each comma-separated outcome while preserving original addresses, quoted lists and conditional context',()=>{
+ const outcome='撤议被否，散时无言，原件没再拿出来';
+ const chapters=[{scenes:[{outcome}],characterActions:[{result:'他没有再争，也未失去名声。'}],characterStates:[{stateAfter:'她说“甲，乙”，并留下三份副本（红，蓝，白）'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{}),results=causalChapterResultAnchors(anchors,0);
+ const scene=results.filter(row=>row.path==='0.scenes.0.outcome');
+ expect(scene.map(row=>row.text)).toEqual(['撤议被否，','散时无言，','原件没再拿出来']);
+ expect(scene.map(row=>row.text).join('')).toBe(outcome);
+ expect(anchors.find(row=>row.id==='body:v1')?.text).toBe(outcome);
+ expect(results.filter(row=>row.path==='0.characterActions.0.result').map(row=>row.text)).toEqual(['他没有再争，','也未失去名声。']);
+ expect(results.filter(row=>row.path==='0.characterStates.0.stateAfter').map(row=>row.text)).toEqual(['她说“甲，乙”，','并留下三份副本（红，蓝，白）']);
+ expect(results.every(row=>body.includes(row.text))).toBe(true);
+ const exit='如果收到原件，才可办理；副本仍未提交。';
+ const inventory=causalExitResultAnchors(causalEvidenceAnchors(JSON.stringify([{exitState:exit}]),{}),exit);
+ expect(inventory.map(row=>row.text).join('')).toBe(exit);
+ expect(inventory.map(row=>row.text)).toContain('如果收到原件，才可办理；');
+});
+
+it('keeps conditional prerequisites attached while still inventorying unrelated outcomes',()=>{
+ const examples=[
+  {text:'如果核验完成，才可移交原件，复印件仍未签收。',expected:['如果核验完成，才可移交原件，','复印件仍未签收。']},
+  {text:'只有手续齐全，才能办理，原记录仍在库中。',expected:['只有手续齐全，才能办理，','原记录仍在库中。']},
+  {text:'只有一个人到场，另两人离开。',expected:['只有一个人到场，','另两人离开。']},
+  {text:'若干人到场，另一组完成清点。',expected:['若干人到场，','另一组完成清点。']},
+  {text:'一旦审查通过，就交还物件，仍不代表获得全部权利。',expected:['一旦审查通过，就交还物件，','仍不代表获得全部权利。']},
+ ];
+ for(const {text,expected} of examples){
+  const anchors=causalEvidenceAnchors(JSON.stringify([{exitState:text}]),{});
+  const parts=causalExitResultAnchors(anchors,text).map(row=>row.text);
+  expect(parts).toEqual(expected);
+  expect(parts.join('')).toBe(text);
+  expect(anchors.some(row=>row.source==='body'&&row.text===text)).toBe(true);
+ }
+});
+
+it('does not accept a result-only parent paragraph as its own independent causal bridge',()=>{
+ const body='灯影出现在街口。\n这时候想往回退，已经来不及了。';
+ const audit={status:'evaluated',reason:'逐项核对行动和结果的原文依据',transitions:[{
+  actionAnchorId:'body:p1',resultAnchorId:'body:projection:s2',bridgeAnchorId:'body:p2',
+  actionEvidence:'灯影出现在街口。',resultEvidence:'已经来不及了。',bridgeEvidence:'这时候想往回退，已经来不及了。',
+  basisSource:'body',status:'supported',reason:'收束句已明确写退回去来不及了。'}]};
+ const checked=validateCausalAudit(audit,body,{});
+ expect(checked.verified).toBe(false);expect(checked.errors[0]).toContain('结果自身');
+ expect(checked.issues).toEqual([]);
+ const fixed={...audit,transitions:[{...audit.transitions[0],status:'gap',bridgeEvidence:'',reason:'灯影出现并未建立封堵退路的实际行动条件'}]};
+ expect(validateCausalAudit(fixed,body,{}).issues).toHaveLength(1);
+ const direct={...audit,transitions:[{...audit.transitions[0],actionEvidence:'这时候想往回退，已经来不及了。'}]};
+ // A same-paragraph direct action is not rejected by this address-only check;
+ // its actual causal sufficiency remains the independent semantic duty.
+ expect(validateCausalAudit(direct,body,{}).verified).toBe(true);
+});
+
+it('offers independent condition clauses from narrative and world sources without creating extra result obligations',()=>{
+ const chapters=[{content:'操作员拉下开关。线路失电，触点无法闭合，设备停机。',characterActions:[{action:'拉下开关',result:'设备停机。'}]}];
+ const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({rules:['只有隔离闸断开，才允许检修，现场仍要核对警示灯。']})};
+ const anchors=causalEvidenceAnchors(body,sources);
+ const action=anchors.find(x=>x.path==='0.content'&&x.text==='操作员拉下开关。')!;
+ const bridge=anchors.find(x=>x.path==='0.content'&&x.text==='线路失电，')!;
+ const result=causalChapterResultAnchors(anchors,0);
+ expect(action.id).toBe('body:v1:c1');expect(bridge.id).toBe('body:v1:c2:s1');
+ expect(result).toHaveLength(1);expect(result[0].path).toBe('0.characterActions.0.result');
+ expect(anchors.some(x=>x.source==='project_context'&&x.text==='只有隔离闸断开，才允许检修，')).toBe(true);
+ expect(anchors.some(x=>x.source==='project_context'&&x.text==='只有隔离闸断开，')).toBe(false);
+ const reviewed=materializeCausalAuditAnchors({status:'evaluated',reason:'核对断电条件与当前停机结果的真实来源',transitions:[{
+  actionAnchorId:action.id,resultAnchorId:result[0].id,bridgeAnchorId:bridge.id,status:'supported',reason:'拉下开关使线路失电，触点无法闭合，故设备停机。',
+ }]},body,sources);
+ expect(validateCausalAudit(reviewed,body,sources)).toMatchObject({verified:true,issues:[]});
+ expect(reviewed.transitions[0].bridgeEvidence).toBe('线路失电，');
+ expect(JSON.parse(body)).toEqual(chapters);
+});
+
+it('uses the same fine condition directory for plain prose and structured chapter content',()=>{
+ const text='操作员拉下开关。线路失电，触点无法闭合，设备停机。';
+ const plain=causalEvidenceAnchors(text,{}),structured=causalEvidenceAnchors(JSON.stringify([{content:text}]),{});
+ expect(plain.find(x=>x.id==='body:p1')?.text).toBe(text);
+ for(const clause of ['操作员拉下开关。','线路失电，','触点无法闭合，','设备停机。']){
+  expect(plain.some(x=>x.text===clause)).toBe(true);expect(structured.some(x=>x.text===clause)).toBe(true);
+ }
+ const conditional=causalEvidenceAnchors('只有隔离闸断开，才允许检修，现场仍要核对警示灯。',{});
+ expect(conditional.some(x=>x.text==='只有隔离闸断开，才允许检修，')).toBe(true);
+ expect(conditional.some(x=>x.text==='只有隔离闸断开，')).toBe(false);
+});
+
+it('groups only literally identical chapter results across fields, never changed scope or negation',()=>{
+ const chapter={scenes:[{outcome:'银行收到了这份有签名的申请。'}],
+  characterActions:[{result:'银行收到了这份有签名的申请。'}],
+  characterStates:[{stateAfter:'银行尚未批准这份有签名的申请。'}]};
+ const body=JSON.stringify([chapter]);
+ const all=causalEvidenceAnchors(body,{});
+ const inventory=causalChapterResultAnchors(all,0);
+ const groups=causalChapterResultReviewGroups(all,0);
+ expect(inventory).toHaveLength(3);
+ expect(groups.review).toHaveLength(2);
+ const original=groups.review.find(row=>row.text==='银行收到了这份有签名的申请。')!;
+ expect(groups.aliasesByReview[original.id]).toHaveLength(1);
+ const accepted={status:'evaluated',reason:'审查收件动作不等于批准，仅证明收到资料',
+  transitions:[{chapterNumber:1,actionAnchorId:original.id,resultAnchorId:original.id,
+    bridgeAnchorId:original.id,status:'gap',reason:'收件动作存在，但尚未证明具体签收人或机构确认'}]};
+ const materialized=materializeCausalAuditAnchors(accepted,body,{});
+ const expanded=expandCausalReviewedResultAliases(materialized,groups.aliasesByReview,body,{});
+ expect(expanded.transitions).toHaveLength(2);
+ expect(expanded.transitions.map((row:any)=>row.resultAnchorId)).toContain(groups.aliasesByReview[original.id][0]);
+ expect(expanded.transitions.every((row:any)=>row.status==='gap')).toBe(true);
+ expect(groups.review.some(row=>row.text.startsWith('银行尚未批准'))).toBe(true);
+ const changed={...groups.aliasesByReview,[original.id]:[groups.review.find(row=>row.text.startsWith('银行尚未批准'))!.id]};
+ expect(()=>expandCausalReviewedResultAliases(materialized,changed,body,{})).toThrow('不一致');
+});
+it('keeps repeated literal event text within a single field as separate obligations',()=>{
+ const body=JSON.stringify([{scenes:[{outcome:'重新确认。然后又重新确认。'}]}]);
+ const all=causalEvidenceAnchors(body,{});
+ const groups=causalChapterResultReviewGroups(all,0);
+ expect(groups.review).toHaveLength(causalChapterResultAnchors(all,0).length);
+ expect(Object.keys(groups.aliasesByReview)).toHaveLength(0);
+});
+it('corrects structured outline citations using the same selectable IDs as the server, not prose-only paragraph IDs',()=>{
+ const source=JSON.stringify([{content:'养马人当众牵出老马。',scenes:[{outcome:'都尉验明马龄，拒收了这匹马。'}]}]);
+ const bad={status:'evaluated',reason:'需要纠正结构化章纲中的实际引文位置',
+  transitions:[{actionEvidence:'不在结构化原文里的行动',resultEvidence:'都尉验明马龄，拒收了这匹马。',
+   bridgeEvidence:'',status:'gap',reason:'行动定位错误，但不以来源协议错误断言故事成立'}]};
+ const errors=validateCausalAudit(bad,source,{}).errors;
+ const prompt=causalAuditRepairPrompt(bad,errors,source,{}).prompt;
+ expect(prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+ expect(prompt).toContain('body:v');
+ expect(prompt).not.toContain('"actionAnchorId":"body段落编号"');
+ const all=causalEvidenceAnchors(source,{});
+ const action=all.find(anchor=>anchor.source==='body'&&anchor.text==='养马人当众牵出老马。')!;
+ const result=all.find(anchor=>anchor.source==='body'&&anchor.text==='都尉验明马龄，拒收了这匹马。')!;
+ expect(action).toBeDefined();expect(result).toBeDefined();
+ const patched=applyCausalAuditRepair(bad,errors,{repairs:[{index:0,actionAnchorId:action.id,
+  resultAnchorId:result.id,bridgeAnchorId:'',status:'gap',reason:'现有信息不能证明都尉拒收的完整决定依据'}]});
+ const materialized=materializeCausalAuditAnchors(patched,source,{});
+ expect(validateCausalAudit(materialized,source,{})).toMatchObject({verified:true});
+ expect(materialized.transitions[0].status).toBe('gap');
+});
+
+it('only sends failed causal rows to the existing repair call and keeps all preserved rows server-side',()=>{
+ const row={status:'supported',actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'body:p1',reason:'完成直接行动已有原文条件证据'};
+ const original={status:'evaluated',reason:'逐项核实全部结果',transitions:[...Array.from({length:40},()=>({...row})),{...row,actionAnchorId:'body:p99'}]};
+ const prompt=causalAuditRepairPrompt(original,['第41项因果审查缺少可验证行动、结果或成立条件'],
+  '实际行动发生。\n\n结果确实发生。',{}).prompt;
+ expect(prompt).toContain('本次仅纠正编号[40]');
+ expect(prompt).toContain('retainedValidatedRows');
+ expect(prompt).not.toContain('"transitions":[');
+ expect(prompt).toContain('"index":40');
+ const patched=applyCausalAuditRepair(original,['第41项因果审查缺少可验证行动、结果或成立条件'],
+  {repairs:[{index:40,...row}]});
+ expect(patched.transitions).toHaveLength(41);
+ expect(patched.transitions.slice(0,40)).toEqual(original.transitions.slice(0,40));
+});
+
+it('judges result self-proof per row and accepts a real action clause shared by a sibling row',()=>{
+ const body='他把凭证放上桌，问明来源。\n\n问明来源。\n\n翻看凭证。\n\n对方承认。';
+ const rows=[
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'body:p2',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'问明来源。',bridgeEvidence:'问明来源。',
+   reason:'问明来源是同一实际行动的直接结果'},
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p3',bridgeAnchorId:'body:p2',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'翻看凭证。',bridgeEvidence:'问明来源。',
+   reason:'问明来源是翻看凭证前已经发生的实际行动'},
+  {actionAnchorId:'body:p1',resultAnchorId:'body:p4',bridgeAnchorId:'body:p4',status:'supported',basisSource:'body',
+   actionEvidence:'他把凭证放上桌，问明来源。',resultEvidence:'对方承认。',bridgeEvidence:'对方承认。',
+   reason:'对方承认不能由结果自身证明'},
+ ];
+ const checked=validateCausalAudit({status:'evaluated',reason:'逐项核对实际行动与必要条件',transitions:rows},body,{});
+ expect(checked.verified).toBe(false);
+ expect(checked.errors).toHaveLength(1);
+ // Row 2 shares row 1's bridge address but its own result is a different
+ // action clause; a cross-row Set must not invalidate it. Row 3 remains a
+ // genuine result-self citation and is the only error.
+ expect(checked.errors[0]).toContain('第3项因果审查以结果自身');
+});
+
+it('exposes real action clause text and its server address in the compact causal catalog',()=>{
+ const chapter={chapterNumber:1,chapterFunction:'climax',content:'他把凭证放上桌，问明来源。',
+  scenes:[{outcome:'对方承认。'}]};
+ const body=JSON.stringify([chapter]);
+ const anchor=causalEvidenceAnchors(body,{})
+  .find(item=>item.source==='body'&&item.path==='0.content'&&item.text==='问明来源。'&&/:s\d+$/.test(item.id));
+ expect(anchor?.id).toBeDefined();
+ expect(anchor!.id).toMatch(/:s\d+$/);
+ const prompt=causalAuditRepairPrompt(null,[],body,{},true,false,true);
+ expect(prompt.prompt).toContain(anchor!.id);
+ expect(prompt.prompt).toContain('"text":"问明来源。"');
+});
+
+
+it('server-owned chapter catalog binds all address roles consistently and blocks same-text cross-chapter IDs',()=>{
+ const chapters=[
+  {chapterNumber:3,content:'养马人当面提交了验马册。',exitState:'都尉登记了战马。',
+   scenes:[{outcome:'都尉登记了战马。'}]},
+  {chapterNumber:4,content:'养马人当面提交了验马册。',exitState:'都尉登记了战马。',
+   scenes:[{outcome:'都尉登记了战马。'}]},
+ ];
+ const source=JSON.stringify(chapters),anchors=causalEvidenceAnchors(source,{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors,'exitState');
+ expect(entries).toHaveLength(2);
+ expect(entries[0].resultAnchorIds[0]).not.toBe(entries[1].resultAnchorIds[0]);
+ const quote='养马人当面提交了验马册。';
+ const raw={status:'evaluated',reason:'逐章核实提交验马册后的真实结果',transitions:[{
+  chapterNumber:4,actionEvidence:quote,beforeStateEvidence:quote,
+  resultEvidence:chapters[1].exitState,bridgeEvidence:quote,status:'supported',
+  reason:'当面提交记录作为审查的真实行动和初始状态',
+ }]};
+ const bound=bindCausalReviewEvidenceAddresses(raw,entries,anchors,'exitState');
+ const action=anchors.find(a=>a.path==='1.content')!.id;
+ expect(bound.transitions[0].actionAnchorId).toBe(action);
+ expect(bound.transitions[0].beforeStateAnchorId).toBe(action);
+ expect(bound.transitions[0].resultAnchorId).toBe(entries[1].resultAnchorIds[0]);
+ // The bridge quote is in two chapters and cannot be inferred by its words.
+ expect(bound.transitions[0].bridgeAnchorId).toBeUndefined();
+ expect(causalChapterEvidenceAddressIssues(bound,entries,'exitState')).toEqual([]);
+ const cross={...bound,transitions:[{...bound.transitions[0],actionAnchorId:anchors.find(a=>a.path==='0.content')!.id}]};
+ expect(causalChapterEvidenceAddressIssues(cross,entries,'exitState').join('；')).toContain('行动编号未绑定本章');
+ const wrongResult={...bound,transitions:[{...bound.transitions[0],resultAnchorId:entries[0].resultAnchorIds[0]}]};
+ expect(causalChapterEvidenceAddressIssues(wrongResult,entries,'exitState').join('；')).toContain('结果编号未绑定本章');
+ const wrongBefore={...bound,transitions:[{...bound.transitions[0],beforeStateAnchorId:anchors.find(a=>a.path==='0.content')!.id}]};
+ expect(causalChapterEvidenceAddressIssues(wrongBefore,entries,'exitState').join('；')).toContain('行动前状态编号未绑定本章');
+ const wrongProvided={...raw,transitions:[{...raw.transitions[0],actionAnchorId:'body:v999'}]};
+ expect(bindCausalReviewEvidenceAddresses(wrongProvided,entries,anchors,'exitState').transitions[0].actionAnchorId).toBe('body:v999');
+ const paraphrased={...raw,transitions:[{...raw.transitions[0],actionEvidence:'养马人提交了验马记录。'}]};
+ expect(bindCausalReviewEvidenceAddresses(paraphrased,entries,anchors,'exitState').transitions[0].actionAnchorId).toBeUndefined();
+ const duplicate={...chapters[1],characterActions:[{action:quote}]};
+ const dupAnchors=causalEvidenceAnchors(JSON.stringify([duplicate]),{});
+ const dupEntries=causalChapterEvidenceCatalog([duplicate],dupAnchors,'exitState').entries;
+ expect(bindCausalReviewEvidenceAddresses(raw,dupEntries,dupAnchors,'exitState').transitions[0].actionAnchorId).toBeUndefined();
+});
+it('locates an identical exit result only through the declared chapter index',()=>{
+ const chapters=[{chapterNumber:1,exitState:'通知已生效。'},{chapterNumber:2,exitState:'通知已生效。'}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const first=causalExitResultAnchors(anchors,chapters[0].exitState,0);
+ const second=causalExitResultAnchors(anchors,chapters[1].exitState,1);
+ expect(first).toHaveLength(1);expect(second).toHaveLength(1);
+ expect(first[0].id).not.toBe(second[0].id);
+ expect(first[0].path).toBe('0.exitState');expect(second[0].path).toBe('1.exitState');
+});
+it('preserves a valid explicit body ID and rejects a duplicate chapter number in the same audit',()=>{
+ const chapters=[{chapterNumber:3,content:'甲完成交付。'},{chapterNumber:3,content:'乙完成复核。'}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const entries=causalChapterEvidenceCatalog(chapters,anchors).entries;
+ const row={chapterNumber:3,actionAnchorId:anchors.find(x=>x.path==='0.content')!.id,
+  resultAnchorId:anchors.find(x=>x.path==='0.content')!.id};
+ expect(causalChapterEvidenceAddressIssues({transitions:[row]},entries).join('；')).toContain('章号不存在或不唯一');
+});
+
+it('distinguishes missing action quote, result quote and bridge while keeping existing targeted-repair indices',()=>{
+ const text='她提交资料。对方收到资料。';
+ const row={actionEvidence:'没有发生过的行动',resultEvidence:'对方收到资料。',bridgeEvidence:'',status:'supported',reason:'声称资料已经接收，但未给出可信步骤'};
+ const checked=validateCausalAudit({status:'evaluated',reason:'审查实际因果证据中的缺失和无效引文',transitions:[row]},text,{});
+ expect(checked.verified).toBe(false);
+ expect(checked.errors.join('；')).toContain('actionEvidence不是正文连续原文');
+ expect(checked.errors.join('；')).toContain('supported缺少有效成立条件原文');
+ expect(causalAuditRepairTargets({transitions:[row]},checked.errors)).toEqual([0]);
+});
+
+it('stress: 60 chapter result projections require 20 distinct semantic checks, but every negative field stays rejected',()=>{
+ const results=Array.from({length:20},(_,index)=>'第'+(index+1)+'笔核算已经得到不同的验收结果。');
+ const chapter={chapterNumber:2,content:'核对人员正在核算原始账目，但仍未取得签署权限。',
+  scenes:results.map(outcome=>({outcome})),
+  characterActions:results.map(result=>({result})),
+  characterStates:results.map(stateAfter=>({stateAfter}))};
+ const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+ const all=causalChapterResultAnchors(anchors,0),groups=causalChapterResultReviewGroups(anchors,0);
+ expect(all).toHaveLength(60);
+ expect(groups.review).toHaveLength(20);
+ expect(Object.values(groups.aliasesByReview).flat()).toHaveLength(40);
+ const action=anchors.find(row=>row.path==='0.content'&&row.text===chapter.content)!;
+ const review=materializeCausalAuditAnchors({status:'evaluated',reason:'逐笔核算不等于具有签署或批准资格',
+  transitions:groups.review.map(result=>({chapterNumber:2,actionAnchorId:action.id,resultAnchorId:result.id,
+   bridgeAnchorId:'',status:'gap',reason:'现有核算动作没有建立由有权人员作出批准的必要条件'}))},body,{});
+ const expanded=expandCausalReviewedResultAliases(review,groups.aliasesByReview,body,{});
+ expect(expanded.transitions).toHaveLength(60);
+ const checked=validateCausalAudit(expanded,body,{});
+ expect(checked.verified).toBe(true);
+ expect(checked.issues).toHaveLength(60);
+ expect(checked.issues.every(row=>row.issueType==='causality_gap')).toBe(true);
+});
+
+it('retains independently reviewed identical outcome aliases instead of aborting the entire outline',()=>{
+ const chapter={chapterNumber:1,scenes:[{outcome:'承办人记录了当面提交的申请。'}],
+  characterActions:[{result:'承办人记录了当面提交的申请。'}]};
+ const body=JSON.stringify([chapter]),anchors=causalEvidenceAnchors(body,{});
+ const grouped=causalChapterResultReviewGroups(anchors,0);
+ expect(grouped.review).toHaveLength(1);
+ const lead=grouped.review[0],alias=grouped.aliasesByReview[lead.id][0];
+ const audit=materializeCausalAuditAnchors({status:'evaluated',reason:'分别核对相同结果字段的实际行动及必要条件',
+  transitions:[
+   {chapterNumber:1,actionAnchorId:lead.id,resultAnchorId:lead.id,bridgeAnchorId:'',
+    status:'gap',reason:'尚未证明承办人实际收到申请原件'},
+   {chapterNumber:1,actionAnchorId:alias,resultAnchorId:alias,bridgeAnchorId:'',
+    status:'gap',reason:'独立复核的同一提交结果仍缺实际签收条件'}
+  ]},body,{});
+ const expanded=expandCausalReviewedResultAliases(audit,grouped.aliasesByReview,body,{});
+ expect(expanded.transitions).toHaveLength(2);
+ expect(expanded.transitions[1].reason).toContain('独立复核');
+ const checked=validateCausalAudit(expanded,body,{});
+ expect(checked.verified).toBe(true);
+ expect(checked.issues).toHaveLength(2); // genuine defects still block saving
+ expect(checked.issues.every((row:any)=>row.issueType==='causality_gap')).toBe(true);
+ const duplicate={...audit,transitions:[...audit.transitions,audit.transitions[1]]};
+ expect(()=>expandCausalReviewedResultAliases(duplicate,grouped.aliasesByReview,body,{}))
+  .toThrow('同一结果地址存在多条互斥审查');
+});
+
+it('keeps missing reviewer bridge citations as incomplete protocol, never manufactures a story gap',()=>{
+ const body='申请已经提交。部门随后决定批准。';
+ const audit={status:'evaluated',reason:'逐项审核真实因果执行状态',transitions:[{
+   actionEvidence:'申请已经提交。',resultEvidence:'部门随后决定批准。',
+   bridgeEvidence:'',basisSource:'body',status:'supported',
+   reason:'审核声称有权部门确实作出决定但未提供单独的依据',
+ }]};
+ const check=validateCausalAudit(audit,body,{});
+ expect(check.verified).toBe(false);
+ expect(check.issues).toEqual([]);
+ expect(check.errors.join('；')).toContain('supported缺少有效成立条件原文');
+ const repair=causalAuditRepairPrompt(audit,check.errors,body,{});
+ expect(repair.systemPrompt).toContain('supported必须填写有效的bridgeAnchorId');
+ expect(repair.prompt).toContain('本次仅纠正编号[0]');
+});
+
+it('recovers only a unique literal condition address without changing the independent supported verdict',()=>{
+ const body='她递交了原始合同。\n\n柜台职员登记接收了原件。\n\n经正式核验后申请获批。';
+ const row={actionAnchorId:'body:p1',resultAnchorId:'body:p3',status:'supported',
+  bridgeEvidence:'柜台职员登记接收了原件。',reason:'收到原件是实际核验并作出决定前已经发生的条件'};
+ const reviewed=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'逐项核对实际行动及完成结果',transitions:[row]},body,{});
+ expect(reviewed.transitions[0].bridgeAnchorId).toBe('body:p2');
+ expect(reviewed.transitions[0].bridgeEvidence).toBe('柜台职员登记接收了原件。');
+ expect(validateCausalAudit(reviewed,body,{})).toMatchObject({verified:true,errors:[]});
+ const wrong=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'拒绝以不存在的原文编号替代证明',transitions:[{...row,bridgeAnchorId:'body:p999'}]},body,{});
+ expect(wrong.transitions[0].bridgeEvidence).toBe('');
+ expect(validateCausalAudit(wrong,body,{}).verified).toBe(false);
+ const repeated=body+'\n\n柜台职员登记接收了原件。';
+ const ambiguous=materializeCausalAuditAnchors({
+  status:'evaluated',reason:'重复原文不能猜测是哪个独立执行动作',transitions:[row]},repeated,{});
+ expect(ambiguous.transitions[0].bridgeAnchorId).toBeUndefined();
+ expect(validateCausalAudit(ambiguous,repeated,{}).verified).toBe(false);
+});
+
+
+it('locks a server-owned omitted result even at the 112th audit row; only its cause may be reviewed',()=>{
+ const retained=Array.from({length:111},(_,index)=>({
+   chapterNumber:4,resultAnchorId:'body:v'+(index+1),actionAnchorId:'body:v1',
+   status:'gap',reason:'此前已经逐项独立审定的真实缺口不能因漏审修复而被覆盖'}));
+ const missed={chapterNumber:4,resultAnchorId:'body:v56:s3'};
+ const original={status:'evaluated',reason:'逐项审核',transitions:[...retained,missed]};
+ const errors=['结构化结果逐项核对未完整覆盖：body:v56:s3',
+   '第112项因果审查缺少该出口结果的行动及成立条件'];
+ expect(causalAuditRepairTargets(original,errors)).toEqual([111]);
+ const repair={index:111,actionAnchorId:'body:v2',bridgeAnchorId:'',
+   status:'gap',reason:'此结果尚无独立可核验的执行动作与必要条件'};
+ const fixed=applyCausalAuditRepair(original,errors,{repairs:[repair]});
+ expect(fixed.transitions).toHaveLength(112);
+ expect(fixed.transitions.slice(0,111)).toEqual(retained);
+ expect(fixed.transitions[111]).toMatchObject({
+   chapterNumber:4,resultAnchorId:'body:v56:s3',actionAnchorId:'body:v2',status:'gap'});
+ expect(()=>applyCausalAuditRepair(original,errors,{repairs:[
+   {...repair,resultAnchorId:'body:v12'}]})).toThrow('不能改动服务器锁定的结果编号');
+ expect(()=>applyCausalAuditRepair(original,errors,{repairs:[
+   {...repair,chapterNumber:5}]})).toThrow('不能改变点名行章号');
+ // Existing invalid references are not locked: only appended missing-result
+ // placeholders have no prior action, status or evidence.
+ const invalid={transitions:[{chapterNumber:4,actionAnchorId:'body:v1',
+   resultAnchorId:'invalid:result',status:'gap',reason:'引用编号有误'}]};
+ const corrected=applyCausalAuditRepair(invalid,['第1项因果审查结果编号无效'],
+   {repairs:[{index:0,actionAnchorId:'body:v1',resultAnchorId:'body:v2',
+     status:'gap',reason:'源文本结果仍缺必要条件'}]});
+ expect(corrected.transitions[0].resultAnchorId).toBe('body:v2');
+});
+
+it('repair prompt identifies the exact missing result without claiming its causality was reviewed',()=>{
+ const chapters=[{chapterNumber:4,content:'她向掌柜递交证据。',scenes:[{outcome:'掌柜收到证据。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const outcome=causalChapterResultAnchors(anchors,0)[0];
+ const original={status:'evaluated',transitions:[{chapterNumber:4,resultAnchorId:outcome.id}]};
+ const prompt=causalAuditRepairPrompt(original,['第1项因果审查缺少该出口结果的行动及成立条件'],body,{}).prompt;
+ expect(prompt).toContain('服务器锁定的漏审结果');
+ expect(prompt).toContain(outcome.id);
+ expect(prompt).toContain('掌柜收到证据');
+ expect(prompt).toContain('遗漏结果尚未经语义审核');
+ expect(prompt).toContain('resultAnchorId可省略');
+ expect(prompt).toContain('可选原文证据编号（唯一允许的地址全集）');
+});
+
+
+it('binds an actually reviewed exact same-chapter alias to its advertised result without another model call',()=>{
+ const chapters=[{chapterNumber:9,content:'她当面交出了登记簿。',
+  scenes:[{outcome:'管理员收下登记簿。'}],
+  characterActions:[{action:'她当面交出了登记簿。',result:'管理员收下登记簿。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ const representative=entries[0].resultAnchorIds[0];
+ const alias=aliasesByReview[representative][0];
+ const action=anchors.find(row=>row.source==='body'&&row.path==='0.content')!;
+ const row={chapterNumber:9,resultAnchorId:alias,actionAnchorId:action.id,
+   status:'gap',reason:'仅提交登记簿还不能证明管理员已正式登记或赋予效力'};
+ const normalized=normalizeReviewedCausalResultAliases({status:'evaluated',reason:'保留原语义判断',
+   transitions:[row]},aliasesByReview,anchors);
+ expect(normalized.transitions[0]).toMatchObject({resultAnchorId:representative,status:'gap',actionAnchorId:action.id});
+ const expanded=expandCausalReviewedResultAliases(normalized,aliasesByReview,body,{});
+ expect(expanded.transitions.map((x:any)=>x.resultAnchorId)).toEqual([representative,alias]);
+ expect(expanded.transitions.every((x:any)=>x.status==='gap')).toBe(true);
+ const withIndependentRepresentative=normalizeReviewedCausalResultAliases({
+  transitions:[{...row,resultAnchorId:representative,status:'supported'},row]
+ },aliasesByReview,anchors);
+ // Independent contradictory review rows remain available to the strict
+ // validator; the helper never overwrites an actual verdict to force success.
+ expect(withIndependentRepresentative.transitions.map((x:any)=>x.resultAnchorId))
+   .toEqual([representative,alias]);
+ expect(withIndependentRepresentative.transitions.map((x:any)=>x.status))
+   .toEqual(['supported','gap']);
+});
+
+it('never aliases same words across different chapters or changed assertions',()=>{
+ const chapters=[{chapterNumber:2,scenes:[{outcome:'账目已经核查。'}]},
+  {chapterNumber:3,scenes:[{outcome:'账目已经核查。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ expect(Object.keys(aliasesByReview)).toHaveLength(0);
+ const foreign={transitions:[{chapterNumber:3,resultAnchorId:entries[0].resultAnchorIds[0],status:'gap'}]};
+ expect(normalizeReviewedCausalResultAliases(foreign,aliasesByReview,anchors)).toEqual(foreign);
+});
+
+
+it('splits a hundred independent final-scene claims into two complete-chapter audits without dropping obligations',()=>{
+ const chapters=[1,2,3].map(chapterNumber=>({
+  chapterNumber,chapterFunction:'resolution',
+  scenes:Array.from({length:18},(_,i)=>({outcome:'第'+chapterNumber+'章第'+(i+1)+'个真实结果已生效。'})),
+  characterActions:Array.from({length:16},(_,i)=>({result:'第'+chapterNumber+'章第'+(i+1)+'项人物行动有结果。'})),
+ }));
+ const groups=causalPlanningProofGroups(chapters);
+ expect(groups).toHaveLength(2);
+ expect(groups.flat()).toEqual(chapters);
+ expect(groups.every(group=>group.length>0)).toBe(true);
+ const original=chapters.reduce((n,chapter)=>
+   n+causalChapterResultReviewGroups(causalEvidenceAnchors(JSON.stringify([chapter]),{}),0).review.length,0);
+ const distributed=groups.flat().reduce((n,chapter)=>
+   n+causalChapterResultReviewGroups(causalEvidenceAnchors(JSON.stringify([chapter]),{}),0).review.length,0);
+ expect(original).toBeGreaterThan(100);
+ expect(distributed).toBe(original);
+ expect(causalPlanningProofGroups(chapters.slice(0,1))).toEqual([chapters.slice(0,1)]);
+ expect(causalPlanningProofGroups(chapters.slice(0,2),1000)).toEqual([chapters.slice(0,2)]);
+ // If one chapter alone carries too many distinct assertions, partitioning
+ // by whole chapter cannot make either reviewer reliable. Keep the chapter
+ // whole here; the caller next partitions its server-owned result IDs, and
+ // each result shard still keeps the normal initial+correction path.
+ const dominated=[{
+   chapterNumber:10,scenes:Array.from({length:85},(_,i)=>({outcome:`第十章独立结果${i}已经成立。`}))
+  },{chapterNumber:11,scenes:[{outcome:'另一章完成登记。'}]},
+    {chapterNumber:12,scenes:[{outcome:'末章撤回通知。'}]}];
+ expect(causalPlanningProofGroups(dominated)).toEqual([dominated]);
+ expect(causalPlanningProofGroups(dominated.slice(0,1))).toEqual([dominated.slice(0,1)]);
+});
+
+it('limits a targeted missing-result correction to the matching chapter while retaining global world evidence',()=>{
+ const chapters=[{chapterNumber:1,content:'他保留登记凭证。',scenes:[{outcome:'第一章的登记成立。'}]},
+   {chapterNumber:2,content:'她向窗口提交申请。',scenes:[{outcome:'第二章的窗口收到申请。'}]},
+   {chapterNumber:3,content:'第三章有人要求作出决定。',scenes:[{outcome:'第三章的处理结果待定。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const missing=causalChapterResultAnchors(anchors,1)[0];
+ const review={status:'evaluated',transitions:[{chapterNumber:2,resultAnchorId:missing.id}]};
+ const reason=['第1项因果审查缺少该出口结果的行动及成立条件'];
+ const prompt=causalAuditRepairPrompt(review,reason,body,{project_context:JSON.stringify({worldRules:'窗口收到申请不等于审批通过。'})}).prompt;
+ const segment=prompt.split('可选原文证据编号（唯一允许的地址全集）：')[1].split('\n本次仅纠正编号')[0];
+ const choices=JSON.parse(segment);
+ expect(choices.some((a:any)=>a.id===missing.id)).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('她向窗口提交申请'))).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('窗口收到申请不等于审批通过'))).toBe(true);
+ expect(choices.some((a:any)=>a.text.includes('他保留登记凭证'))).toBe(false);
+ expect(choices.some((a:any)=>a.text.includes('第三章有人要求'))).toBe(false);
+ expect(prompt).toContain('遗漏结果尚未经语义审核');
+});
+
+
+it('losslessly reviews 105 independent chapter outcomes through compact tuples while preserving every negative Gate',()=>{
+ const chapters=[1,2,3].map(chapterNumber=>({
+   chapterNumber,content:'她提交了核对清单。',
+   scenes:Array.from({length:35},(_,i)=>({outcome:'第'+chapterNumber+'章第'+(i+1)+'项处理结果已经生效。'})),
+ }));
+ const body=JSON.stringify(chapters), anchors=causalEvidenceAnchors(body,{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors);
+ const expected=entries.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId})));
+ let ordinal=0;
+ const proofRows=entries.flatMap((entry,index)=>{
+   const action=anchors.find(a=>a.path===index+'.content'&&a.source==='body');
+   expect(action).toBeDefined();
+   return entry.resultAnchorIds.map(()=>[
+     ++ordinal,action!.id,'','gap','只有提交核对清单的行动，未实际建立每项最终生效的决定条件'
+   ]);
+ });
+ expect(proofRows).toHaveLength(105);
+ const decoded=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',proofRows},expected);
+ expect(decoded.proofRows).toBeUndefined();
+ expect(decoded.transitions).toHaveLength(105);
+ const bound=materializeCausalAuditAnchors(decoded,body,{});
+ expect(causalChapterEvidenceAddressIssues(bound,entries)).toEqual([]);
+ expect(validateCausalAudit(bound,body,{})).toMatchObject({verified:true});
+ expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(105);
+ const catalogIds=new Set(entries.flatMap(entry=>entry.resultAnchorIds));
+ expect(new Set(bound.transitions.map((row:any)=>row.resultAnchorId))).toEqual(catalogIds);
+ const reordered=decodePlanningProofRows({status:'evaluated',reason:'结果地址由序号绑定而非输出位置',proofRows:[...proofRows].reverse()},expected);
+ expect(reordered.transitions.map((row:any)=>row.resultAnchorId)).toEqual([...expected].reverse().map(item=>item.resultAnchorId));
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'同序号不许重复',proofRows:[...proofRows.slice(0,104),proofRows[0]]},expected)).toThrow(/结果序号无效、重复或越界/);
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
+   proofRows:proofRows.slice(0,104)},expected)).toThrow(/结果数量与服务器目录不一致/);
+ const wrong=decodePlanningProofRows({status:'evaluated',reason:'逐章核对结果与真实成立条件',
+   proofRows:[...proofRows.slice(0,104),[105,'body:invalid:action','','gap','独立结果的行动证据必须来自同章实际原文']]},expected);
+ const wrongBound=materializeCausalAuditAnchors(wrong,body,{});
+ expect(causalChapterEvidenceAddressIssues(wrongBound,entries).length).toBeGreaterThan(0);
+ expect(validateCausalAudit(wrongBound,body,{}).verified).toBe(false);
+});
+
+it('compact initial proof removes repeated body prose but retains all result and world evidence and protocol failures',()=>{
+ const chapters=[{chapterNumber:1,content:'她提交了核对清单。',
+   supportingNotes:Array.from({length:40},(_,i)=>'第'+i+'项已有独立核验记录但最终批准权限仍属于管理员。'),
+   scenes:[{outcome:'管理员暂时受理申请，最终是否批准尚不确定。'}]}];
+ const body=JSON.stringify(chapters),sources={project_context:JSON.stringify({worldRules:'受理申请不等于准许最终登记。'})};
+ const base=causalAuditRepairPrompt(null,[],body,sources,false,false);
+ const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
+ expect(compact.prompt).toContain('proofRows每行恰好5项');
+ expect(compact.prompt).toContain('受理申请不等于准许最终登记');
+ const inventory=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,sources)).entries[0].resultAnchorIds;
+ for(const id of inventory)expect(compact.prompt).toContain(id);
+ expect(base.prompt).toContain('她提交了核对清单。');
+ // Existing action evidence must be visible; non-action background stays compact.
+ expect(compact.prompt).toContain('"text":"她提交了核对清单。"');
+ expect(compact.prompt).not.toContain('"text":"第0项已有独立核验记录但最终批准权限仍属于管理员。"');
+ expect(compact.prompt.length).toBeLessThan(base.prompt.length);
+ expect(decodePlanningProofRows({status:'evaluated',reason:'旧版本完整结果账目',
+   transitions:[{chapterNumber:1,resultAnchorId:'body:v1',status:'gap'}]}).transitions).toHaveLength(1);
+ const expected=[{chapterNumber:1,resultAnchorId:'body:v2'}];
+ // A supported row with no real action/bridge is not proof: it decodes as a
+ // gap so the existing repair path handles it, instead of failing the chapter.
+ const noBridge=decodePlanningProofRows({status:'evaluated',reason:'没有独立桥接证据',
+   proofRows:[[1,'body:v1','', 'supported','没有独立桥接证据']]},expected);
+ expect(noBridge.transitions[0].status).toBe('gap');
+ for(const invalid of [
+   {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
+   {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v1','gap','理由']]},
+
+ ])expect(()=>decodePlanningProofRows(invalid,expected)).toThrow();
+ expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不存在权威结果目录',proofRows:[
+   [1,'body:v1','','gap','未确认实际成立条件']]})).toThrow(/服务器结果目录/);
+});
+
+it('partitions a dominant chapter by server-owned result identities without omitting any result or chapter context',()=>{
+ const chapters=[
+  {chapterNumber:10,chapterFunction:'climax',content:'已有身份与行动均按完整事实保留。',
+   scenes:Array.from({length:85},(_,index)=>({outcome:'第十章结果'+index+'需要分别审查。'}))},
+  {chapterNumber:11,chapterFunction:'resolution',content:'完整故事中的前章因果仍需核对。',
+   scenes:[{outcome:'另一章真正完成了登记。'}]},
+ ];
+ const full=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(JSON.stringify(chapters),{}))
+  .entries.flatMap(entry=>entry.resultAnchorIds);
+ const partitions=causalPlanningProofResultPartitions(chapters);
+ expect(partitions).toHaveLength(4);
+ expect(partitions.every(part=>part.length<=24)).toBe(true);
+ expect(partitions.flat()).toEqual(full);
+ expect(new Set(partitions.flat()).size).toBe(full.length);
+ const tighter=causalPlanningProofResultPartitions(chapters,40);
+ expect(tighter).toHaveLength(3);
+ expect(tighter.flat()).toEqual(full);
+ expect(new Set(tighter.flat()).size).toBe(full.length);
+});
+
+
+it('shards more than 144 independent results without losing claims or the normal correction path',()=>{
+ const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'主角实际递交材料，对方是否接受仍需分别核对。',
+   scenes:Array.from({length:200},(_,index)=>({outcome:'独立结果第'+(index+1)+'项需要逐个反证成立条件。'}))}];
+ const body=JSON.stringify(chapters);
+ const catalog=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(body,{})).entries;
+ const all=catalog.flatMap(entry=>entry.resultAnchorIds);
+ expect(all.length).toBeGreaterThan(144);
+ // One huge call previously exceeded the provider output cap. Sharding bounds
+ // only each first pass; every shard still keeps its own initial+correction
+ // path, and no independent result claim is dropped.
+ const parts=causalPlanningProofResultPartitions(chapters);
+ // Shard count is derived from the work and the configured reliable row budget,
+ // not from a fixed number of calls; no result claim may be dropped.
+ const rowLimit=LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS;
+ expect(parts).toHaveLength(Math.ceil(all.length/rowLimit));
+ expect(parts.every(part=>part.length<=rowLimit)).toBe(true);
+ expect(parts.flat()).toEqual(all);
+ expect(new Set(parts.flat()).size).toBe(all.length);
+ const anchors=causalEvidenceAnchors(body,{});
+ const action=anchors.find(item=>item.path==='0.content');
+ expect(action).toBeDefined();
+ let approved=0;
+ for(const part of parts){
+  const expected=part.map(resultAnchorId=>({chapterNumber:3,resultAnchorId}));
+  const proofRows=part.map((_,index)=>[index+1,action!.id,'','gap','逐项要求的结果尚未得到实际决定者的有效批准']);
+  const checked=materializeCausalAuditAnchors(decodePlanningProofRows({
+   status:'evaluated',reason:'实际逐一核对各个结果成立条件',proofRows},expected),body,{});
+  expect(causalChapterEvidenceAddressIssues(checked,[{
+   chapterNumber:3,anchorIds:catalog[0].anchorIds,resultAnchorIds:part
+  }])).toEqual([]);
+  expect(validateCausalAudit(checked,body,{}).verified).toBe(true);
+  approved+=checked.transitions.length;
+ }
+ expect(approved).toBe(all.length);
+});
+
+it('large outline audit keeps every exact result but avoids resending all action IDs',()=>{
+ const chapters=[{chapterNumber:3,chapterFunction:'climax',content:'员工核对异常，但主管尚未作出最终决定。',
+   scenes:[{outcome:'主管暂缓处分决定。'}],
+   characterActions:[{character:'员工',action:'员工当面递交带签名的记录。',result:'主管暂缓处分决定。'},
+     {character:'员工',action:'员工向人事递交离职申请。',result:'离职申请已交，人事尚未批准。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const {entries,aliasesByReview}=causalChapterEvidenceCatalog(chapters,anchors);
+ const shown=causalPlanningProofPromptCatalog(chapters,entries,anchors);
+ expect(shown).toHaveLength(1);
+ expect(shown[0].bodyIndex).toBe(0);
+ expect(shown[0].resultAnchorIds).toEqual(entries[0].resultAnchorIds);
+ expect(shown[0]).not.toHaveProperty('anchorIds');
+ expect(shown[0].actionLookup.length).toBeGreaterThan(0);
+ // The reviewer now sees actual prior actions in the same chapter rather
+ // than guessing a supporting condition from the result's parent paragraph.
+ // IDs are location hints only; they do not grant a supported verdict.
+ expect(shown[0].actionAnchorIds).toHaveLength(2);
+ expect(shown[0].actionAnchorIds.every(id=>anchors.some(a=>a.id===id
+   &&a.path?.startsWith('0.characterActions.')&&a.path.endsWith('.action')))).toBe(true);
+ const reviewedScene=anchors.find(a=>a.path==='0.scenes.0.outcome'&&shown[0].resultAnchorIds.includes(a.id));
+ const siblingAction=anchors.find(a=>a.path==='0.characterActions.0.action');
+ expect(reviewedScene).toBeDefined();
+ expect(siblingAction).toBeDefined();
+ // The scene result won the exact-text alias; its original character action
+ // must still be available as a hint, without being assumed causal proof.
+ expect(shown[0].actionLookup).toContainEqual({
+   resultAnchorId:reviewedScene!.id,actionAnchorId:siblingAction!.id,
+ });
+ for(const hint of shown[0].actionLookup){
+   const action=anchors.find(a=>a.id===hint.actionAnchorId)!;
+   const result=anchors.find(a=>a.id===hint.resultAnchorId)!;
+   expect(action.source).toBe('body');
+   expect(action.path?.startsWith('0.characterActions.')).toBe(true);
+   expect(result.source).toBe('body');
+   expect(result.path?.startsWith('0.')).toBe(true);
+   expect(action.text).not.toEqual(result.text);
+ }
+ // Small examples can grow when a valid cross-field address hint is added.
+ // Preserve the complete proof inventory and avoid a misleading size claim.
+ expect(shown[0]).not.toHaveProperty('anchorIds');
+ expect(new Set(shown[0].resultAnchorIds).size).toBe(entries[0].resultAnchorIds.length);
+ expect(shown[0].actionLookup.every(hint=>shown[0].resultAnchorIds.includes(hint.resultAnchorId))).toBe(true);
+ expect(Object.values(aliasesByReview).flat().length).toBeGreaterThan(0);
+ const hint=shown[0].actionLookup[0];
+ const checked=materializeCausalAuditAnchors({status:'evaluated',reason:'核对主管实际处分或批准的前置条件',
+   transitions:[{chapterNumber:3,actionAnchorId:hint.actionAnchorId,resultAnchorId:hint.resultAnchorId,
+     bridgeAnchorId:'',status:'gap',reason:'递交记录或申请并不自动证明处分或审批已经发生'}]},body,{});
+ expect(validateCausalAudit(checked,body,{}).verified).toBe(true);
+ expect(validateCausalAudit(checked,body,{}).issues).toHaveLength(1);
+});
+
+it('decodes only lossless negative-proof transport and retains full causal and chapter Gates',()=>{
+ const chapters=[{chapterNumber:1,content:'她先提交申请，机关尚未作出决定。',
+   scenes:[{outcome:'申请最终被批准却无人提供审批依据。'}]}];
+ const body=JSON.stringify(chapters),anchors=causalEvidenceAnchors(body,{});
+ const inventory=causalChapterEvidenceCatalog(chapters,anchors).entries;
+ const expected=inventory.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({
+   chapterNumber:entry.chapterNumber,resultAnchorId})));
+ const action=anchors.find(a=>a.path==='0.content');
+ expect(action).toBeDefined();
+ expect(expected).toHaveLength(1);
+ const negative=decodePlanningProofRows({status:'evaluated',reason:'没有实际的审批者和决定条件',
+   proofRows:[['1',' '+action!.id+' ',null,'gap','只提出申请，未交代有权者批准及生效动作']]},expected);
+ expect(negative.transitions[0].bridgeAnchorId).toBe('');
+ expect(negative.transitions[0].actionAnchorId).toBe(action!.id);
+ const bound=materializeCausalAuditAnchors(negative,body,{});
+ expect(causalChapterEvidenceAddressIssues(bound,inventory)).toEqual([]);
+ expect(validateCausalAudit(bound,body,{}).verified).toBe(true);
+ expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(1);
+ // supported without a bridge is not proof → gap, not a fatal protocol error.
+ const noBridgeSupported=decodePlanningProofRows({status:'evaluated',reason:'没有实际审批证据',
+   proofRows:[['1',action!.id,null,'supported','没有决定证据也不能判定审批已经成立']]},expected);
+ expect(noBridgeSupported.transitions[0].status).toBe('gap');
+ for(const ordinal of ['1.0','01','-1','2','1e0']){
+   expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不得使用不合法结果编号',
+     proofRows:[[ordinal,action!.id,'','gap','本章没有合法批准行动的证据']]},expected)).toThrow(/结果序号/);
+ }
+ const forged=decodePlanningProofRows({status:'evaluated',reason:'拒绝结论也不能使用伪造行动编号',
+   proofRows:[['1','body:invented',null,'gap','本章没有合法批准行动的证据']]},expected);
+ const forgedBound=materializeCausalAuditAnchors(forged,body,{});
+ expect(validateCausalAudit(forgedBound,body,{}).verified).toBe(false);
+});
+
+it('downgrades an unproven supported row to a real gap instead of deadlocking the chapter review',()=>{
+ const content='甲把钥匙放在桌上。乙看见钥匙。';
+ const audit={status:'evaluated',reason:'逐项核对行动与结果',transitions:[{
+  actionAnchorId:'body:p1',resultAnchorId:'body:p2',bridgeAnchorId:'',status:'supported',
+  basisSource:'body',actionEvidence:'甲把钥匙放在桌上',resultEvidence:'乙看见钥匙',
+  bridgeEvidence:'',reason:'声称钥匙已交付但未给出成立条件原文',
+ }]};
+ expect(validateCausalAudit(audit,content,{}).verified).toBe(false);
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('gap');
+ expect(validateCausalAudit(coerced,content,{}).verified).toBe(true);
+ expect(validateCausalAudit(coerced,content,{}).issues).toHaveLength(1);
+});
+
+it('treats internal attempts and states as self-evidencing, while external results still need a bridge',()=>{
+ const content='他坐在床沿上，试着学喊。\n\n那声调子叫不出来。\n\n他把耳机推过去。';
+ const audit={status:'evaluated',reason:'逐项核对内在状态与外部交付',transitions:[
+  {actionEvidence:'他坐在床沿上，试着学喊。',resultEvidence:'那声调子叫不出来。',
+   bridgeEvidence:'',status:'gap',reason:'这是内在尝试，不需要外部行动锚点'},
+  {actionEvidence:'',resultEvidence:'他把耳机推过去。',bridgeEvidence:'',status:'supported',
+   reason:'外部交付结果缺少成立条件'},
+ ]};
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('supported');
+ expect(coerced.transitions[1].status).toBe('gap');
+ expect(validateCausalAudit(audit,content,{}).errors.join('；')).toContain('缺少可验证结果或成立条件');
+});
+
+it('accepts a supported row whose reason states an internal reaction or carried-over state',()=>{
+ const content='我没有多解释，只是站着。\n\n妈的声音找不回来。';
+ const audit={status:'evaluated',reason:'逐项核对内在反应与承前状态',transitions:[{
+  resultEvidence:'我没有多解释，只是站着。',status:'supported',bridgeEvidence:'',
+  reason:'原文直接写我没多解释，是当时反应，无独立外部动作；妈的声音找不回来，属当前状态。',
+ }]};
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('supported');
+ expect(validateCausalAudit(coerced,content,{}).verified).toBe(true);
+});
+
+it('returns verified when every audited row is an internal state',()=>{
+ const content='他试着学喊，却叫不出调子。';
+ const audit={status:'evaluated',reason:'逐项核对内在状态',transitions:[{
+  resultEvidence:'他试着学喊，却叫不出调子。',status:'gap',reason:'内心尝试，属内部状态，不需要外部行动锚点。',
+ }]};
+ expect(validateCausalAudit(audit,content,{}).verified).toBe(true);
+});
+
+it('excludes internal-state outcomes from the required action-proof result catalog',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'他试着学喊。',
+  scenes:[{outcome:'他试着学喊。'}],
+  characterActions:[{action:'他坐下。',result:'心里发冷。'}]}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors,undefined,{allowInternalStates:true});
+ const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ expect(entries[0].resultAnchorIds.every(id=>!isInternalStateResult(byId.get(id)?.text))).toBe(true);
 });
