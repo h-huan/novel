@@ -118,6 +118,30 @@ describe('IdempotentRealLLMService', () => {
     } finally { db.close(); }
   });
 
+  it('binds the live generation run id directly instead of depending on a post-hoc fingerprint lookup', async () => {
+    const metrics = {
+      beginRun: vi.fn(() => ({ id: 'run-live', constitution: null })),
+      finishRun: vi.fn(),
+      setRunModel: vi.fn(),
+    };
+    const service = new RealLLMService({
+      getModelForScenario: () => ({ modelName: 'test-model', modelVersion: 'v1' }),
+      getConfig: () => ({ scenarios: {}, defaults: { maxTokens: 4096 } }),
+    } as any, metrics as any);
+    (service as any).generateInternal = vi.fn(async () => ({
+      content: '{"world":"live"}', model: 'test-model', latency: 1,
+    }));
+
+    const response = await service.generate({
+      prompt: '生成世界观JSON', scenario: 'world_building',
+      metrics: { projectId: 'p', stepKey: 'world_source_local_repair' },
+    } as any);
+
+    expect(response.content).toBe('{"world":"live"}');
+    expect(response.runId).toBe('run-live');
+    expect(metrics.finishRun).toHaveBeenCalledWith('run-live', 'success', expect.any(Number), '{"world":"live"}', undefined, 'test-model');
+  });
+
   it('reuses an identical chapter-scoped planning review but not a changed review', async () => {
     const { db } = fixture();
     const superGenerate = vi.spyOn(RealLLMService.prototype, 'generate').mockResolvedValue({

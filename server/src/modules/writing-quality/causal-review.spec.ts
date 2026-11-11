@@ -1,4 +1,5 @@
-import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions,coerceUnprovenSupportedCausalRows} from './causal-review';
+import {causalAuditRepairTargets,applyCausalAuditRepair,causalAuditRepairPrompt,compactCausalProofSourceCatalog,causalEvidenceAnchorOptions,coerceUnprovenSupportedCausalRows,isInternalStateResult,buildCausalPromptTransport,mapCausalPromptAnchorIds} from './causal-review';
+import { LLM_TUNABLES } from '../../config/llm-tunables';
 import { expect, it } from 'vitest';
 import { materializeCausalAuditAnchors, validateCausalAudit } from './causal-review';
 import { causalEvidenceAnchors, causalExitResultAnchors } from './causal-review';
@@ -33,6 +34,80 @@ it('compacts external source citations without omitting any literal clause or ad
  expect(after).toEqual(full);
 });
 
+it('carries source evidence once through reversible transport aliases',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她把材料交给管理人。',
+   scenes:[{outcome:'管理人收下材料并登记，产权人尚未批准。'}],
+   characterActions:[{character:'她',action:'把材料交给管理人',result:'管理人收下材料'}]}];
+ const body=JSON.stringify(chapters);
+ const sources={project_context:JSON.stringify({worldRules:'只有登记之后才算受理，批准仍需产权人签字。'}),
+   chapter_plan:JSON.stringify({priorChapters:[
+     {content:'管理人此前只收过副本，产权人从未签字。'},
+     {content:'产权人上次拒绝批准，要求补齐原始记录。'}],
+     priorLedger:'管理人保留第一份副本，产权人尚未核查。'})};
+ const full=causalAuditRepairPrompt(null,[],body,sources,false,false,true);
+ const compact=causalAuditRepairPrompt(null,[],body,sources,false,false,true,undefined,undefined,true);
+ expect(compact.transport).toBeDefined();
+ // Source anchors are aliased, body result addresses stay unchanged.
+ expect(compact.prompt).toContain('"id":"src1"');
+ expect(full.prompt).toMatch(/chapter_plan:v\d+/);
+ expect(compact.prompt).not.toMatch(/chapter_plan:v\d+/);
+ expect(compact.prompt).toContain('产权人尚未核查');
+ expect(compact.prompt).toContain('批准仍需产权人签字');
+ expect(compact.prompt.length).toBeLessThan(full.prompt.length);
+ // The full server catalog still exists; aliases only change the transport.
+ const aliasEntry=[...compact.transport!.aliasToReal.entries()][0];
+ expect(aliasEntry[1]).toMatch(/^(chapter_plan|project_context):v\d+/);
+ const restored=mapCausalPromptAnchorIds({transitions:[{
+   actionAnchorId:aliasEntry[0],bridgeAnchorId:aliasEntry[0],resultAnchorId:aliasEntry[0],
+   actionAnchorIds:[aliasEntry[0]],beforeStateAnchorId:aliasEntry[0],reason:aliasEntry[0],
+ }]},compact.transport!.aliasToReal);
+ expect(restored.transitions[0].actionAnchorId).toBe(aliasEntry[1]);
+ expect(restored.transitions[0].bridgeAnchorId).toBe(aliasEntry[1]);
+ expect(restored.transitions[0].actionAnchorIds).toEqual([aliasEntry[1]]);
+ // Free-text reasons are not silently rewritten as addresses.
+ expect(restored.transitions[0].reason).toBe(aliasEntry[0]);
+ expect(buildCausalPromptTransport(causalEvidenceAnchorOptions(body,sources)).catalog
+   .filter(row=>row.source==='body').every(row=>row.id.startsWith('body:'))).toBe(true);
+});
+
+it('requires a gap reason to name the missing condition instead of contradicting the verdict',()=>{
+ const body=JSON.stringify([{chapterNumber:1,chapterFunction:'conflict',content:'民警问遗物登记没有，我答没登。'}]);
+ const prompt=causalAuditRepairPrompt(null,[],body,{});
+ expect(prompt.systemPrompt).toContain('reason与status必须一致');
+ expect(prompt.systemPrompt).toContain('不得把已成立的结果标成gap');
+ expect(prompt.systemPrompt).toContain('问答链/交付链已完成');
+});
+
+it('keeps prose anchor ids in the p/s namespace and forbids invented clause suffixes',()=>{
+ const body=JSON.stringify([{chapterNumber:1,chapterFunction:'conflict',content:'她把耳机塞进袖口。'}]);
+ const prompt=causalAuditRepairPrompt(null,[],body,{});
+ expect(prompt.systemPrompt).toContain('body:pN:sM');
+ expect(prompt.systemPrompt).toContain('不得猜测、补齐或改写编号后缀');
+});
+
+it('validates a proof that cites transport aliases after restoring them',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'她把材料交给管理人。',
+   scenes:[{outcome:'管理人收下材料并登记。'}],
+   characterActions:[{character:'她',action:'把材料交给管理人',result:'管理人收下材料'}]}];
+ const body=JSON.stringify(chapters);
+ const sources={project_context:JSON.stringify({worldRules:'只有登记之后才算受理。'})};
+ const prompt=causalAuditRepairPrompt(null,[],body,sources,true,false,true,undefined,undefined,true);
+ const transport=prompt.transport!;
+ const anchors=causalEvidenceAnchors(body,sources);
+ const catalog=causalChapterEvidenceCatalog(chapters,anchors.filter(a=>a.source==='body'),undefined,{allowInternalStates:true});
+ const expected=catalog.entries.flatMap(e=>e.resultAnchorIds.map(id=>({chapterNumber:e.chapterNumber,resultAnchorId:id})));
+ const action=anchors.find(a=>a.source==='body'&&a.path==='0.characterActions.0.action')!;
+ const ruleAlias=[...transport.realToAlias.entries()].find(([real])=>real.startsWith('project_context:'))![1];
+ const response={causalAudit:{status:'evaluated',reason:'已逐项核对结果、行动与成立条件',proofRows:expected.map((_,index)=>
+   [index+1,action.id,ruleAlias,'supported','管理人实际收下并登记，规则要求登记后才算受理'] as [number,string,string,string,string])}};
+ const decoded=decodePlanningProofRows(response.causalAudit,expected);
+ const restored=mapCausalPromptAnchorIds(decoded,transport.aliasToReal);
+ expect(restored.transitions[0].bridgeAnchorId).toBe(transport.aliasToReal.get(ruleAlias));
+ const audit=materializeCausalAuditAnchors(restored,body,sources);
+ const checked=validateCausalAudit(audit,body,sources,{allowInternalStates:true});
+ expect(checked.verified,checked.errors.join('；')).toBe(true);
+});
+
 it('compact chapter proofs keep existing action text visible without deciding the causal verdict',()=>{
  const chapters=[{chapterNumber:1,chapterFunction:'climax',
   content:'她先核对了文件上的签名，再到窗口办理交接。',
@@ -45,15 +120,19 @@ it('compact chapter proofs keep existing action text visible without deciding th
  expect(prompt).toContain('真实gap须完整解释缺失条件');
 });
 
-it('逐项目录包括场景、人物、状态及伏笔结果，且不把目标或前态当结果', () => {
- const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
+it('逐项目录只审计可外部核验的结果，导演性高光与伏笔投影交给事实/阶段审查', () => {
+ const chapters=[{scenes:[{goal:'先帮老人登记',outcome:'记录已在老人手里。药仍未买到。'}],characterActions:[{action:'把编号记在本子上',result:'登记完成'}],characterStates:[{stateBefore:'尚未登记',stateAfter:'登记已有底稿'}],highlights:[{point:'登记本上的编号被当场核对'}],foreshadowingRecover:[{method:'取回原始记录'}]}];
  const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
  const results=causalChapterResultAnchors(anchors,0);
  expect(results.some(row=>row.text.includes('老人手里'))).toBe(true);
  expect(results.filter(row=>row.path==='0.scenes.0.outcome')).toHaveLength(2);
  expect(results.map(row=>row.path)).not.toContain('0.scenes.0.goal');
  expect(results.map(row=>row.path)).not.toContain('0.characterStates.0.stateBefore');
- expect(results.map(row=>row.path)).toContain('0.foreshadowingRecover.0.method');
+ // Narrative metadata is not an independent causal obligation: its event is
+ // already audited in scenes/actions/states, while factual consistency and
+ // fixed-stage fulfillment stay with their own gates.
+ expect(results.map(row=>row.path)).not.toContain('0.foreshadowingRecover.0.method');
+ expect(results.map(row=>row.path)).not.toContain('0.highlights.0.point');
 });
 it('causal source splitter binds dependent antecedents to their consequence without dropping independent outcomes', () => {
  const cases=[
@@ -738,9 +817,13 @@ it('compact initial proof removes repeated body prose but retains all result and
  expect(decodePlanningProofRows({status:'evaluated',reason:'旧版本完整结果账目',
    transitions:[{chapterNumber:1,resultAnchorId:'body:v1',status:'gap'}]}).transitions).toHaveLength(1);
  const expected=[{chapterNumber:1,resultAnchorId:'body:v2'}];
+ // A supported row with no real action/bridge is not proof: it decodes as a
+ // gap so the existing repair path handles it, instead of failing the chapter.
+ const noBridge=decodePlanningProofRows({status:'evaluated',reason:'没有独立桥接证据',
+   proofRows:[[1,'body:v1','', 'supported','没有独立桥接证据']]},expected);
+ expect(noBridge.transitions[0].status).toBe('gap');
  for(const invalid of [
    {status:'evaluated',reason:'拒绝双格式',transitions:[],proofRows:[]},
-   {status:'evaluated',reason:'拒绝假冒通过',proofRows:[[1,'body:v1','', 'supported','没有独立桥接证据']]},
    {status:'evaluated',reason:'拒绝缺项',proofRows:[[1,'body:v1','gap','理由']]},
 
  ])expect(()=>decodePlanningProofRows(invalid,expected)).toThrow();
@@ -758,12 +841,12 @@ it('partitions a dominant chapter by server-owned result identities without omit
  const full=causalChapterEvidenceCatalog(chapters,causalEvidenceAnchors(JSON.stringify(chapters),{}))
   .entries.flatMap(entry=>entry.resultAnchorIds);
  const partitions=causalPlanningProofResultPartitions(chapters);
- expect(partitions).toHaveLength(2);
- expect(partitions.every(part=>part.length<=72)).toBe(true);
+ expect(partitions).toHaveLength(4);
+ expect(partitions.every(part=>part.length<=24)).toBe(true);
  expect(partitions.flat()).toEqual(full);
  expect(new Set(partitions.flat()).size).toBe(full.length);
  const tighter=causalPlanningProofResultPartitions(chapters,40);
- expect(tighter).toHaveLength(2);
+ expect(tighter).toHaveLength(3);
  expect(tighter.flat()).toEqual(full);
  expect(new Set(tighter.flat()).size).toBe(full.length);
 });
@@ -780,7 +863,11 @@ it('shards more than 144 independent results without losing claims or the normal
  // only each first pass; every shard still keeps its own initial+correction
  // path, and no independent result claim is dropped.
  const parts=causalPlanningProofResultPartitions(chapters);
- expect(parts).toHaveLength(2);
+ // Shard count is derived from the work and the configured reliable row budget,
+ // not from a fixed number of calls; no result claim may be dropped.
+ const rowLimit=LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS;
+ expect(parts).toHaveLength(Math.ceil(all.length/rowLimit));
+ expect(parts.every(part=>part.length<=rowLimit)).toBe(true);
  expect(parts.flat()).toEqual(all);
  expect(new Set(parts.flat()).size).toBe(all.length);
  const anchors=causalEvidenceAnchors(body,{});
@@ -870,8 +957,10 @@ it('decodes only lossless negative-proof transport and retains full causal and c
  expect(causalChapterEvidenceAddressIssues(bound,inventory)).toEqual([]);
  expect(validateCausalAudit(bound,body,{}).verified).toBe(true);
  expect(validateCausalAudit(bound,body,{}).issues).toHaveLength(1);
- expect(()=>decodePlanningProofRows({status:'evaluated',reason:'没有实际审批证据',
-   proofRows:[['1',action!.id,null,'supported','没有决定证据也不能判定审批已经成立']]},expected)).toThrow(/成立条件/);
+ // supported without a bridge is not proof → gap, not a fatal protocol error.
+ const noBridgeSupported=decodePlanningProofRows({status:'evaluated',reason:'没有实际审批证据',
+   proofRows:[['1',action!.id,null,'supported','没有决定证据也不能判定审批已经成立']]},expected);
+ expect(noBridgeSupported.transitions[0].status).toBe('gap');
  for(const ordinal of ['1.0','01','-1','2','1e0']){
    expect(()=>decodePlanningProofRows({status:'evaluated',reason:'不得使用不合法结果编号',
      proofRows:[[ordinal,action!.id,'','gap','本章没有合法批准行动的证据']]},expected)).toThrow(/结果序号/);
@@ -894,4 +983,47 @@ it('downgrades an unproven supported row to a real gap instead of deadlocking th
  expect(coerced.transitions[0].status).toBe('gap');
  expect(validateCausalAudit(coerced,content,{}).verified).toBe(true);
  expect(validateCausalAudit(coerced,content,{}).issues).toHaveLength(1);
+});
+
+it('treats internal attempts and states as self-evidencing, while external results still need a bridge',()=>{
+ const content='他坐在床沿上，试着学喊。\n\n那声调子叫不出来。\n\n他把耳机推过去。';
+ const audit={status:'evaluated',reason:'逐项核对内在状态与外部交付',transitions:[
+  {actionEvidence:'他坐在床沿上，试着学喊。',resultEvidence:'那声调子叫不出来。',
+   bridgeEvidence:'',status:'gap',reason:'这是内在尝试，不需要外部行动锚点'},
+  {actionEvidence:'',resultEvidence:'他把耳机推过去。',bridgeEvidence:'',status:'supported',
+   reason:'外部交付结果缺少成立条件'},
+ ]};
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('supported');
+ expect(coerced.transitions[1].status).toBe('gap');
+ expect(validateCausalAudit(audit,content,{}).errors.join('；')).toContain('缺少可验证结果或成立条件');
+});
+
+it('accepts a supported row whose reason states an internal reaction or carried-over state',()=>{
+ const content='我没有多解释，只是站着。\n\n妈的声音找不回来。';
+ const audit={status:'evaluated',reason:'逐项核对内在反应与承前状态',transitions:[{
+  resultEvidence:'我没有多解释，只是站着。',status:'supported',bridgeEvidence:'',
+  reason:'原文直接写我没多解释，是当时反应，无独立外部动作；妈的声音找不回来，属当前状态。',
+ }]};
+ const coerced=coerceUnprovenSupportedCausalRows(audit,content,{});
+ expect(coerced.transitions[0].status).toBe('supported');
+ expect(validateCausalAudit(coerced,content,{}).verified).toBe(true);
+});
+
+it('returns verified when every audited row is an internal state',()=>{
+ const content='他试着学喊，却叫不出调子。';
+ const audit={status:'evaluated',reason:'逐项核对内在状态',transitions:[{
+  resultEvidence:'他试着学喊，却叫不出调子。',status:'gap',reason:'内心尝试，属内部状态，不需要外部行动锚点。',
+ }]};
+ expect(validateCausalAudit(audit,content,{}).verified).toBe(true);
+});
+
+it('excludes internal-state outcomes from the required action-proof result catalog',()=>{
+ const chapters=[{chapterNumber:1,chapterFunction:'climax',content:'他试着学喊。',
+  scenes:[{outcome:'他试着学喊。'}],
+  characterActions:[{action:'他坐下。',result:'心里发冷。'}]}];
+ const anchors=causalEvidenceAnchors(JSON.stringify(chapters),{});
+ const {entries}=causalChapterEvidenceCatalog(chapters,anchors,undefined,{allowInternalStates:true});
+ const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ expect(entries[0].resultAnchorIds.every(id=>!isInternalStateResult(byId.get(id)?.text))).toBe(true);
 });

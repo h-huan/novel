@@ -15,12 +15,19 @@ export class GenerationDeadlineExceededError extends GenerationCancelledError {
     this.message = `${label}超过整次请求总时限${minutes != null ? `（${minutes} 分钟，判定为不合格）` : ''}，已停止在途调用并保留已验收结果；本次未完成`;
   }
 }
-const context = new AsyncLocalStorage<{signal:AbortSignal;checkDeadline?:()=>void}>();
+const context = new AsyncLocalStorage<{signal:AbortSignal;checkDeadline?:()=>void;deadlineAt?:number}>();
 export function currentGenerationSignal(): AbortSignal | undefined { return context.getStore()?.signal; }
+/** Remaining request lifetime for callers that must decide whether a whole
+ * repair round (design -> review -> patch -> candidate review) can still fit.
+ * Undefined means the current task has no wall-clock deadline. */
+export function remainingGenerationMs(): number | undefined {
+  const deadlineAt = context.getStore()?.deadlineAt;
+  return deadlineAt === undefined ? undefined : Math.max(0, deadlineAt - Date.now());
+}
 export function withGenerationSignal<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
   const parent = context.getStore();
   const combined = parent ? AbortSignal.any([parent.signal, signal]) : signal;
-  return context.run({signal:combined,checkDeadline:parent?.checkDeadline}, async () => { assertGenerationActive(); return work(); });
+  return context.run({signal:combined,checkDeadline:parent?.checkDeadline,deadlineAt:parent?.deadlineAt}, async () => { assertGenerationActive(); return work(); });
 }
 export function generationCancellationReason(signal = currentGenerationSignal()): GenerationCancelledError {
   return signal?.reason instanceof GenerationCancelledError ? signal.reason : new GenerationCancelledError();
@@ -63,7 +70,7 @@ export class GenerationTasks {
       else { deadlineTimer = setTimeout(expire,remaining); deadlineTimer.unref?.(); }
     }
     this.active.set(key, controller);
-    try { return await context.run({signal:controller.signal,checkDeadline:()=>{if(options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)expire();}}, async()=>{assertGenerationActive();return work();}); }
+    try { return await context.run({signal:controller.signal,checkDeadline:()=>{if(options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)expire();},deadlineAt:options.deadlineAt}, async()=>{assertGenerationActive();return work();}); }
     finally {
       if(deadlineTimer)clearTimeout(deadlineTimer);
       if (this.active.get(key) === controller) this.active.delete(key);

@@ -1,6 +1,6 @@
 import {describe,expect,it,vi} from 'vitest';
 import {creationChapterContracts,creationResponsibilityPlan} from './creation-chapter-contract';
-import {buildChapterResponsibilityAuditPrompt,chapterResponsibilityAuditOutputContract,chapterResponsibilityPlanningDirective} from '../../shared/src/chapter-responsibility-review';
+import {buildChapterResponsibilityAuditPrompt,chapterResponsibilityAuditOutputContract,chapterResponsibilityPlanningDirective,buildChapterResponsibilityRepairPrompt} from '../../shared/src/chapter-responsibility-review';
 import {buildNarrativeBeatPlan} from './adaptive-narrative';
 import {ChainController} from './chain.controller';
 import {findChapterOutline,creationTimelineFallbackChapters} from './chapter-outline-coordinate';
@@ -17,6 +17,17 @@ it('enforces the same evidenced-outcome and reputation boundaries during chapter
  expect(OUTLINE_PROJECTION_POLICY).toContain('highlights、characterStates');
  expect(OUTLINE_PROJECTION_POLICY).toContain('承诺在某期限给出意见');
  expect(OUTLINE_PROJECTION_POLICY).toContain('实际决定主体、采纳依据与已发生的生效行动');
+});
+it('keeps chapter threads through the contract round-trip and the repair prompt',()=>{
+ const withThreads={chapterResponsibilities:[{chapter:1,title:'进入',function:'opening',responsibility:'住户取出旧钥匙并开门，让主角进入',prerequisites:['住户持有仍有效的旧钥匙并在场'],timeline:'当夜',exitState:'主角进入屋内',threads:['推进：主角与住户的信任（人物弧）','埋设：旧钥匙上的划痕（short）']}]};
+ const rows=creationChapterContracts(withThreads,v=>v);
+ expect(rows[0].threads).toEqual(['推进：主角与住户的信任（人物弧）','埋设：旧钥匙上的划痕（short）']);
+ expect(creationResponsibilityPlan(rows)[0].threads).toEqual(['推进：主角与住户的信任（人物弧）','埋设：旧钥匙上的划痕（short）']);
+ const repair=buildChapterResponsibilityRepairPrompt({includeSharedPolicies:false,strategyDirective:'只修已举证条件',issueContracts:[],currentPlan:creationResponsibilityPlan(rows),creativeBrief:'已确认题材',shortStoryCard:{},worldContinuityDirective:'世界规则',requiredChapterCount:1,entryExitContract:true});
+ expect(repair).toContain('"threads"');
+ expect(repair).toContain('修复不得丢弃原有 threads');
+ expect(repair).toContain('物件保管链一次修完');
+ expect(repair).toContain('不能只补取得不补移交');
 });
 it('complete chapter contracts survive normalization, beat projection, saved JSON and prose context',()=>{
  const input=plan(),before=structuredClone(input);const rows=creationChapterContracts(input,v=>v),shared=creationResponsibilityPlan(rows),beats=buildNarrativeBeatPlan(shared);

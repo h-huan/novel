@@ -30,6 +30,10 @@ export const LLM_TUNABLES = {
   TIMEOUT_SIMPLE: envInt('LLM_TIMEOUT_SIMPLE_MS', 300_000), // 标题/短文本：5 分钟
   TIMEOUT_MEDIUM: envInt('LLM_TIMEOUT_MEDIUM_MS', 420_000), // 角色/世界观/伏笔：7 分钟
   TIMEOUT_CONTENT: envInt('LLM_TIMEOUT_CONTENT_MS', 540_000), // 大纲/正文：9 分钟
+  // 独立事实/因果评审：6 分钟。创建目标墙钟是 20 分钟，单次评审不能占用
+  // 整段预算；正常短篇评审约 1–3 分钟，超时按"评审未完成"保留草稿，
+  // 不把慢调用当成故事缺陷，也不无限等待。
+  TIMEOUT_REVIEW: envInt('LLM_TIMEOUT_REVIEW_MS', 360_000),
   get TIMEOUT_COMPLEX(){return readGenerationBudgets().complexTimeoutMs;}, // 单次复杂模型调用保护上限：从运行时预算读取，仓库默认20分钟；并非整次灵感发现的时限
 
   // ============ 跨模块一致性检查 maxTokens 边界 ============
@@ -48,7 +52,14 @@ export const LLM_TUNABLES = {
   QUALITY_REVIEW_MAXTOKENS: envInt('LLM_QUALITY_REVIEW_MAXTOKENS', 32768),
   QUALITY_REPAIR_MAXTOKENS: envInt('LLM_QUALITY_REPAIR_MAXTOKENS', 32768),
   // RPR-003：证据证明改善才继续；轮数上限不授予保存通过。
-  QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS: envInt('LLM_QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS', 8),
+  // 默认从 8 收紧到 2：一层最多一次主修复 + 一次替代策略，随后必须停下，
+  // 由时间预算和明确错误收口，避免“修 A 坏 B”变成无限循环。
+  QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS: envInt('LLM_QUALITY_LOCAL_REPAIR_MAX_ATTEMPTS', 2),
+  // 单章从首稿到最终 Gate 的自动调整预算。超过后保留当前正文、不保存，
+  // 让作者人工决定；不把模型/评审的慢调用变成无限重试。
+  CHAPTER_ADJUSTMENT_BUDGET_MS: envInt('LLM_CHAPTER_ADJUSTMENT_BUDGET_MS', 20 * 60 * 1000),
+  // 章节级自动修复轮数上限（不含首稿生成）。超过即停止，不再自动改写。
+  CHAPTER_REPAIR_MAX_ROUNDS: envInt('LLM_CHAPTER_REPAIR_MAX_ROUNDS', 2),
 
   // ============ outline 写入 maxTokens ============
   // ⚠️ 防复发（勿再引入）：这里曾有一组 OUTLINE_WRITE_MIN / OUTLINE_WRITE_MAX /
@@ -73,6 +84,26 @@ export const LLM_TUNABLES = {
   // 首版即给到硬顶，从源头消除这一轮。预算的唯一调法 = LLM_BODY_MAXTOKENS 环境变量。
   BODY_MAXTOKENS: envInt('LLM_BODY_MAXTOKENS', 32768),
 
+  // ============ 因果证明分片预算 ============
+  // 分片大小不是固定 24。按“结果条数 × 单条结果长度 × 单次结构化输出预算”
+  // 计算，并受经验可靠行数约束。以下值均可通过环境变量覆盖；设为 0 时
+  // 由 proof-shard-policy 从工作量推导（RELIABLE_ROWS 除外，它是经验上限）。
+  CAUSAL_PROOF_RELIABLE_ROWS: envInt('LLM_CAUSAL_PROOF_RELIABLE_ROWS', 24),
+  CAUSAL_PROOF_ROW_TOKEN_BUDGET: envInt('LLM_CAUSAL_PROOF_ROW_TOKEN_BUDGET', 8192),
+  CAUSAL_PROOF_BASE_ROW_TOKENS: envInt('LLM_CAUSAL_PROOF_BASE_ROW_TOKENS', 160),
+  CAUSAL_PROOF_MIN_ROWS: envInt('LLM_CAUSAL_PROOF_MIN_ROWS', 8),
+  // 0 = 由结果条数和最小片大小推导，不写死调用次数上限。
+  CAUSAL_PROOF_MAX_SHARDS: envInt('LLM_CAUSAL_PROOF_MAX_SHARDS', 0),
+  // 多章首次证明的门槛同样按行预算推导；这里只保留一个可调系数。
+  CAUSAL_PROOF_CHAPTER_GROUP_RESULT_FACTOR: envInt('LLM_CAUSAL_PROOF_CHAPTER_GROUP_RESULT_FACTOR', 3),
+  CAUSAL_PROOF_CHAPTER_GROUP_SIZE: envInt('LLM_CAUSAL_PROOF_CHAPTER_GROUP_SIZE', 3),
+
+  // 事实台账分批：同样不写死“每批4章”。按章节序列化长度累计，
+  // 超过预算才换批；MAX_CHARS=0 时仅用 MAX_CHAPTERS 作为护栏。
+  // prior 始终保留完整已接受前缀，累计事实不会因分批丢失。
+  FACT_REVIEW_BATCH_MAX_CHAPTERS: envInt('LLM_FACT_REVIEW_BATCH_MAX_CHAPTERS', 4),
+  FACT_REVIEW_BATCH_MAX_CHARS: envInt('LLM_FACT_REVIEW_BATCH_MAX_CHARS', 0),
+
   // ============ 进度心跳 / 重试节奏 ============
   PROGRESS_HEARTBEAT_MS: envInt('LLM_PROGRESS_HEARTBEAT_MS', 15000), // 长篇综合生成心跳
   HEARTBEAT_INLINE_MS: envInt('LLM_HEARTBEAT_INLINE_MS', 30000), // 单章生成阶段心跳
@@ -90,6 +121,7 @@ export const LLM_TUNABLES = {
   timeoutSimple: () => toTimeout(LLM_TUNABLES.TIMEOUT_SIMPLE),
   timeoutMedium: () => toTimeout(LLM_TUNABLES.TIMEOUT_MEDIUM),
   timeoutContent: () => toTimeout(LLM_TUNABLES.TIMEOUT_CONTENT),
+  timeoutReview: () => toTimeout(LLM_TUNABLES.TIMEOUT_REVIEW),
   timeoutComplex: () => toTimeout(LLM_TUNABLES.TIMEOUT_COMPLEX),
 };
 

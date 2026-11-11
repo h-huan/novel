@@ -53,6 +53,8 @@ const ProjectDashboard: React.FC = () => {
   const [recovering, setRecovering] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [ov, setOv] = useState<any>(null);
+  const [bookValidating, setBookValidating] = useState(false);
+  const [bookReport, setBookReport] = useState<any>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -132,6 +134,23 @@ const ProjectDashboard: React.FC = () => {
   const outlineReady = Boolean(recovery?.counts?.outlineChapters)
     && !recovery?.consistencyIssues?.some(issue => issue.includes('章节'));
 
+  const isShortStory = String((currentProject as any)?.type || '').toLowerCase() === 'short_story';
+  const writtenChapterCount = Number(stats.writtenChapters ?? stats.completedChapters ?? 0);
+  const bookValidationReady = isShortStory && stats.totalChapters > 0 && writtenChapterCount >= stats.totalChapters;
+  const runBookValidation = async () => {
+    if (!projectId || !bookValidationReady || bookValidating) return;
+    setBookValidating(true);
+    setBookReport(null);
+    try {
+      const response = await api.post('/chain/validate-book', { projectId }, 600000);
+      setBookReport((response as any).data ?? response);
+    } catch (error: any) {
+      setBookReport({ success: false, error: error?.message || '全书总校验请求失败' });
+    } finally {
+      setBookValidating(false);
+    }
+  };
+
   const resumeGeneration = async () => {
     if (!projectId || recovering || !recovery?.canResume) return;
     setRecovering(true);
@@ -173,7 +192,25 @@ const ProjectDashboard: React.FC = () => {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '800px', margin: '0 auto', overflow: 'auto', height: '100%', background: 'var(--color-bg-primary)' }}>
-      <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '24px' }}>🏠 首页</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--color-text-primary)' }}>🏠 首页</h1>
+        {isShortStory && (
+          <button type="button" onClick={runBookValidation} disabled={!bookValidationReady || bookValidating}
+            title={bookValidationReady ? '对全部章节做一次跨模块一致性校验' : '全部章节生成完成后可用'}
+            style={{ padding: '9px 15px', borderRadius: '8px', border: '1px solid rgba(96,165,250,0.35)', backgroundColor: bookValidationReady && !bookValidating ? 'rgba(59,130,246,0.18)' : 'var(--color-bg-elevated)', color: bookValidationReady && !bookValidating ? 'var(--color-text-primary)' : 'var(--color-text-muted)', cursor: bookValidationReady && !bookValidating ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+            {bookValidating ? '全书总校验中…' : '全书总校验'}
+          </button>
+        )}
+      </div>
+      {bookReport && (
+        <div style={{ padding: '12px 14px', marginBottom: '18px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', backgroundColor: 'var(--color-bg-elevated)', fontSize: 13, color: 'var(--color-text-secondary)' }}>
+          {bookReport.success === false
+            ? `全书总校验未完成：${bookReport.error || '未知原因'}`
+            : bookReport.report?.consistent
+              ? '全书总校验通过。'
+              : `全书总校验发现 ${bookReport.report?.contradictions?.length || 0} 项冲突；锁定章只读，未自动改写。`}
+        </div>
+      )}
       {settingBadges.length > 0 && <div aria-label="本书创作设定标签" style={{ display: 'flex', flexWrap: 'wrap', gap: 7, margin: '-8px 0 20px' }}>
         {settingBadges.map(([label, content]) => <span key={label} style={{ padding: '5px 9px', borderRadius: 6, background: 'var(--color-bg-elevated)', color: 'var(--color-text-secondary)', fontSize: 12 }}>
           {label}：{content || '未设置'}

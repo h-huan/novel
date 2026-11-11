@@ -51,7 +51,7 @@ describe('public policy single injection', () => {
   });
   it('keeps all active rule IDs and independent review, evidence and repair contracts', () => {
     standardDirectiveCache.rebuild();
-    expect(activeSystemWorkflowRules()).toHaveLength(60);
+    expect(activeSystemWorkflowRules()).toHaveLength(61);
     expect(count(standardDirectiveCache.get('idea_generate'),IDEA_PRESELECTION_REVIEW_POLICY)).toBe(1);
     for (const policy of policies) expect(count(standardDirectiveCache.get('review'),policy)).toBe(1);
     expect(standardDirectiveCache.get('review')).toContain('能结构化且可复算的冲突必须指出 identity');
@@ -100,7 +100,7 @@ it('injects the preselection policy once at the actual card-structuring entry', 
   expect(count(prompt+standardDirectiveCache.get('idea_generate'),IDEA_PRESELECTION_REVIEW_POLICY)).toBe(1);
 });
 
-it('scopes only the registered temporal workers, preserving authority, dependencies and all full chapter gates',()=>{standardDirectiveCache.rebuild();for(const step of ['alignment_temporal_review','alignment_temporal_contract']){const scoped=standardDirectiveCache.get('review',step);expect(count(scoped,TEMPORAL_FACT_CONTINUITY_POLICY)).toBe(1);expect(scoped).toContain('AUTH-002');expect(scoped).not.toContain('QLT-014');expect(scoped).not.toContain('QLT-003');expect(standardDirectiveCache.snapshot('review',true,step).ruleIds).toContain('CTX-008');}const full=standardDirectiveCache.get('review','alignment_review');expect(full).toContain('QLT-003');expect(full).toContain('QLT-014');expect(activeSystemWorkflowRules()).toHaveLength(60);});
+it('scopes only the registered temporal workers, preserving authority, dependencies and all full chapter gates',()=>{standardDirectiveCache.rebuild();for(const step of ['alignment_temporal_review','alignment_temporal_contract']){const scoped=standardDirectiveCache.get('review',step);expect(count(scoped,TEMPORAL_FACT_CONTINUITY_POLICY)).toBe(1);expect(scoped).toContain('AUTH-002');expect(scoped).not.toContain('QLT-014');expect(scoped).not.toContain('QLT-003');expect(standardDirectiveCache.snapshot('review',true,step).ruleIds).toContain('CTX-008');}const full=standardDirectiveCache.get('review','alignment_review');expect(full).toContain('QLT-003');expect(full).toContain('QLT-014');expect(activeSystemWorkflowRules()).toHaveLength(61);});
 
 it('scopes insertion workers without removing the full chapter quality gates',()=>{
  standardDirectiveCache.rebuild();
@@ -109,7 +109,7 @@ it('scopes insertion workers without removing the full chapter quality gates',()
   for(const id of ['GEN-007','AUTH-002','CTX-008','RPR-004'])expect(scoped).toContain(id);
   expect(scoped).not.toContain('QLT-014');expect(scoped.length).toBeLessThan(standardDirectiveCache.get('review','alignment_review').length);
  }
- expect(standardDirectiveCache.get('review','alignment_review')).toContain('QLT-014');expect(activeSystemWorkflowRules()).toHaveLength(60);
+ expect(standardDirectiveCache.get('review','alignment_review')).toContain('QLT-014');expect(activeSystemWorkflowRules()).toHaveLength(61);
 });
 it('uses task-specific generation details while retaining full final quality rules and identical rule inventory',()=>{
  standardDirectiveCache.rebuild();

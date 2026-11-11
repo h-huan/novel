@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const SCHEMA_DESCRIPTION =
-  'Single execution standard, versioned creative authority, bounded dependency context and terminal generation invariants';
+  'Single execution standard, versioned creative authority, canonical chapter outlines, bounded dependency context and terminal generation invariants';
 
 type ColumnRow = { name: string };
 
@@ -82,6 +82,50 @@ export function reconcileSchema(db: DatabaseSync): { version: number; actions: s
         actions.push('generation_runs.discovery_request_id');
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_discovery_request ON generation_runs(discovery_request_id,started_at)');
+    }
+
+    // 章纲规范化：活动列只保留规范版本；旧副本原文进审计表，不再参与生成。
+    if (hasTable(db, 'outlines')) {
+      for (const [name, definition] of [
+        ['outline_revision', 'INTEGER NOT NULL DEFAULT 0'],
+        ['canonical_hash', 'TEXT'],
+        ['normalized_at', 'TEXT'],
+      ] as Array<[string, string]>) {
+        if (!hasColumn(db, 'outlines', name)) {
+          db.exec(`ALTER TABLE outlines ADD COLUMN ${name} ${definition}`);
+          actions.push(`outlines.${name}`);
+        }
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS outline_normalization_log (
+          id TEXT PRIMARY KEY,
+          outline_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          field TEXT NOT NULL,
+          old_value TEXT NOT NULL DEFAULT '',
+          new_value TEXT NOT NULL DEFAULT '',
+          reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_outline_normalization_outline
+          ON outline_normalization_log(outline_id,created_at);
+      `);
+    }
+
+    // 旧生成稿只保留审计，不再作为复评/生成候选。
+    if (hasTable(db, 'generation_runs')) {
+      for (const [name, definition] of [
+        ['superseded_at', 'TEXT'],
+        ['superseded_by_run_id', 'TEXT'],
+      ] as Array<[string, string]>) {
+        if (!hasColumn(db, 'generation_runs', name)) {
+          db.exec(`ALTER TABLE generation_runs ADD COLUMN ${name} ${definition}`);
+          actions.push(`generation_runs.${name}`);
+        }
+      }
+      if (['project_id', 'chapter_index', 'started_at'].every(column => hasColumn(db, 'generation_runs', column))) {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_generation_runs_chapter_version ON generation_runs(project_id,chapter_index,started_at)');
+      }
     }
 
     // generation_runs 的终态必须与 gate_status 一致。过去 finishRun 只写 status，

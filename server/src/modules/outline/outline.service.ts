@@ -18,6 +18,7 @@ import type {
 import { StateItemService } from '../../state/state-item.service';
 import { ConsistencyCheckService } from '../../state/consistency-check.service';
 import { CHAPTER_WORD_RANGE, validateChapterPlan } from '../../../shared/src';
+import { canonicalizeChapterOutline } from '../../chain/chapter-outline-canonical';
 
 export interface OutlineResponse {
   id: string;
@@ -224,7 +225,40 @@ export class OutlineService {
       if (plan.targetWords !== undefined) updateData.target_words = this.resolveChapterTargetWords(existing.project_id, plan.targetWords);
     }
 
+    let canonicalChanges: ReturnType<typeof canonicalizeChapterOutline>['changes'] = [];
+    if (existing.level === 'chapter' && (dto.content !== undefined || dto.scenes !== undefined || dto.plan !== undefined)) {
+      // 普通 PUT 过去只写传入的 content/scenes，导致另一份和派生列保持旧值。
+      // 这里先把候选合并成一份章纲，规范化后再一次性写回；无法判定的冲突直接拒绝。
+      const candidate = {
+        ...existing,
+        ...updateData,
+        content: updateData.content !== undefined ? updateData.content : existing.content,
+        scenes: updateData.scenes !== undefined ? updateData.scenes : existing.scenes,
+      };
+      const canonical = canonicalizeChapterOutline(candidate);
+      if (canonical.conflicts.length) {
+        throw new BadRequestException(
+          `章节大纲存在多版本冲突：${canonical.conflicts.map(item => `${item.field}：${item.message}`).join('；')}`,
+        );
+      }
+      updateData.content = canonical.content;
+      if (canonical.scenes !== null) updateData.scenes = canonical.scenes;
+      Object.assign(updateData, canonical.derived);
+      canonicalChanges = canonical.changes;
+      updateData.canonical_hash = canonical.canonicalHash;
+      updateData.normalized_at = now;
+      updateData.outline_revision = Number((existing as any).outline_revision || 0) + (canonical.changed ? 1 : 0);
+    }
+
     this.repo.update(id, updateData);
+    if (canonicalChanges.length) {
+      const insertLog = this.db.getDb().prepare(`INSERT INTO outline_normalization_log
+        (id, outline_id, project_id, field, old_value, new_value, reason, created_at)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      for (const change of canonicalChanges) {
+        insertLog.run(uuid(), id, existing.project_id, change.field, change.oldValue, change.newValue, change.reason, now);
+      }
+    }
     const response = this.toResponse(this.repo.findById(id)!);
     // 大纲标题/内容/场景变化时，自动更新地点关联
     if (this.mapPointService && (dto.title !== undefined || dto.content !== undefined || dto.scenes !== undefined)) {

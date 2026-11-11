@@ -4,7 +4,7 @@ import { readConstitution } from '../modules/project/creative-constitution';
 import { parseScoreReviewJson } from './review-json';
 import { SCORE_DIMENSIONS } from '../modules/writing-quality/stage-score';
 import { dimensionBasis } from '../test/quality-review.fixture';
-import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchors, causalExitResultAnchors, causalChapterResultAnchors, causalPlanningProofResultPartitions } from '../modules/writing-quality/causal-review';
 import { createServer } from 'node:http';
 
 it.each(['project_context:v1', 'project_context:v999'])('completes issue citations within the existing two reviews and preserves verdicts: %s', async (basisAnchorId) => {
@@ -499,10 +499,13 @@ describe('large result shards keep the normal correction pass',()=>{
    JSON.stringify({volumes:[{chapters:[chapter]}]}));
   expect(result.verified).toBe(true);
   // One initial pass per shard plus exactly one correction for the shard that
-  // cited its own result. The other shard must not be re-split or re-run.
-  expect(generate).toHaveBeenCalledTimes(3);
+  // cited its own result. The other shards must not be re-split or re-run.
+  const partitions=causalPlanningProofResultPartitions([chapter]);
+  expect(generate).toHaveBeenCalledTimes(partitions.length + 1);
   expect(generate.mock.calls.filter((call:any)=>String(call[0].prompt).includes('本次仅纠正编号[0]'))).toHaveLength(1);
-  expect((result.audit as any[]).every((audit:any)=>audit.transitions.length===40)).toBe(true);
+  const audits=result.audit as any[];
+  expect(audits.map(audit=>audit.transitions.length).sort()).toEqual(partitions.map(part=>part.length).sort());
+  expect(new Set(audits.flatMap(audit=>audit.transitions.map((row:any)=>row.resultAnchorId)))).toEqual(new Set(allResults));
  });
 });
 

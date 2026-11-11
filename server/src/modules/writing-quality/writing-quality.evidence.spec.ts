@@ -102,11 +102,14 @@ describe('QLT-003 evidence execution', () => {
       .toMatchObject({ verified: true, unique: false, start: null, end: null });
   });
 
-  it('does not let a trusted flag override false prose evidence or low severity create a false pass', () => {
+  it('does not let a trusted flag override false prose evidence, but an unverified advisory does not block the gate', () => {
     const issue = qualityIssue({ projectId: 'p', stage: 'chapter', source: 'semantic_judge', ruleId: 'prose',
       message: '轻微问题', severity: 'low', quote: '不存在', content: '真实正文', evidenceVerified: true });
     expect(issue.evaluation).toBe('insufficient_evidence');
-    expect(qualityGate([issue], true).status).toBe('not_evaluated');
+    expect(qualityGate([issue], true).status).toBe('passed');
+    const blocking = qualityIssue({ projectId: 'p', stage: 'chapter', source: 'semantic_judge', ruleId: 'logic.fact',
+      message: '事实冲突', severity: 'blocking', quote: '不存在', content: '真实正文' });
+    expect(qualityGate([blocking], true).status).toBe('not_evaluated');
   });
 
   it('requires paired evidence for an explanation and the actual plan for premature disclosure', () => {
@@ -120,14 +123,18 @@ describe('QLT-003 evidence execution', () => {
       basisEvidence: '第三章揭示', basisReason: '提前揭示' }, content, { chapter_plan: '第三章揭示' }).verified).toBe(true);
   });
 
-  it('never declares complete scores when a low severity semantic claim is unverified', () => {
+  it('does not let an unverified advisory claim null the score, while an unverified blocking claim still does', () => {
     const content = '我把钥匙放回桌上。';
-    const score = parseStageScore({ dimensions: dimensions(content), issues: [{
+    const advisory = parseStageScore({ dimensions: dimensions(content), issues: [{
       ruleId: 'ai_trace.causal_author_explanation', severity: 'low', message: '解释太多', evidence: content,
     }] }, { projectId: 'p', runId: 'r', stage: 'chapter', content, constitution });
-    expect(score.status).toBe('partial');
-    expect(score.overallScore).toBeNull();
-    expect(score.gateStatus).toBe('not_evaluated');
+    expect(advisory.status).toBe('evaluated');
+    expect(advisory.overallScore).not.toBeNull();
+    expect(advisory.gateStatus).toBe('passed');
+    const blocking = parseStageScore({ dimensions: dimensions(content), issues: [{
+      ruleId: 'logic.fact', severity: 'blocking', message: '事实冲突', evidence: '不存在',
+    }] }, { projectId: 'p', runId: 'r', stage: 'chapter', content, constitution });
+    expect(blocking.gateStatus).toBe('not_evaluated');
   });
 
   it('does not score an unknown definition or shrink the dimension coverage denominator', () => {

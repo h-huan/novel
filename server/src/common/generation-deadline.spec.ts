@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {GenerationTasks,GenerationDeadlineExceededError,assertGenerationActive,currentGenerationSignal,withGenerationSignal,waitForGeneration} from './generation-cancellation';
+import {GenerationTasks,GenerationDeadlineExceededError,assertGenerationActive,currentGenerationSignal,withGenerationSignal,waitForGeneration,remainingGenerationMs} from './generation-cancellation';
 import {RealLLMService} from '../chain/real-llm.service';
 afterEach(()=>vi.useRealTimers());
 describe('explicit test-only deadlines and unbounded production-style discovery',()=>{
@@ -49,5 +49,29 @@ describe('explicit test-only deadlines and unbounded production-style discovery'
     appealGate:{qualified:2,returned:2,shortfall:0},
   });
   expect(tasks.isRunning('discovery','production-style')).toBe(false);
+ });
+ it('hard-stops a creation task at 30 minutes and reports the deadline as unfinished',async()=>{
+  vi.useFakeTimers();
+  const tasks=new GenerationTasks();
+  const task=tasks.run('creation','project-30m','',async()=>{
+    await waitForGeneration(31*60*1000);
+    return 'must never finish after the deadline';
+  },{deadlineAt:Date.now()+30*60*1000}).then(()=>null,error=>error);
+  await vi.advanceTimersByTimeAsync(30*60*1000);
+  const error=await task;
+  expect(error).toBeInstanceOf(GenerationDeadlineExceededError);
+  expect((error as Error).message).toContain('项目创建超过整次请求总时限（30 分钟');
+  expect(tasks.isRunning('creation','project-30m')).toBe(false);
+ });
+ it('exposes the remaining request lifetime so a repair round can refuse to start',async()=>{
+  const tasks=new GenerationTasks();
+  const start=Date.now();
+  let inside:number|undefined;
+  await tasks.run('creation','remaining','',async()=>{
+   inside=remainingGenerationMs();
+  },{deadlineAt:start+30*60*1000});
+  expect(inside).toBeGreaterThan(0);
+  expect(inside).toBeLessThanOrEqual(30*60*1000);
+  expect(remainingGenerationMs()).toBeUndefined();
  });
 });

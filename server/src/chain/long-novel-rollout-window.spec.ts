@@ -1,5 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
+import * as budgetConfig from '../config/generation-budgets';
+
+// These cases exercise the rolling-window algorithm at the former 20-chapter
+// lookahead. The production default is now 5 (creationDetailWindow); that
+// default is covered by the generation-budget spec. Pin the algorithm here so
+// its batching and trigger invariants stay covered independently.
+beforeEach(() => vi.spyOn(budgetConfig, 'readGenerationBudgets')
+  .mockReturnValue({ ...budgetConfig.GENERATION_BUDGET_DEFAULTS, creationDetailWindow: 20 }));
+afterEach(() => vi.restoreAllMocks());
 
 function fixture(writtenMax: number, existingAuthoredChapter = false) {
   const controller = Object.create(ChainController.prototype) as any;

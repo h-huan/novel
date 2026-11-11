@@ -1,7 +1,7 @@
 import { renderScoreEvidenceAnchors, selectedScoreEvidence } from './score-evidence-anchors';
 import { scorePolicy, weightedScore, type ScorePolicy } from './score-policy';
 import { attributeCharacterEvidence, type CharacterVoiceContract } from './character-contract';
-import { MISSING_STANDARD_SOURCE, qualityIssue, qualityGate, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, materializeDimensionBasis, type QualityIssue, type QualityStage } from './quality-issue';
+import { MISSING_STANDARD_SOURCE, qualityIssue, qualityGate, resolveQualityEvidence, verifySemanticEvidence, semanticEvidenceSources, verifyDimensionBasis, materializeDimensionBasis, isMissingStandardIssue, isAdvisoryRule, type QualityIssue, type QualityStage } from './quality-issue';
 import { deterministicPlatformReview, isObjectivePlatformRule } from './platform-quality-rules';
 import { EXECUTION_STANDARD_DIMENSIONS } from '../../../shared/src';
 import { buildExecutionStandard, missingConstitutionStandards, type CreativeConstitution, type MissingStandard } from '../project/creative-constitution';
@@ -205,12 +205,26 @@ export function parseStageScore(raw: unknown, input: {
     if (input.enforcePlanningConditions && input.stage === 'outline' && verified.verified && issue.evidenceKind === 'causal_gap') {
       normalized.requiredPlanningCondition = true;
     }
+    // 因果缺口即使没有开启规划前置条件，也不能用一条无法定位的引文当普通建议放行。
+    // 未核实时保留 not_evaluated；已核实时仍按普通问题参与评分。
+    if (!verified.verified && issue.evidenceKind === 'causal_gap') {
+      normalized.requiresEvidence = true;
+    }
     if (issue.characterId) { normalized.contractVersion = issue.contractVersion; normalized.contractField = issue.contractField; }
     issues.push(normalized);
   }
   const required = Object.values(dimensions).filter(d => d.status !== 'not_applicable');
   const assessed = required.filter(d => d.status === 'evaluated');
-  const complete = assessed.length === required.length && semanticEvidenceComplete && issues.every(i => i.evaluation === 'evidenced');
+  // 只有可能阻断的结论需要逐字证据。建议级 AI 痕迹/对白占比/段落同构
+  // 即使证据未定位，也不能把整章评分打成 partial 或把总分置空。
+  const requiresEvidence = (issue: QualityIssue): boolean =>
+    !isAdvisoryRule(issue)
+    && (issue.severity === 'blocking'
+      || issue.requiredPlanningCondition === true
+      || issue.requiresEvidence === true
+      || isMissingStandardIssue(issue));
+  const evidenceComplete = issues.every(issue => !requiresEvidence(issue) || issue.evaluation === 'evidenced');
+  const complete = assessed.length === required.length && semanticEvidenceComplete && evidenceComplete;
   return { stage: input.stage, policy, gateStatus: qualityGate(issues, complete).status, dimensions, issues, coverage: required.length ? assessed.length / required.length : 0,
     overallScore: complete ? weightedScore(dimensions, policy) : null,
     status: complete ? 'evaluated' : assessed.length ? 'partial' : 'not_evaluated' };

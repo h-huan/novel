@@ -445,3 +445,40 @@ it('keeps discovery diagnostics in storage while projecting one constitution and
  expect(context.projectCard.creativeConstitution).toBeDefined();expect(context.projectCard.planning).toMatchObject({structurePlanning:{chapters:5},customAuthorRequirement:'保留其它作者要求'});expect(context.projectCard.taboos).toEqual(['保留作者禁忌']);
  expect((f.db.prepare("SELECT settings FROM projects WHERE id='p'").get() as any).settings).toBe(before);
 });
+
+it('includes dynamic item/pet/technique state and only the recent three chapter summaries',()=>{
+ const f=fixture();
+ addState(f,'prop','confirmed','prop','earbud');
+ f.db.prepare(`UPDATE state_items SET target_label='耳机', summary='耳机在袖口', payload='{"stage":"held"}' WHERE id='prop'`).run();
+ addState(f,'pet','pending','pet','egg');
+ f.db.prepare(`UPDATE state_items SET target_label='灵兽蛋', summary='灵兽蛋待孵化', payload='{"stage":"egg"}' WHERE id='pet'`).run();
+ addState(f,'tech','confirmed','technique','sword');
+ f.db.prepare(`UPDATE state_items SET target_label='御剑术', summary='御剑术已学', payload='{"stage":"learned"}' WHERE id='tech'`).run();
+ addState(f,'deadpet','confirmed','pet','dead');
+ f.db.prepare(`UPDATE state_items SET target_label='死去的灵兽', summary='已死亡', payload='{"stage":"dead"}' WHERE id='deadpet'`).run();
+ f.db.prepare(`INSERT INTO chapters (id,project_id,title,status,content,chapter_index,created_at,updated_at) VALUES
+  ('c1','p','c1','locked','',1,'t','t'),('c2','p','c2','locked','',2,'t','t'),('c3','p','c3','locked','',3,'t','t'),('c4','p','c4','locked','',4,'t','t')`).run();
+ for(let index=1;index<=4;index++) {
+  f.db.prepare(`INSERT INTO chapter_summaries (id,project_id,chapter_id,content_checksum,summary,status,generated_at,updated_at) VALUES (?, 'p', ?, 'h', ?, 'confirmed', 't', 't')`)
+    .run(`s${index}`, `c${index}`, `summary-${index}`);
+ }
+ const text=f.service.buildWritingStateContext('p',4).contextText;
+ expect(text).toContain('耳机在袖口');
+ expect(text).toContain('灵兽蛋待孵化');
+ expect(text).toContain('御剑术已学');
+ expect(text).not.toContain('死去的灵兽');
+ expect(text).toContain('summary-3');
+ expect(text).toContain('summary-2');
+ expect(text).toContain('summary-1');
+ expect(text).not.toContain('summary-4');
+});
+
+it('archives resolved/dead dynamic state without touching active canon',()=>{
+ const f=fixture();
+ addState(f,'dead','confirmed','pet','dead');
+ f.db.prepare(`UPDATE state_items SET payload='{"stage":"dead"}' WHERE id='dead'`).run();
+ addState(f,'alive','confirmed','character','hero');
+ expect(f.service.pruneStoryStateItems('p')).toBe(1);
+ expect((f.db.prepare(`SELECT status FROM state_items WHERE id='dead'`).get() as any).status).toBe('archived');
+ expect((f.db.prepare(`SELECT status FROM state_items WHERE id='alive'`).get() as any).status).toBe('confirmed');
+});

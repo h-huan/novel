@@ -23,6 +23,12 @@ export interface QualityIssue {
   contractField?: string;
   /** A verified missing prerequisite must be resolved before a framework is expanded into prose. */
   requiredPlanningCondition?: boolean;
+  /**
+   * 结构性的“必须给证据”标记：用于 causal_gap 这类规划前置条件。
+   * 它不是新的严重度，也不改变阻断文案；只让未核实的结论保持 not_evaluated，
+   * 而不是被当成普通建议静默放行。
+   */
+  requiresEvidence?: boolean;
 }
 
 /** QLT-003: recover only layout differences; never stitch or rewrite a quotation. */
@@ -141,6 +147,17 @@ export function isMissingStandardIssue(issue: Pick<QualityIssue, 'source' | 'rul
 }
 
 /**
+ * 表达级规则：AI 痕迹、平台可读性测量、段落/句式同构。
+ * 即使评审模型误把它们标成 blocking，也不能阻断保存或要求逐字证据；
+ * 否则会重新变成“建议级问题卡死整章”的旧问题。
+ */
+export const ADVISORY_RULE_PATTERN = /^(?:ai_trace\.|platform\.(?:dialogue_ratio|avgParaChars|longParaRatio|opening_hook_position|ending_hook)|style\.(?:paragraph_opening|cross_paragraph_transition|one_sentence_paragraph_ratio))/;
+
+export function isAdvisoryRule(issue: Pick<QualityIssue, 'ruleId'>): boolean {
+  return ADVISORY_RULE_PATTERN.test(String(issue.ruleId || ''));
+}
+
+/**
  * A semantic blocking verdict becomes a proven blocker only when its evidence is
  * verifiable against the artifact. Missing execution standards are different:
  * they are structural project facts, so they do not require a quote from prose.
@@ -148,6 +165,7 @@ export function isMissingStandardIssue(issue: Pick<QualityIssue, 'source' | 'rul
 export function isConfirmedBlockingIssue(issue: QualityIssue): boolean {
   return issue.status === 'open'
     && (issue.severity === 'blocking' || issue.requiredPlanningCondition === true)
+    && !isAdvisoryRule(issue)
     && (isMissingStandardIssue(issue) || issue.evaluation === 'evidenced');
 }
 
@@ -159,6 +177,7 @@ export function isConfirmedBlockingIssue(issue: QualityIssue): boolean {
 export function isUnevidencedBlockingIssue(issue: QualityIssue): boolean {
   return issue.status === 'open'
     && issue.severity === 'blocking'
+    && !isAdvisoryRule(issue)
     && !isMissingStandardIssue(issue)
     && issue.evaluation !== 'evidenced';
 }
@@ -223,8 +242,16 @@ export function qualityIssue(input: {
 export function qualityGate(issues: QualityIssue[], evaluated: boolean) {
   const blocking = issues.filter(isConfirmedBlockingIssue);
   const unevidencedBlocking = issues.filter(isUnevidencedBlockingIssue);
+  // 证据完整性只约束可能阻断的结论。AI 痕迹、对白占比、段落同构等建议级
+  // 问题即使引文无法逐字定位，也只能保留为建议，不能把整章判成“评审未完成”。
+  const requiresEvidence = (issue: QualityIssue): boolean =>
+    !isAdvisoryRule(issue)
+    && (issue.severity === 'blocking'
+      || issue.requiredPlanningCondition === true
+      || issue.requiresEvidence === true
+      || isMissingStandardIssue(issue));
   const reviewComplete = evaluated && issues.every(issue => issue.status !== 'open'
-    || isMissingStandardIssue(issue) || issue.evaluation === 'evidenced');
+    || !requiresEvidence(issue) || issue.evaluation === 'evidenced');
   return {
     passed: reviewComplete && blocking.length === 0,
     status: blocking.length ? 'blocked' : !reviewComplete ? 'not_evaluated' : 'passed',
@@ -275,8 +302,9 @@ export function replaceQualityIssues(db: DatabaseSync, input: {
     source: input.source,
     severity: raw.severity,
   }));
-  const evidenceComplete = normalized.every(issue => issue.evaluation === 'evidenced') || normalized.length === 0;
-  const gate = qualityGate(normalized, evidenceComplete);
+  // qualityGate 自己只对阻断类结论要求逐字证据；这里不能再用
+  // “所有问题都必须 evidenced”把建议级未核实项重新变成 not_evaluated。
+  const gate = qualityGate(normalized, true);
   const blocking = gate.status === 'blocked';
   const summary = normalized.length === 0 ? '未发现问题' : `${normalized.length} 条问题`;
 

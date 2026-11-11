@@ -106,8 +106,35 @@ const SECTION_TITLE: Record<GateTopic, Record<GateFailureKind, string>> = {
   },
 };
 
-function clean(list?: string[]): string[] {
-  return (list || []).map(s => String(s).trim()).filter(Boolean);
+function describeGateItem(item: unknown): string {
+  if (item === undefined || item === null) return '';
+  if (typeof item === 'string') return item.trim();
+  if (typeof item === 'number' || typeof item === 'boolean') return String(item);
+  if (typeof item !== 'object') return String(item).trim();
+  // 评审结论偶尔把 summary 嵌成对象。String(item) 会把它变成 "[object Object]"，
+  // Gate 报错里就只剩一句无信息量的话，真实缺陷被隐藏。
+  const row = item as Record<string, unknown>;
+  const pick = (keys: string[]): string => {
+    for (const key of keys) {
+      const value = row[key];
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (text && text !== '[object Object]') return text;
+    }
+    return '';
+  };
+  const summary = pick(['summary', 'message', 'reason', 'detail', 'problem', 'issue', 'description']);
+  const evidence = pick(['evidence', 'original', 'snippet', 'quote', 'text', 'excerpt']);
+  if (summary) return evidence && !summary.includes(evidence) ? `${summary} | 原文: ${evidence}` : summary;
+  if (evidence) return evidence;
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return '[无法序列化的评审条目]';
+  }
+}
+
+function clean(list?: unknown[]): string[] {
+  return (list || []).map(describeGateItem).filter(Boolean);
 }
 
 /**

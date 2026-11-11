@@ -311,6 +311,8 @@ export const HARDLINE_RULE_LABELS: Record<string, string> = {
   '52-env-imagery-repeat': '同一环境意象反复铺陈',
   '53-same-structure-parallel': '同构排比（V了A、V了B…）',
   'literal-character-count': '正文引文字符计数不一致',
+  'punctuation-width': '正文中文夹用半角标点',
+  'meta-narration': '正文出现章节编号或创作元叙述',
   '54-measure-word-mismatch': '量词与名词搭配错',
   '55': 'AI 高频模糊词过密（仿佛/似乎/缓缓）',
   '56-punct-stacking': '标点叠用（！！！/？？）',

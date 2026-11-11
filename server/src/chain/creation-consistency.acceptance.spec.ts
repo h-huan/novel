@@ -305,6 +305,14 @@ describe('production cross-module commit boundary with native SQLite', () => {
     await expect(run()).rejects.toThrow('prerequisites verified');
     expect((db.prepare('SELECT content FROM outlines WHERE id=?').get('chapter0') as any).content).toBe('个人授权使闸机一直敞开。');
   });
+  it('persists accepted short-outline progress outside Canon until activation', async () => {
+    const before=(db.prepare("SELECT COUNT(*) c FROM outlines WHERE project_id='p' AND level='chapter'").get() as any).c;
+    controller.persistCreationOutlineProgress('p',[{order:0,title:'第一章',content:'事件链',chapterFunction:'opening',goalArc:'',targetWords:2000,scenes:'[]'}]);
+    const progress=await controller.getCreationProgress('p');
+    expect(progress.acceptedChapters).toBe(1);
+    expect(progress.chapters[0].title).toBe('第一章');
+    expect((db.prepare("SELECT COUNT(*) c FROM outlines WHERE project_id='p' AND level='chapter'").get() as any).c).toBe(before);
+  });
   it('rechecks candidate event facts after a broad pass and keeps them unpublished until the ledger passes', async () => {
     controller.llmCallWithRetry.mockResolvedValueOnce(review(true)).mockResolvedValueOnce(patch('5')).mockResolvedValueOnce(review(true));
     controller.reviewOutlineFacts.mockResolvedValueOnce({consistent:false,contradictions:['chapter0 与 clue 的回收时点互斥'],ledger:[]})

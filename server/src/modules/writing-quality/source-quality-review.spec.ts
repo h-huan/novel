@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { remapOutlineSourceBoundaryTargets, SOURCE_QUALITY_AXES, sourceQualityReviewContract, validateSourceQualityReview, needsSourceBoundaryReview, validateSourceBoundaryReview, continuityAuditFromClaims, resolveSourceContextEvidence, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, outlineSourceBoundaryCatalog, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog, exclusiveClaimReviewMismatch } from './source-quality-review';
+import { remapOutlineSourceBoundaryTargets, SOURCE_QUALITY_AXES, sourceQualityReviewContract, validateSourceQualityReview, needsSourceBoundaryReview, validateSourceBoundaryReview, continuityAuditFromClaims, resolveSourceContextEvidence, validateOutlineSourceBoundaryReview, outlineResultClaimCatalog, outlineResultClaimPrompt, validateOutlineResultClaims, outlineSourceBoundaryCatalog, sourceBoundaryEvidenceContext, sourceEvidenceCatalog, reviewFixedCatalog, outlineNarrativeSourceCatalog, exclusiveClaimReviewMismatch, promiseAxisReviewPrompt, applyPromiseAxisVerdict } from './source-quality-review';
 import { crossStagePromiseFindings, describeCrossStageReviewValidation } from '../../chain/cross-stage-review';
 import { structuredTruncationError } from '../../chain/structured-truncation';
 import { remapBodySourceBoundaryTargets, materializeContinuityNewInformationEvidence, continuityPriorEvidenceAnchors, applyContinuityCitationRepairs, bodySourceBoundaryCatalog, validateBodySourceBoundaryReview, reviewFixedSourceChecklist, validateOutlineSourceBoundaryPartialReview } from './source-quality-review';
@@ -522,4 +522,17 @@ it('unpacks nested source envelopes without dropping values, changing roles or p
  const decoded=JSON.parse(actual);expect(decoded.storySources.world.worldProfiles[0].profile.rules).toEqual(['当班调度通话由通话录音留存。']);
  expect(decoded.storySources.world.worldProfiles[0].profile.count).toBe(3);
  expect(sourceEvidenceCatalog(actual).find(s=>s.text==='未来完整录音被恢复。')?.path).toContain('.ending');
+});
+
+describe('promise axis semantic repair',()=>{
+ it('separates opening position from promise fulfillment and rejects a gap without a story basis',()=>{
+  const audit:any={version:1,checks:Object.fromEntries(SOURCE_QUALITY_AXES.map(axis=>[axis,{status:'supported',evidence:'我把物件放进袋子。',reason:'已核对本章实际事件与状态'}]))};
+  const prompt=promiseAxisReviewPrompt({chapterTitle:'测试标题',content:'我把物件放进袋子。',chapterPlan:'第1章 合同',context:'{}',current:audit.checks.promise});
+  expect(prompt).toContain('开篇位置归 readerGoals.click');
+  expect(prompt).toContain('即使出现在中后段');
+  const supported=applyPromiseAxisVerdict(audit,{promise:{status:'supported',evidence:'我把物件放进袋子。',basisSource:'body',basisEvidence:'我把物件放进袋子。',reason:'本章实际事件兑现标题承诺'}});
+  expect(supported?.checks.promise.status).toBe('supported');
+  const invalidGap=applyPromiseAxisVerdict(audit,{promise:{status:'gap',evidence:'开头没有出现该物件',basisSource:'chapter_plan',basisEvidence:'',reason:'开篇太晚'}});
+  expect(invalidGap).toBe(audit);
+ });
 });

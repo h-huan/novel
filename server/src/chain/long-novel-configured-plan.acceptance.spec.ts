@@ -1,5 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChainController } from './chain.controller';
+import * as budgetConfig from '../config/generation-budgets';
+
+// Keep this acceptance fixture on a 20-chapter first window so it continues to
+// exercise multi-batch splitting and token-budget adaptation. The production
+// default is 5 (creationDetailWindow); the default itself is covered by the
+// generation-budget spec.
+beforeEach(() => vi.spyOn(budgetConfig, 'readGenerationBudgets')
+  .mockReturnValue({ ...budgetConfig.GENERATION_BUDGET_DEFAULTS, creationDetailWindow: 20 }));
+afterEach(() => vi.restoreAllMocks());
 
 describe('configured long novel planning acceptance', () => {
   it('stops on a changed named protagonist before paying for characters or chapter planning',async()=>{

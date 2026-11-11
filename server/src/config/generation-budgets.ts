@@ -1,9 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {resolveDataDir} from './data-dir';
-export const GENERATION_BUDGET_DEFAULTS={reviewGroupingMode:0,structuredOutputTokens:131072,structuredOutputCeiling:393216,sourceMaxPhysicalCalls:12,presentationMaxPhysicalCalls:24,premiseReselectionMaxCalls:12,sourceBatchSize:3,presentationBatchSize:2,poolBatchSize:0,complexTimeoutMs:1200000};
+export const GENERATION_BUDGET_DEFAULTS={reviewGroupingMode:0,structuredOutputTokens:131072,structuredOutputCeiling:393216,sourceMaxPhysicalCalls:12,presentationMaxPhysicalCalls:24,premiseReselectionMaxCalls:12,sourceBatchSize:3,presentationBatchSize:2,poolBatchSize:0,complexTimeoutMs:1200000,
+ // Hard wall-clock ceiling for one background project creation. The user
+ // requires creation to be interrupted at 30 minutes; 30 minutes is also the
+ // maximum configurable value, not a soft target.
+ creationMaxWallMs:1800000,
+ // Long novels build the complete volume/world/character framework at creation,
+ // but only this many detailed chapter outlines; the existing rolling outline
+ // path keeps the same lookahead as prose advances. Default 5 keeps first
+ // creation inside the 20-minute target instead of spending it on 20 chapters.
+ creationDetailWindow:5};
 export type GenerationBudgets=typeof GENERATION_BUDGET_DEFAULTS;
-export const GENERATION_BUDGET_RANGES:Record<keyof GenerationBudgets,[number,number]>={reviewGroupingMode:[0,1],structuredOutputTokens:[1024,393216],structuredOutputCeiling:[1024,393216],sourceMaxPhysicalCalls:[1,200],presentationMaxPhysicalCalls:[1,200],premiseReselectionMaxCalls:[1,200],sourceBatchSize:[1,20],presentationBatchSize:[1,20],poolBatchSize:[0,20],complexTimeoutMs:[60000,3600000]};
+export const GENERATION_BUDGET_RANGES:Record<keyof GenerationBudgets,[number,number]>={reviewGroupingMode:[0,1],structuredOutputTokens:[1024,393216],structuredOutputCeiling:[1024,393216],sourceMaxPhysicalCalls:[1,200],presentationMaxPhysicalCalls:[1,200],premiseReselectionMaxCalls:[1,200],sourceBatchSize:[1,20],presentationBatchSize:[1,20],poolBatchSize:[0,20],complexTimeoutMs:[60000,3600000],creationMaxWallMs:[300000,1800000],creationDetailWindow:[1,50]};
 export function validateGenerationBudgets(value:unknown):GenerationBudgets{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('生成预算须为配置对象');
  const input=value as Record<string,unknown>,next={...GENERATION_BUDGET_DEFAULTS};

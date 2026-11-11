@@ -23,6 +23,19 @@ describe('转场必须有位置与重复证据',()=>{
   });
 });
 
+describe('章纲元叙述不能漏进正文', () => {
+  it('blocks chapter-number and creation-term narration', () => {
+    expect(ids('登记本按原样合上，和第一章临走时搁的地方不差分毫。')).toContain('meta-narration');
+    expect(ids('本章的结尾停在门口，谁也没再说话。')).toContain('meta-narration');
+    expect(ids('读者能看出他其实已经后悔了。')).toContain('meta-narration');
+    expect(ids('剧情需要一个人先开口。')).toContain('meta-narration');
+    expect(isLanguageHardline('meta-narration')).toBe(true);
+  });
+  it('does not flag chapter references inside quoted dialogue', () => {
+    expect(ids('“第一章我还没看完。”她把书合上。')).not.toContain('meta-narration');
+  });
+});
+
 describe('语言重复证据与标点种类分离', () => {
   it.each(['仓库', '星舰', '宫门'])('不因克制叙述只使用逗号句号阻断：%s', place => {
     const sentences = [

@@ -127,7 +127,7 @@ describe('chain HTTP architecture', () => {
     expect(shared).toContain('【跨章已完成结果不得重复兑现】');
     expect(shared).toContain('每章的responsibility必须能被该章content与characterActions自己的实际行动独立证明');
     expect(source).toContain('chapterResponsibilityPlanningDirective(false)');
-    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
     const env=source.split('outlineEnvironmentContext=JSON.stringify({')[1]?.split('});')[0]||'';
     expect(env).toContain('era:savedWorld.era');
     expect(env).toContain('locations:worldPromptValue(savedWorld.locations)');
@@ -188,8 +188,8 @@ describe('chain HTTP architecture', () => {
     expect(OUTLINE_PROJECTION_POLICY).toContain('不能把尚未完成的交付、核验或后续安排写成既成事实');
     expect(OUTLINE_PROJECTION_POLICY).toContain('散会、日常叮嘱、普通离开等没有独立推进作用的行为留在content');
     expect(source).not.toContain('【本章事件与状态唯一来源】');
-    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
-    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence,{allowAdditiveCompletion:true})');
   });
 
   it('materializes each selected premise as exactly one independent full card instead of one five-card JSON batch', () => {
@@ -283,7 +283,7 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain('const causalReviewChapter=(candidate:Record<string,any>)=>planningChapterForCausalReview(candidate,order+1,expectedChapter.func)');
     expect(source).toContain('[causalReviewChapter(candidate)]');
     expect(source).toContain('const actionRepairEvidence = chapterActionRepairEvidence(causalReviewChapter(chData), dependencyCheck.actionFailure)');
-    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence)');
+    expect(source).toContain('outlineFactPatchSynchronizationIssues(chData,rawPatch,defects,actionRepairEvidence,{allowAdditiveCompletion:true})');
     expect(source).toContain('chData = applyOutlineFactPatch(chData,rawPatch)');
     expect(source).toContain("shortOutlineSourceRunIds.add(String(repair.runId))");
     expect(patch).toContain('OUTLINE_FACT_REPAIR_FIELDS = [');
@@ -346,15 +346,75 @@ describe('chain HTTP architecture', () => {
     expect(source).toContain("const parsed=JSON.parse(value)");
     expect(source).toContain('世界规则也约束次要场景与过场动作');
     expect(source).toContain('无推进价值的过场可不写');
-    expect(source).toContain('reviewChapterDependencies(chData, reviewChapterFacts, reviewChapterActions)');
+    expect(source).toContain('reviewChapterDependencies(chData,reviewChapterFacts,reviewChapterActions)');
   });
 
-  it('does not promote a nested JSON fragment into an independently reviewed result', () => {
-    const source = read('chain.controller.ts');
-    const safeJson = source.slice(source.indexOf('private safeExtractJson'), source.indexOf('private loadChapterOutlineConsistencyRows'));
-    expect(safeJson).toContain('extractBalancedJson<T>(cleaned)');
-    expect(safeJson).not.toContain('cleaned.matchAll(');
-    expect(source).not.toContain('const lineParsed: any[] = []');
+  it('gives the first cross-stage review the same structured output budget as the candidate re-review',()=>{
+    const source=read('chain.controller.ts');
+    const firstAt=source.indexOf('const [alignmentSettled, stagePromiseSettled, sourceBoundarySettled] = await Promise.allSettled([');
+    const firstEnd=source.indexOf('reviewStagePromises(generatedBundle)',firstAt);
+    expect(firstAt).toBeGreaterThan(-1);expect(firstEnd).toBeGreaterThan(firstAt);
+    // A 32K cap can be consumed entirely by reasoning; the length-recovery
+    // attempt then disables reasoning and returns a shallow pass that misses
+    // real contradictions. Both review rounds must use the same full budget.
+    expect(source.slice(firstAt,firstEnd)).not.toContain('maxTokens');
+    const secondAt=source.indexOf('const secondAlignmentResult = await this.llmCallWithRetry<any>(');
+    const secondEnd=source.indexOf('const candidateAlignment = crossStageCoreVerdict',secondAt);
+    expect(secondAt).toBeGreaterThan(-1);expect(secondEnd).toBeGreaterThan(secondAt);
+    expect(source.slice(secondAt,secondEnd)).not.toContain('maxTokens');
+  });
+
+  it('bounds chapter fact repair to one attempt then regenerates with the cited defects',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('chapterRepairAttempts < 1');
+    expect(source).toContain('带已举证缺陷重生成');
+    expect(source).toContain('一次有界局部修复');
+  });
+
+  it('gives the decisive-chapter action audit the configured structured reasoning budget',()=>{
+    const real=read('real-llm.service.ts');
+    const at=real.indexOf("stepKey: countercheck ? 'framework_action_state_countercheck' : 'framework_action_proof'");
+    expect(at).toBeGreaterThan(-1);
+    expect(real.slice(Math.max(0,at-1600),at)).not.toContain('maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS');
+  });
+
+  it('starts the aggregate fact review with the source and result checks and drains it before returning',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('const aggregateFactReview = (async () => {');
+    expect(source).toContain('const factFindings = await aggregateFactReview;');
+    expect(source).toContain('if (aggregateFactError) throw aggregateFactError;');
+  });
+
+  it('checks selected tags and protagonist agency, and writes chapter titles at the chapter-plan source',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('扮猪吃虎等流派的隐藏优势须驱动主角主动操作');
+    expect(source).toContain('章节标题优先使用本章具体反常事件');
+  });
+
+  it('reviews each chapter against its frozen entry/exit contract before cross-stage',()=>{
+    const source=read('chain.controller.ts');
+    // The entry/exit contract is reviewed, but the upfront planning-only
+    // prerequisites/threads are excluded so a stale planning assumption cannot
+    // be asserted as a fact against the chapter's real action.
+    expect(source).toContain('[{...chapterFactsForReview(order, candidate), ...factReviewContract}]');
+    expect(source).toContain('const factReviewContract=');
+    expect(source).toContain('content、scenes.outcome、characterActions.action/result、characterStates中的同一物件位置');
+  });
+
+  it('carries the story tapestry through the card repair prompt so the repaired card can pass validation',()=>{
+    const source=read('chain.controller.ts');
+    // The card repair must request the same tapestry fields the validator
+    // requires; otherwise repair returns an incomplete card and creation stops.
+    expect(source).toContain('修复只改被点名的错误机制，其余人物、真相、结局与"故事织锦"保持');
+    expect(source).toContain('subPlots[{thread,serves,span,resolution}]');
+    expect(source).toContain('characterArcs[{character,start,turn,end}]');
+    expect(source).toContain('foreshadowingLayers[{content,layer:short|cross|volume|book|suspense,plantChapter,payoffChapter}]');
+  });
+
+  it('hard-stops project creation at the configured 30-minute ceiling',()=>{
+    const source=read('chain.controller.ts');
+    expect(source).toContain('const deadlineAt = Date.now() + readGenerationBudgets().creationMaxWallMs');
+    expect(source).toContain('cancellation instanceof Error && cancellation.message');
   });
 
 });

@@ -6,9 +6,11 @@ const context = { allowedMin: CHAPTER_WORD_RANGE.min, allowedMax: CHAPTER_WORD_R
 const chapter = () => ({
   title: '盘下食堂', targetWords: CHAPTER_WORD_RANGE.min, wordCountReason: '依照本章场景与剩余篇幅规划',
   content: '主角被裁员后确认赔偿到账，查看旧食堂租约，核算经营成本，完成盘铺交接并安排首日营业。'.repeat(15),
-  scenes: [{ location: '旧食堂', goal: '确认能否盘铺', conflict: '租期与成本尚未明确', outcome: '查清租约并签订交接清单' }],
+  scenes: [{ location: '旧食堂', goal: '确认能否盘铺', conflict: '租期与成本尚未明确', outcome: '查清租约并签订交接清单', beats: ['主角→核对旧租约→成本不明→继续核算', '主角→与房东谈判→租期不明→签交接清单'] }],
   characterActions: [{ character: '主角', action: '核对清单后接收钥匙', result: '取得食堂经营权' }],
-  conflicts: [], highlights: [], foreshadowing: [], foreshadowingRecover: [], characterStates: [], hook: '次日开始营业', emotionalTone: '谨慎期待',
+  conflicts: [],
+  highlights: [{ type: '处境变化', point: '盘下食堂并拿到钥匙', trigger: '主角核对清单后签字接收', setup: '前文已确认赔偿到账与租约' }],
+  foreshadowing: [], foreshadowingRecover: [], characterStates: [], hook: '次日开始营业', emotionalTone: '谨慎期待→成本压力→接下食堂的决断',
 });
 
 describe('chapter payload object envelopes never weaken GEN-005',()=>{
@@ -71,13 +73,25 @@ describe('chapter detail schema under GEN-005', () => {
   it('still rejects missing events, scene outcomes and action results', () => {
     const value = { ...chapter(), content: '', scenes: [{ location: '食堂', goal: '盘铺', conflict: '成本未知' }], characterActions: [{ character: '主角', action: '接收钥匙' }] };
     expect(chapterDetailStructureIssues(value, context)).toEqual([
-      '缺少content事件链', 'scenes[0]缺少outcome', 'characterActions[0]缺少result',
+      '缺少content事件链', 'scenes[0]缺少outcome', 'scenes[0]缺少beats（每场至少2条可执行节拍）', 'characterActions[0]缺少result',
     ]);
   });
   it('preserves dynamic body-length and non-final ending requirements', () => {
     const issues = chapterDetailStructureIssues({ ...chapter(), targetWords: context.allowedMax + 1, hook: '' }, context);
     expect(issues).toContain(`targetWords必须是${context.allowedMin}-${context.allowedMax}之间的整数`);
     expect(issues).toContain('非终章缺少hook');
+  });
+  it('requires scene beats, a real highlight, and an emotional curve before prose', () => {
+    const value = {
+      ...chapter(),
+      scenes: [{ location: '食堂', goal: '盘铺', conflict: '成本未知', outcome: '签下交接' }],
+      highlights: [],
+      emotionalTone: '压抑',
+    };
+    const issues = chapterDetailStructureIssues(value, context);
+    expect(issues).toContain('scenes[0]缺少beats（每场至少2条可执行节拍）');
+    expect(issues).toContain('highlights必须是非空数组：每章至少一个实际落地的有效剧情点');
+    expect(issues).toContain('emotionalTone必须写成情绪曲线（主导情绪→转折/代价→释放或余味），不能只写一个情绪词');
   });
 });
 
@@ -96,12 +110,20 @@ describe('frozen chapter identity wins over provider envelope order',()=>{
   expect(unwrapExpectedChapterEnvelope({...chapter(),chapterNumber:2},3,'盘下食堂')).toBeNull();
   expect(unwrapExpectedChapterEnvelope({chapter:[{...chapter(),chapterNumber:2}]},3,'盘下食堂')).toBeNull();
  });
- it('rejects the wrong frozen chapter title even without an explicit number',()=>{
+ it('freezes the title on a unique structurally valid chapter but still rejects a wrong explicit number',()=>{
   const wrong={...chapter(),title:'前一章',content:'前一章事件'};
-  expect(unwrapExpectedChapterEnvelope(wrong,3,'盘下食堂')).toBeNull();
-  expect(unwrapExpectedChapterEnvelope({chapters:[wrong]},3,'盘下食堂')).toBeNull();
-  expect(unwrapExpectedChapterEnvelope({...wrong,chapterNumber:3},3,'盘下食堂')).toBeNull();
+  const expected={...wrong,title:'盘下食堂'};
+  expect(unwrapExpectedChapterEnvelope(wrong,3,'盘下食堂')).toEqual(expected);
+  expect(unwrapExpectedChapterEnvelope({chapters:[wrong]},3,'盘下食堂')).toEqual(expected);
+  expect(unwrapExpectedChapterEnvelope({...wrong,chapterNumber:3},3,'盘下食堂')).toEqual({...expected,chapterNumber:3});
   expect(unwrapExpectedChapterEnvelope({chapters:[wrong,chapter()]},3,'盘下食堂')).toEqual(chapter());
+  expect(unwrapExpectedChapterEnvelope({...wrong,chapterNumber:2},3,'盘下食堂')).toBeNull();
+ });
+ it('normalizes a paraphrased chapter title without regenerating the chapter',()=>{
+  const paraphrased={...chapter(),title:'第四章：交接完成以后'};
+  const frozen='第四章：交接之后';
+  expect(unwrapExpectedChapterEnvelope(paraphrased,4,frozen)).toEqual({...paraphrased,title:frozen});
+  expect(unwrapExpectedChapterEnvelope({chapters:[{...paraphrased,chapterNumber:4}]},4,frozen)).toEqual({...paraphrased,chapterNumber:4,title:frozen});
  });
  it('does not pay for another generated chapter when repeated envelopes contain identical data',()=>{
   const item={...chapter(),chapterNumber:3};

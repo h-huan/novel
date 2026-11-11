@@ -582,11 +582,42 @@ export function validateSourceQualityReview(audit: unknown, readerGoals: unknown
 export function sourceQualityReviewContract(): string {
   return '另返回sourceQualityAudit:{version:1,checks:{' + SOURCE_QUALITY_AXES.map(axis =>
     `${axis}:{status:"supported|gap|conflict|not_applicable|unknown",evidence:"当前正文连续逐字原文",basisSource:"body|chapter_plan|context",basisEvidence:"gap/conflict对应的必要前提连续原文",reason:"至少8字具体核对与影响"}`,
-  ).join(',') + '}}。六项必须逐项返回；not_applicable时evidence必须为空字符串，实际不适用原因只写reason，不能把“没有前文”等评审说明冒充正文引文；有前章仍必须核对，不能not_applicable。unknown表示必要依据尚未核实，不能伪造supported；gap/conflict只报影响当前行动理解或已声称结果的缺口，不要求补无关细节。chapter_plan只引用本次显示章纲，context只引用本次显示上下文。'
+  ).join(',') + '}}。六项必须逐项返回；not_applicable时evidence必须为空字符串，实际不适用原因只写reason，不能把“没有前文”等评审说明冒充正文引文；有前章仍必须核对，不能not_applicable。unknown表示必要依据尚未核实，不能伪造supported；gap/conflict只报影响当前行动理解或已声称结果的缺口，不要求补无关细节。promise的gap/conflict只能引用已提供故事来源（标题、简介、章纲、前章）的逐字原文，不能引用执行标准或写作要求充当承诺；开篇钩子位置、首屏兑现时点归readerGoals.click，不归promise；无法引用逐字承诺时不得判gap，改为unknown或在readerGoals说明。chapter_plan只引用本次显示章纲，context只引用本次显示上下文。'
     + CONTINUITY_EVIDENCE_CONTRACT
     + '另返回readerGoals:{click,completion,sharing,immersion}，各项为{status:"supported|weak|unknown",quote:"本章连续逐字原文，unknown可为空",reason:"至少8字说明本阶段成立机制、薄弱处或未验证部分"}。正文阶段只评本章实际体验，不把未来计划、总分和未写结局当已兑现；weak/unknown保留真实阅读倾向，不伪造高倾向；不预测实际读者转化率。';
 }
 import { causalEvidenceAnchors } from './causal-review';
+
+/** Focused semantic repair for the promise axis. It is not a citation patch:
+ * the reviewer must decide whether the story's own events fulfill the promise,
+ * while opening-hook position stays in readerGoals.click. */
+export function promiseAxisReviewPrompt(input: {
+  chapterTitle: string; content: string; chapterPlan: string; context: string; current: unknown;
+}): string {
+  return '你是章节承诺轴复核器。只重新判断 promise 轴，不改正文、其它轴或 readerGoals。'
+    + '\npromise 核对标题/主线/阶段承诺是否由本章及已确认故事的实际事件兑现，不是开篇钩子位置或首屏时点；开篇位置归 readerGoals.click。'
+    + '\n【本章标题】' + input.chapterTitle
+    + '\n【本章正文】' + input.content
+    + '\n【章纲与故事来源】' + input.chapterPlan
+    + '\n【上下文】' + input.context
+    + '\n【原promise判断】' + JSON.stringify(input.current)
+    + '\n只返回JSON:{"promise":{"status":"supported|gap|conflict|unknown","evidence":"本章连续逐字原文","basisSource":"body|chapter_plan|context","basisEvidence":"故事来源逐字原文；gap/conflict必填","reason":"至少8字具体比较"}}。'
+    + '\n若本章事件确实兑现标题/主线承诺，即使出现在中后段，promise=supported，evidence引用实际兑现事件；开篇延迟的担忧留在readerGoals.click。'
+    + '\n只有承诺在已写故事中根本没有兑现时才判gap/conflict；basisEvidence必须逐字来自chapter_plan/context，不能引用执行标准或写作要求。'
+    + '\n无法引用逐字承诺且不能确认兑现时status=unknown并说明缺什么；不得为通过改status。';
+}
+export function applyPromiseAxisVerdict(audit: SourceQualityAudit | undefined, value: unknown): SourceQualityAudit | undefined {
+  if (!audit) return audit;
+  const row = (value && typeof value === 'object' ? (value as Record<string, unknown>).promise : null) as SourceQualityRow | null;
+  if (!row || typeof row !== 'object'
+    || !['supported', 'gap', 'conflict', 'unknown'].includes(row.status)
+    || typeof row.evidence !== 'string'
+    || typeof row.reason !== 'string' || row.reason.trim().length < 8) return audit;
+  if (['gap', 'conflict'].includes(row.status)
+    && (!['body', 'chapter_plan', 'context'].includes(row.basisSource || '')
+      || typeof row.basisEvidence !== 'string' || !row.basisEvidence.trim())) return audit;
+  return { ...audit, checks: { ...audit.checks, promise: row } };
+}
 
 export interface SourceCitationTarget { key: string; axis: SourceQualityAxis; field: 'evidence' | 'basisEvidence'; source: string }
 export function invalidSourceQualityCitations(audit: SourceQualityAudit, content: string, sources: Record<string,string>): SourceCitationTarget[] {

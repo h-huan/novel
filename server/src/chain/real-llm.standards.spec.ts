@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { RealLLMService } from './real-llm.service';
 import { standardDirectiveCache } from '../modules/module-standards/standard-directive.cache';
-import { activeSystemWorkflowRules, SYSTEM_WORKFLOW_RULESET_VERSION, STORY_PREREQUISITE_POLICY } from '../modules/module-standards/system-workflow-rules.registry';
+import { activeSystemWorkflowRules, getSystemWorkflowRule, SYSTEM_WORKFLOW_RULESET_VERSION, STORY_PREREQUISITE_POLICY } from '../modules/module-standards/system-workflow-rules.registry';
 
 afterEach(() => standardDirectiveCache.clear());
 
@@ -180,7 +180,10 @@ it('projects the actual payoff recheck and citation-only protocols instead of th
 });
 
 it('delivers the shared action-state condition to draft and local repair before any model output, once per physical call',async()=>{
- const {STORY_CAUSAL_STATE_POLICY,SOURCE_QUALITY_POLICY}=await import('../modules/module-standards/system-workflow-rules.registry');
+ const {STORY_CAUSAL_STATE_POLICY,SOURCE_QUALITY_POLICY,OUTLINE_FACT_REPAIR_SYNC_POLICY}=await import('../modules/module-standards/system-workflow-rules.registry');
+ expect(STORY_CAUSAL_STATE_POLICY).toContain('断言本身成立、只是缺少实际执行或必要条件');
+ expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('被点名的断言本身成立');
+ expect(OUTLINE_FACT_REPAIR_SYNC_POLICY).toContain('缺少实际执行');
  standardDirectiveCache.rebuild(activeSystemWorkflowRules());
  const service=new RealLLMService({
   getConfig:()=>({defaults:{maxTokens:4096}}),
@@ -197,6 +200,61 @@ it('delivers the shared action-state condition to draft and local repair before 
   expect(system).toContain('CR-1');
   expect(system).not.toContain('坐标由程序按 UTF-16');
  }
+});
+
+it('escalates a failed local repair to a bounded chapter or world regeneration without relaxing any gate',async()=>{
+ const rule=getSystemWorkflowRule('RPR-006');
+ expect(rule?.status).toBe('active');
+ expect(rule?.blocking).toBe(true);
+ expect(String(rule?.summary)).toContain('独立复审');
+ expect(String(rule?.summary)).toContain('仍失败则如实阻断');
+ expect(rule?.directives?.repair).toContain('仍留已举证缺陷');
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ const service=new RealLLMService({
+  getConfig:()=>({defaults:{maxTokens:4096}}),
+  getModelForScenario:()=>({modelName:'fixture',modelVersion:'fixture',temperature:0}),
+ } as any,{beginRun:vi.fn(),finishRun:vi.fn()} as any);
+ const call=vi.fn(async()=>({content:'{}',finishReason:'stop'}));(service as any).callModel=call;
+ await service.generate({prompt:'按已举证缺陷重生成该章',scenario:'outline',responseFormat:'json_object',metrics:{stepKey:'creation_chapter_regenerate'}});
+ const system=(call.mock.calls[0] as any)[2] as string;
+ expect(system).toContain('RPR-006');
+ expect(system).toContain('已确认前章原文及事实台账');
+ expect(system).toContain('不把有输出当作通过');
+});
+
+it('scopes single-purpose creation reviews to their deferred rules instead of the full review registry',()=>{
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ const full=standardDirectiveCache.get('review','review');
+ const promise=standardDirectiveCache.get('review','creation_stage_promise_review');
+ const card=standardDirectiveCache.get('review','creation_short_card_review');
+ const responsibility=standardDirectiveCache.get('review','creation_chapter_responsibility_review');
+ expect(promise).toContain('RPR-004');
+ expect(promise.length).toBeLessThan(full.length/8);
+ expect(card).toContain('AUTH-002');
+ expect(card.length).toBeLessThan(full.length/8);
+ // The responsibility audit defers cumulative state + time continuity to the
+ // registry (CTX-005/CTX-008) while inlining its CR rules; it must keep those,
+ // but must not carry the whole review registry.
+ expect(responsibility).toContain('CTX-005');
+ expect(responsibility).toContain('CTX-008');
+ expect(responsibility).not.toContain('QLT-003');
+ expect(responsibility.length).toBeLessThan(full.length/3);
+});
+
+it('scopes the acceptance gates to their named rules without dropping prosePassed or fact/time authority',()=>{
+ standardDirectiveCache.rebuild(activeSystemWorkflowRules());
+ const full=standardDirectiveCache.get('review','review');
+ const alignment=standardDirectiveCache.get('review','alignment_review');
+ const quality=standardDirectiveCache.get('review','quality_gate');
+ // The chapter acceptance review defers to QLT-003/QLT-004 (value/language),
+ // QLT-011 (prosePassed), CTX-008 (time), plus fact/contract authority; it must
+ // keep every one of them, while dropping the unrelated review rules.
+ for(const id of ['QLT-003','QLT-004','QLT-011','QLT-014','CTX-008','CTX-005','ARCH-002','AUTH-002']) expect(alignment).toContain('【系统规则 '+id);
+ expect(alignment.length).toBeLessThan(full.length);
+ // The prose quality gate is self-contained except for the semantic gate and
+ // language/POV boundaries it names.
+ for(const id of ['QLT-003','QLT-004','QLT-014','AUTH-002']) expect(quality).toContain('【系统规则 '+id);
+ expect(quality.length).toBeLessThan(full.length/2);
 });
 
 it('projects the same established-boundary check into candidate generation, source audit and final card audit',()=>{

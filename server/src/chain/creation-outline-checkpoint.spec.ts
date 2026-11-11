@@ -61,6 +61,16 @@ describe('creation outline checkpoints (noncanonical)', () => {
     expect(work.load('p1', 'chapter_0', CreationOutlineCheckpoint.fingerprint(changed))).toBeNull();
   });
 
+  it('exposes a saved chapter body after a rule revision but never as an accepted verdict', () => {
+    const original = { story: 'A', world: ['only A'], standard: 'v1' };
+    const key = CreationOutlineCheckpoint.fingerprint(original);
+    work.save('p1', 'chapter_0', key, { chapter: { content: '旧规则下生成的章纲' }, ledger: ['旧台账'] });
+    const revised = CreationOutlineCheckpoint.fingerprint({ ...original, standard: 'v2' });
+    expect(work.load('p1', 'chapter_0', revised)).toBeNull();
+    expect(work.loadStale('p1', 'chapter_0')).toEqual({ chapter: { content: '旧规则下生成的章纲' }, ledger: ['旧台账'] });
+    expect(work.loadStale('p1', 'chapter_9')).toBeNull();
+  });
+
   it('rejects damaged stage payload instead of allowing it into canonical outlines', () => {
     const key = CreationOutlineCheckpoint.fingerprint('known');
     work.save('p1', 'chapter_plan', key, { chapters: [1, 2] });

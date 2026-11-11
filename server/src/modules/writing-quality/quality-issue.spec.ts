@@ -24,6 +24,19 @@ it('does not fabricate evidence offsets or diagnostics', () => {
   expect(Object.values(result.dimensions).every(v => v === null)).toBe(true);
   expect(service.inspect(text)).toEqual(result);
 });
+it('keeps an unverified advisory visible without turning the gate into not_evaluated', () => {
+  const advisory = qualityIssue({ projectId: 'p', stage: 'chapter', ruleId: 'ai_trace.particle_overuse',
+    source: 'ai_trace_heuristic_v3', severity: 'medium', message: '了过多', quote: '不存在', content: '真实正文' });
+  expect(qualityGate([advisory], true)).toMatchObject({ passed: true, status: 'passed' });
+  const blocking = qualityIssue({ projectId: 'p', stage: 'chapter', ruleId: 'logic.fact',
+    source: 'semantic_judge', severity: 'blocking', message: '事实冲突', quote: '不存在', content: '真实正文' });
+  expect(qualityGate([blocking], true).status).toBe('not_evaluated');
+});
+it('never lets an ai_trace rule block even when the reviewer labels it blocking', () => {
+  const trace = qualityIssue({ projectId: 'p', stage: 'chapter', ruleId: 'ai_trace.abstract_summary',
+    source: 'semantic_judge', severity: 'blocking', message: '总结句重复', quote: '不存在', content: '真实正文' });
+  expect(qualityGate([trace], true)).toMatchObject({ passed: true, status: 'passed' });
+});
 it('keeps one wide criterion for "the standard itself is empty" but never flags ordinary prose issues', () => {
   const missingStandard = [
     '创作宪法未设置分类：属未执行标准，必须补齐后才能继续（不得用默认值或平台推荐替代）',

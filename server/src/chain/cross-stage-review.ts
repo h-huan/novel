@@ -10,15 +10,29 @@ export function crossStagePromiseCatalog(brief:string):Array<{ref:string;path:st
     typeof stage?.outcome==='string'&&stage.outcome.trim()?[{ref:'P'+(index+1),path:`confirmedStory.scopeBreakdown[${index}].outcome`,outcome:stage.outcome}]:[]):[];
 }
 /** Diagnostics locate a failure; they never replace the confirmed obligation. */
+/** A pair of chapter-content quotes is a local fact conflict, not a promise
+ * that needs a new action path. Route it to the direct dependency patch; only
+ * explicit stage markers may turn it into a path-design obligation. */
+export function crossStageFindingIsDirectChapterConflict(finding: string): boolean {
+  return /"location1"\s*:\s*"本批·第\d+章\.content"/.test(finding)
+    && /"location2"\s*:\s*"本批·第\d+章\.content"/.test(finding)
+    && !/【阶段兑现 P[1-9]\d*/.test(finding)
+    && !/【关键结果】/.test(finding);
+}
+
 export function crossStageRepairObligations(brief:string,findings:readonly string[],chapters:readonly any[]=[],fallbackTargetIds:readonly string[]=[]) {
   const refs=new Set(findings.flatMap(finding=>[...finding.matchAll(/【阶段兑现 (P[1-9]\d*)\b/g)].map(match=>match[1])));
   const affected=new Set<string>();
   for(const finding of findings){
+    if(crossStageFindingIsDirectChapterConflict(finding))continue;
     for(const chapter of chapters)if(typeof chapter.id==='string'&&finding.includes(chapter.id))affected.add(chapter.id);
     for(const match of finding.matchAll(/chapters\[(\d+)\]/g)){
       const row=chapters[Number(match[1])];if(row?.id)affected.add(row.id);
     }
   }
+  // All findings are chapter-content quote conflicts: repair the later
+  // chapter's exact claim directly. There is no stage outcome to redesign.
+  if(findings.length&&!findings.some(finding=>!crossStageFindingIsDirectChapterConflict(finding)))return [];
   // Source/causal failures carry entity ownership, not the promise-audit label.
   // Replacing their means must still preserve the outcome of those stages.
   // Book/volume ownership alone has no numbered stage. Resolve its linked
@@ -189,16 +203,27 @@ export function describeStagePromiseReviewValidation(value:any,brief:string,cand
   return describeCrossStageReviewValidation({consistent:Array.isArray(value?.checks)&&value.checks.every((row:any)=>row?.status==='preserved'),contradictions:[],unrelatedInventions:[],promiseChecks:value?.checks},brief,candidateText);
 }
 
-/** One review contract for both the live bundle and uncommitted repair candidates. */
-export function crossStageReviewDirective(includePolicy = true): string {
-  return `${includePolicy ? CROSS_STAGE_REVIEW_POLICY : "按已注入QLT-003跨模块判据执行。"}\n只输出JSON:{"consistent":true,"contradictions":[],"unrelatedInventions":[],"warnings":[]}，有固定阶段清单时另含promiseChecks。contradictions和unrelatedInventions问题项可用非空字符串，或具有canonicalSource、conflictingSource、evidence、impact四个非空字符串字段的对象；warnings只用字符串。保留字段与原文，不返回整份资料的事实重述。`;
+export const CROSS_STAGE_SOURCE_SCOPE = '只审上层/下层来源层级、无关发明和固定阶段承诺；不重复逐章事实/投影审查；章节内部投影冲突只放 warnings，不进入 path design。';
+/** Source-hierarchy-only contract for the whole-story review. Per-chapter
+ * facts, projections and contract consistency remain owned by the per-chapter
+ * fact review; the dedicated stage review owns fixed-stage fulfillment. */
+export function crossStageSourceReviewDirective(): string {
+  return `${CROSS_STAGE_SOURCE_SCOPE}\n标签兑现强度、组织关系命名冗余、地点气候/感官补充、建议性措辞属于 warnings；不要放进 contradictions/unrelatedInventions，不触发 path design。只有与已确认题材、世界规则、来源字段逐字互斥或下层改写上层事实才进 contradictions。只输出JSON:{"consistent":true,"contradictions":[],"unrelatedInventions":[],"warnings":[]}。contradictions和unrelatedInventions问题项可用非空字符串，或具有canonicalSource、conflictingSource、evidence、impact四个非空字符串字段的对象；warnings只用字符串。每条问题只引用定位与判断所需的连续短句：position字段不超过约600字，evidence不超过约3000字，impact不超过约1500字，warnings不超过约1200字；不得粘贴整章、重复整份资料或输出未要求的长篇分析。保留字段与原文，不返回整份资料的事实重述。`;
+}
+/** One review contract for both the live bundle and uncommitted repair candidates.
+ * The dedicated stage-promise review owns fixed-stage fulfillment for the live
+ * bundle and candidate bundle; callers that do not request promiseChecks must
+ * pass includePromiseChecks=false. The path-design review keeps them because it
+ * checks a proposed repair plan, not the full bundle. */
+export function crossStageReviewDirective(includePolicy = true, includePromiseChecks = true): string {
+  return `${includePolicy ? CROSS_STAGE_REVIEW_POLICY : "按已注入QLT-003跨模块判据执行。"}\n标签兑现强度、组织关系命名冗余、地点气候/感官补充、建议性措辞属于 warnings；不要放进 contradictions/unrelatedInventions，不触发 path design。只有与已确认题材、世界规则、来源字段逐字互斥或下层改写上层事实才进 contradictions。只输出JSON:{"consistent":true,"contradictions":[],"unrelatedInventions":[],"warnings":[]}${includePromiseChecks ? '，有固定阶段清单时另含promiseChecks' : '；固定阶段兑现由独立阶段审查负责，本审查不返回promiseChecks'}。contradictions和unrelatedInventions问题项可用非空字符串，或具有canonicalSource、conflictingSource、evidence、impact四个非空字符串字段的对象；warnings只用字符串。每条问题只引用定位与判断所需的连续短句：position字段不超过约600字，evidence不超过约3000字，impact不超过约1500字，warnings不超过约1200字；不得粘贴整章、重复整份资料或输出未要求的长篇分析。保留字段与原文，不返回整份资料的事实重述。`;
 }
 function validFinding(item:any):boolean {
   return typeof item==='string'?!!item.trim():!!item&&typeof item==='object'
     &&['canonicalSource','conflictingSource','evidence','impact'].every(key=>typeof item[key]==='string'&&!!item[key].trim());
 }
 
-export function describeCrossStageReviewValidation(value: any,brief?:string,candidateText?:string): string[] {
+export function describeCrossStageReviewValidation(value: any,brief?:string,candidateText?:string,options?:{requirePromises?:boolean}): string[] {
   if(candidateText)value=bindCrossStagePromiseEvidence(value,candidateText);
   const issues: string[] = [];
   if (!value || typeof value.consistent !== 'boolean') issues.push('consistent必须为布尔值');
@@ -207,12 +232,28 @@ export function describeCrossStageReviewValidation(value: any,brief?:string,cand
       issues.push(`${field}必须为有完整来源、原文和影响的具体问题数组；没有问题时返回空数组`);
     }
   }
+  // A whole-story review must cite the minimal evidence needed to locate the
+  // contradiction, not paste entire chapters. Oversized rows are a protocol
+  // failure: they waste output budget and bury the actual conflict.
+  for (const field of ['contradictions', 'unrelatedInventions']) {
+    const rows = Array.isArray(value?.[field]) ? value[field] : [];
+    if (rows.some((item: any) => item && typeof item === 'object' && (
+      String(item.canonicalSource || '').length > 600
+      || String(item.conflictingSource || '').length > 600
+      || String(item.evidence || '').length > 3000
+      || String(item.impact || '').length > 1500))) {
+      issues.push(`${field}必须引用必要连续短句和字段位置，不得粘贴整章或重复整份资料`);
+    }
+  }
+  if (Array.isArray(value?.warnings) && value.warnings.some((item: any) => typeof item === 'string' && item.length > 1200)) {
+    issues.push('warnings必须简短，不得粘贴整章或重复资料');
+  }
   if (value?.warnings !== undefined && (!Array.isArray(value.warnings)
     || value.warnings.some((item: unknown) => typeof item !== 'string' || !item.trim()))) {
     issues.push('warnings必须为非空字符串数组；没有建议时返回空数组');
   }
   const promises=brief?crossStagePromiseCatalog(brief):[];
-  if(promises.length){
+  if(promises.length && options?.requirePromises !== false){
     const checks=value?.promiseChecks;
     if(!Array.isArray(checks)||checks.length!==promises.length||new Set(checks.map((item:any)=>item?.ref)).size!==promises.length
       ||checks.some((item:any)=>!promises.some(p=>p.ref===item?.ref)))issues.push('promiseChecks必须覆盖全部固定阶段兑现编号，不能漏项或重复');

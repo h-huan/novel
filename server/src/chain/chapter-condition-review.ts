@@ -30,6 +30,82 @@ export function chapterConditionTaskAnchors(plan:readonly any[]){
 
 const CONDITION_ERROR='逐章条件核对缺少取得路径、有效性证据或完整覆盖；supported需要当前计划的实际取得路径，不能只引用世界规则';
 
+/** Bind a supported verdict to an actual prior/current chapter task anchor when
+ * the reviewer names the acquisition in prose but omits the address. This is a
+ * transport binding, not a new verdict: the reviewer already said supported and
+ * the matched chapter responsibility must contain the cited phrase. */
+function namedChapterNumbers(reason: string): number[] {
+  const chinese: Record<string, number> = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+  const result: number[] = [];
+  for (const match of reason.matchAll(/第\s*([0-9一二三四五六七八九十]+)\s*章/g)) {
+    const raw = match[1];
+    const value = /^\d+$/.test(raw) ? Number(raw) : chinese[raw];
+    if (Number.isInteger(value) && value > 0) result.push(value);
+  }
+  return [...new Set(result)];
+}
+
+function acquisitionPhrase(reason: string, responsibility: string): string | null {  const clean = (value: string) => value.replace(/[，。；、,.!?！？:：\s"'“”‘’（）()]/g, '');
+  const source = clean(reason);
+  const target = clean(responsibility);
+  if (!source || !target) return null;
+  const stop = new Set(['本章', '前章', '当前', '已经', '实际', '完成', '结果', '条件', '行动', '责任', '规划', '有效', '证明', '取得', '缺口', '评审', '未给', '对应', '需要', '可以', '不能', '本章或前章', '当前或前章', '当时', '状态', '既定', '延续', '解释', '原文', '正文', '字段', '章纲', '动作', '操作', '成立', '没有', '第二', '一件', '外部', '独立', '锚点', '反应', '内在', '克制']);
+  for (let length = Math.min(8, source.length); length >= 2; length--) {
+    for (let start = 0; start + length <= source.length; start++) {
+      const phrase = source.slice(start, start + length);
+      if (stop.has(phrase)) continue;
+      if (target.includes(phrase)) return phrase;
+    }
+  }
+  return null;
+}
+
+/** A "supported" row that provides no executed acquisition action is not proof.
+ * Downgrade it to gap (in place) so the existing plan-repair path handles it,
+ * instead of failing the whole creation on one reviewer omission. If the reason
+ * explicitly names an acquisition already in a prior/current responsibility, bind
+ * that chapter's real task anchor instead of downgrading a truthful verdict.
+ * Structural errors (bad chapter number/status) are left untouched so they still retry. */
+export function coerceUnprovenConditionChecks(value:any,plan:any[],sources:string,
+ resolveAnchors:false|((check:any)=>boolean)=false,requireExitState=false):any{
+ if(!value||typeof value!=='object'||!Array.isArray(value.conditionChecks))return value;
+ let coerced=false;
+ for(const check of value.conditionChecks){
+  if(!check||typeof check!=='object'||check.status!=='supported')continue;
+  const n=check.chapter;
+  if(!Number.isInteger(n)||n<1||n>plan.length)continue;
+  const valid=Array.isArray(check.bridgeAnchorIds)
+   ?typeof resolveAnchors==='function'&&resolveAnchors(check)
+   :(check.bridgeSource===undefined||check.bridgeSource==='body')
+     &&resolveQualityEvidence(JSON.stringify({
+       chapterResponsibilities:plan.slice(0,n).map(({responsibility}:any)=>({responsibility}))
+     }),check.bridgeEvidence).verified;
+  if(valid)continue;
+  let bound=false;
+  if(!Array.isArray(check.bridgeAnchorIds)||!check.bridgeAnchorIds.length){
+   const named=namedChapterNumbers(String(check.reason||''))
+     .filter(chapter=>chapter>=1&&chapter<=n)
+     .map(chapter=>chapter-1);
+   const candidates=[...named,...Array.from({length:n},(_,i)=>n-1-i)];
+   for(const index of [...new Set(candidates)]){
+    if(bound)break;
+    const phrase=acquisitionPhrase(String(check.reason||''),String(plan[index]?.responsibility||''));
+    if(!phrase)continue;
+    check.bridgeAnchorIds=[`chapter:c${index+1}:task`];
+    check.bridgeEvidence=String(plan[index]?.responsibility||'');
+    bound=typeof resolveAnchors!=='function'||resolveAnchors(check);
+   }
+  }
+  if(bound)continue;
+  check.status='gap';
+  check.reason=((typeof check.reason==='string'&&check.reason.trim())?check.reason.trim()+' | ':'')
+   +'评审未给出当前或前章已执行的条件取得动作，按未证明缺口进入规划修复';
+  coerced=true;
+ }
+ if(coerced&&value.consistent===true)value.consistent=false;
+ return value;
+}
+
 /** Same fail-closed semantic contract for short and long preflight. Keep a
  * precise per-chapter reason so the EXISTING validation retry can correct
  * transport errors instead of repeating an opaque entire-plan rejection. */

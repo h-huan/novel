@@ -74,6 +74,25 @@ export class CreationOutlineCheckpoint {
     }
   }
 
+  /** Return stage work even when the source hash changed. This is transport
+   * only: a rule/prompt revision no longer discards a structurally valid
+   * chapter and spends another full generation. The caller must treat the
+   * returned chapter as an UNREVIEWED draft and re-run every current gate
+   * (structure, facts, actions, continuity); the old verdicts and ledger are
+   * never accepted. Sections whose generation contract changed are repaired
+   * by those gates, exactly like a fresh draft. */
+  loadStale<T>(projectId: string, stageKey: string): T | null {
+    const row = this.db.prepare(
+      'SELECT payload FROM creation_outline_checkpoints WHERE project_id=? AND stage_key=?',
+    ).get(projectId, stageKey) as { payload?: string } | undefined;
+    if (!row?.payload) return null;
+    try {
+      return JSON.parse(String(row.payload)) as T;
+    } catch {
+      return null;
+    }
+  }
+
   save(projectId: string, stageKey: string, sourceHash: string, payload: unknown): void {
     this.db.prepare(`INSERT INTO creation_outline_checkpoints
       (project_id,stage_key,source_hash,payload,updated_at) VALUES (?,?,?,?,?)

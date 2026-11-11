@@ -37,6 +37,14 @@ describe('local fact repair evidence ownership and prompt size', () => {
      expect(outlineFactRepairPromptDefects([entry])).toEqual([entry]);
    }
  });
+ it('keeps short conflicting quotes so the repair can target the named assertion',()=>{
+   const defect=JSON.stringify({location1:'本批·第2章.content',quote1:'那份文件仍在柜子里',
+     location2:'本批·第3章.content',quote2:'那份文件已经交出',
+     conflict:'同一份文件不能同时在柜子里和已经交出'});
+   expect(outlineFactRepairPromptDefects([defect])).toEqual([{location1:'本批·第2章.content',
+     quote1:'那份文件仍在柜子里',location2:'本批·第3章.content',quote2:'那份文件已经交出',
+     conflict:'同一份文件不能同时在柜子里和已经交出'}]);
+ });
 });
 
 describe('outline fact ledger review contract', () => {
@@ -387,4 +395,15 @@ it('locates confirmed calendar spans and the same-archive arithmetic rule',()=>{
  expect(spans).toEqual(expect.arrayContaining(['五年','一年','十四个月','上个月']));
  expect(spans.some((span:string)=>span.includes('两个月'))).toBe(true);
  expect(prompt).toContain('同一档案或期间的覆盖年限');
+});
+
+describe('chapter contract reconciliation',()=>{
+ it('asks the fact review to reconcile entry/exit contract with every projection',()=>{
+  const prompt=buildOutlineFactReviewPrompt({
+   canonicalBrief:'{}',world:{},previousLedger:[],
+   chapters:[{order:0,content:'物证从值班室交出。',responsibilityContract:{entryState:'物证在值班室',exitState:'物证留在值班室'},characterStates:[{stateAfter:'物证在驻馆民警室'}]}],
+  });
+  expect(prompt).toContain('responsibilityContract（entryState、exitState');
+  expect(prompt).toContain('不能只在 content 改位置而留下旧 exitState');
+ });
 });

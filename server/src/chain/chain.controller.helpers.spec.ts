@@ -1014,13 +1014,13 @@ describe('cross-chapter boundary enforcement', () => {
     evidence: ['证据'],
   };
 
-  it('does not accept a wrong literal count even when every model flag claims success',async()=>{
+  it('keeps a wrong literal count as a non-blocking advisory unless the story depends on it',async()=>{
     const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
     c.logger={warn:vi.fn(),error:vi.fn()};
     c.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
     const result=await c.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'通知',outlineContract:'本章完成通知与人物决定。'.repeat(12),storyContext:'既定事实。',content:'纸上印着“立即返航”五个字。'});
-    expect(result.evaluationStatus).toBe('evaluated');expect(result.pass).toBe(false);expect(result.prosePassed).toBe(false);
-    expect(result.contradictions.join('')).toContain('literal-character-count');
+    expect(result.evaluationStatus).toBe('evaluated');expect(result.pass).toBe(true);
+    expect(result.advisories.join('')).toContain('literal-character-count');
     expect(c.realLLM.generate).toHaveBeenCalledTimes(1);
   });
   it('preserves verified temporal conflicts when another countdown remains unresolved',async()=>{
@@ -1062,7 +1062,19 @@ describe('cross-chapter boundary enforcement', () => {
     const clean=await controller.checkChapterAlignment(input);expect(clean.pass).toBe(true);expect(clean.hardlineFindings.some((f:any)=>f.ruleId==='53-same-structure-parallel')).toBe(false);
     expect(controller.realLLM.generate.mock.calls[0][0].prompt).toContain('形态风险定位（不是已确认缺陷）');
     controller.realLLM.generate.mockResolvedValue({content:JSON.stringify({...passVerdict,prosePassed:false,contradictions:[{kind:'language',summary:'连续重复同一场景动作，没有推进，原文已逐段核对。'}]})});
-    expect((await controller.checkChapterAlignment(input)).pass).toBe(false);
+    // Same content+contract+context is intentionally cached after a PASS; vary the
+    // content so this assertion exercises a fresh review rather than the cache.
+    expect((await controller.checkChapterAlignment({...input, content: input.content + '他把手机扣在桌上。'})).pass).toBe(false);
+  });
+
+  it('reuses a verified PASS for identical chapter alignment input',async()=>{
+    const controller=applyStandardsStub(Object.create(ChainController.prototype) as any);controller.logger={warn:vi.fn()};
+    const input={projectId:'p',chapterIndex:1,chapterTitle:'图',outlineContract:'有效详细大纲'.repeat(30),storyContext:'已确认故事上下文',content:'他截了三张图，一张评价总页，一张倒计时，一张账号信息。'};
+    controller.realLLM={generate:vi.fn().mockResolvedValue({content:JSON.stringify(passVerdict)})};
+    const first=await controller.checkChapterAlignment(input);
+    const second=await controller.checkChapterAlignment({...input});
+    expect(first.pass).toBe(true);expect(second.pass).toBe(true);
+    expect(controller.realLLM.generate).toHaveBeenCalledTimes(1);
   });
 
   it('corrects only reader citations once and keeps real language failures',async()=>{
@@ -1150,10 +1162,10 @@ describe('cross-chapter boundary enforcement', () => {
   });
   it('requests only missing report paths and preserves the original failed prose decision',async()=>{
     const c=applyStandardsStub(Object.create(ChainController.prototype) as any);
-    const original:any={...passVerdict,pass:false,prosePassed:false};delete original.readerGoals;
+    const original:any={...passVerdict,pass:false,prosePassed:false};delete original.causalAudit;
     c.realLLM={generate:vi.fn().mockResolvedValueOnce({content:JSON.stringify(original)}).mockImplementation(async(request:any)=>{
-      expect(request.prompt).toContain('不要重发完整报告');expect(request.prompt).toContain('["readerGoals"]');
-      return {content:JSON.stringify({corrections:[{path:'readerGoals',value:passVerdict.readerGoals}]})};
+      expect(request.prompt).toContain('不要重发完整报告');expect(request.prompt).toContain('["causalAudit"]');
+      return {content:JSON.stringify({corrections:[{path:'causalAudit',value:passVerdict.causalAudit}]})};
     })};
     const report=await c.checkChapterAlignment({projectId:'p',chapterIndex:1,chapterTitle:'门',outlineContract:'有效详细大纲'.repeat(30),storyContext:'确认上下文',content:'她留下了清样。'});
     expect(report.pass).toBe(false);expect(report.prosePassed).toBe(false);expect(c.realLLM.generate).toHaveBeenCalledTimes(2);
@@ -1370,9 +1382,10 @@ describe('cross-chapter boundary enforcement', () => {
 
   it('injects the boundary into the first-pass prompt and forwards it to alignment checks', async () => {
     const controller = applyStandardsStub(Object.create(ChainController.prototype) as any);
+    const body = '正文'.repeat(2000);
     controller.realLLM = {
-      generate: vi.fn().mockResolvedValue({ content: '正文'.repeat(400) }),
-      validateGeneratedContent: vi.fn().mockResolvedValue('正文'.repeat(400)),
+      generate: vi.fn().mockResolvedValue({ content: body }),
+      validateGeneratedContent: vi.fn().mockResolvedValue(body),
     };
     controller.getActiveLessons = vi.fn().mockReturnValue('');
     controller.generateBodyWithLengthGuard = vi.fn()
@@ -1447,7 +1460,7 @@ describe('cross-chapter boundary enforcement', () => {
 
   it('uses a verified local fact patch before whole-chapter rewriting and then reaches hardline repair', async () => {
     const controller = applyStandardsStub(Object.create(ChainController.prototype) as any);
-    const body = '林野核对名单，二楼那户仍有名字。'.repeat(180);
+    const body = '林野核对名单，二楼那户仍有名字。'.repeat(300);
     const corrected = body.replace('二楼那户仍有名字', '二楼那户变成空白');
     const final = corrected.replace('林野核对名单', '林野停下来核对名单');
     controller.realLLM = { validateGeneratedContent: vi.fn().mockResolvedValue(body) };

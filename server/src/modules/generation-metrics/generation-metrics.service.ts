@@ -367,7 +367,12 @@ export class GenerationMetricsService implements OnModuleInit {
         severity: 'blocking', message: '生成期间创作宪法或前序资料已变化，必须基于最新上下文重新生成', source: 'version_gate' }));
       score.overallScore = null;
     }
-    const gate = qualityGate(score.issues, score.status === 'evaluated');
+    // 维度覆盖完整时，建议级问题不应因为 aggregate status=partial 再次把 Gate
+    // 打成 not_evaluated。这里与 real-llm 的最终 gate 使用同一口径，避免两套
+    // 重算路径互相覆盖（此前正是这里把已判定为建议级的 AI 痕迹重新判死）。
+    const dimensionsComplete = Object.values(score.dimensions).every(dimension =>
+      dimension.status === 'evaluated' || dimension.status === 'not_applicable');
+    const gate = qualityGate(score.issues, score.status === 'evaluated' || dimensionsComplete);
     const now = new Date().toISOString();
     // A physical model call is a generation_run. A quality report belongs to the
     // current artifact scope and is updated in place across retries/regenerations.

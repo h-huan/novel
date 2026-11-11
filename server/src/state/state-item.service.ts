@@ -356,6 +356,7 @@ export class StateItemService {
     if (!project) throw new Error(`项目 ${projectId} 不存在`);
     const constitution = readConstitution(project);
     const projectSettings = constitutionSettings(JSON.parse(project.settings || '{}'), constitution);
+    try { this.pruneStoryStateItems(projectId); } catch { /* cleanup is best-effort */ }
     const projectCard = {
       title: project.title, type: constitution.projectType,
       targetWords: constitution.targetWords, targetPlatform: constitution.targetPlatform,
@@ -393,8 +394,9 @@ export class StateItemService {
     ].filter(Boolean);
 
     const legacy = this.buildLegacyConfirmedContext(projectId, chapterNumber, grouped.pending);
+    const storyState = this.buildStoryStateContext(projectId, chapterNumber);
     return {
-      contextText: [legacy, ...contextSections].filter(Boolean).join('\n\n'),
+      contextText: [legacy, storyState, ...contextSections].filter(Boolean).join('\n\n'),
       confirmed: grouped.confirmed,
       pending: grouped.pending,
       conflict: grouped.conflict,
@@ -404,6 +406,90 @@ export class StateItemService {
       stateGuard: '已确稿 hard_fact 必须遵守。待确认 soft_candidate 只能参考, 不要写死。冲突/过期 warning 需要避免或复核。若提示角色不会自然做出某选择, 必须补充动机、事件或过渡剧情。',
       projectCard,
     };
+  }
+
+  /**
+   * Dynamic story state for the current chapter: items/pets/techniques/realms,
+   * open foreshadowing, and only the most recent 3 chapter summaries. Fixed canon
+   * and character states already come from the existing context builders.
+   */
+  private buildStoryStateContext(projectId: string, chapterNumber?: number): string {
+    const db = this.databaseService.getDb();
+    const sections: string[] = [];
+    try {
+      const dynamic = db.prepare(`
+        SELECT target_type, target_id, target_label, state_key, summary, status, authority, payload
+        FROM state_items
+        WHERE project_id = ? AND status IN ('confirmed','pending','conflict','stale')
+          AND COALESCE(authority,'') <> 'excluded'
+          AND target_type IN ('item','prop','pet','technique','realm','timer','relationship')
+        ORDER BY CASE status WHEN 'confirmed' THEN 1 WHEN 'pending' THEN 2 WHEN 'conflict' THEN 3 ELSE 4 END, updated_at DESC
+        LIMIT 80
+      `).all(projectId) as any[];
+      if (dynamic.length) {
+        sections.push('【动态状态｜物品/宠物/功法/境界/计时器/关系】\n' + dynamic.map(row => {
+          let payload: any = {};
+          try { payload = JSON.parse(row.payload || '{}'); } catch { payload = {}; }
+          const stage = payload?.stage || payload?.state || payload?.status || row.state_key || '';
+          if (['resolved', 'ended', 'dead', 'closed', 'completed', 'archived'].includes(String(stage).toLowerCase())) return '';
+          return `- [${row.target_type}/${row.status}] ${row.target_label || row.target_id || ''}: ${row.summary}${stage ? `（${stage}）` : ''}`;
+        }).filter(Boolean).join('\n'));
+      }
+    } catch { /* state table may be partially migrated */ }
+    try {
+      const open = db.prepare(`
+        SELECT f.description, fs.status, fs.planted_chapter, fs.recovered_chapter
+        FROM foreshadowing_states fs
+        JOIN foreshadowings f ON f.id = fs.foreshadowing_id
+        WHERE fs.project_id = ? AND fs.status IN ('planted','active')
+        ORDER BY fs.updated_at DESC LIMIT 30
+      `).all(projectId) as any[];
+      if (open.length) {
+        sections.push('【未结伏笔】\n' + open.map(row =>
+          `- ${row.description}（${row.status}，埋于第${row.planted_chapter || '?'}章，计划回收${row.recovered_chapter ?? '未定'}）`,
+        ).join('\n'));
+      }
+    } catch { /* optional table */ }
+    try {
+      const summaries = db.prepare(`
+        SELECT c.chapter_index, cs.summary
+        FROM chapter_summaries cs
+        JOIN chapters c ON c.id = cs.chapter_id
+        WHERE cs.project_id = ? AND c.chapter_index < ?
+        ORDER BY c.chapter_index DESC LIMIT 3
+      `).all(projectId, chapterNumber || 999999) as any[];
+      if (summaries.length) {
+        sections.push('【最近章节摘要｜只取最近 3 章】\n' + summaries.map(row =>
+          `- 第${row.chapter_index}章：${String(row.summary || '').slice(0, 400)}`,
+        ).join('\n'));
+      }
+    } catch { /* optional table */ }
+    return sections.join('\n\n');
+  }
+
+  /** Archive resolved/dead/ended dynamic state so the prompt stays bounded. */
+  pruneStoryStateItems(projectId: string): number {
+    const db = this.databaseService.getDb();
+    const rows = db.prepare(`
+      SELECT id, payload FROM state_items
+      WHERE project_id = ? AND status IN ('confirmed','pending','conflict','stale')
+    `).all(projectId) as any[];
+    const archive = db.prepare(`
+      UPDATE state_items
+      SET status = 'archived', authority = 'excluded', archived_at = datetime('now'), updated_at = datetime('now')
+      WHERE project_id = ? AND id = ?
+    `);
+    let archived = 0;
+    for (const row of rows) {
+      let payload: any = {};
+      try { payload = JSON.parse(row.payload || '{}'); } catch { payload = {}; }
+      const stage = String(payload?.stage || payload?.state || payload?.status || '').toLowerCase();
+      if (payload?.resolved === true || ['resolved', 'ended', 'dead', 'closed', 'completed', 'archived'].includes(stage)) {
+        archive.run(projectId, row.id);
+        archived += 1;
+      }
+    }
+    return archived;
   }
 
   analyzeImpact(projectId: string, body: {
@@ -1175,6 +1261,10 @@ export class StateItemService {
       { pattern: /回收|揭晓|真相|原来|终于明白/, targetType: 'foreshadowing', targetLabel: '伏笔', title: '伏笔回收', tags: ['foreshadowing', 'emotional_payoff'] },
       { pattern: /规则|禁忌|法则|设定|世界观|制度/, targetType: 'world_setting', targetLabel: '世界观规则', title: '世界观新增规则', tags: ['world'] },
       { pattern: /道具|钥匙|戒指|剑|手机|信物|归属|交给|拿走/, targetType: 'prop', targetLabel: '道具归属', title: '道具归属变化', tags: ['prop_ownership'] },
+      { pattern: /交给|递给|交出|被收走|收下|移交|封存/, targetType: 'prop', targetLabel: '物品移交', title: '物品移交/收走', tags: ['prop_ownership', 'handover'] },
+      { pattern: /孵化|破壳|驯服|认主|灵兽|宠物|妖兽|契约兽/, targetType: 'pet', targetLabel: '宠物/灵兽', title: '宠物/灵兽状态变化', tags: ['pet'] },
+      { pattern: /功法|秘籍|学会|练成|修炼成功|施展|失效/, targetType: 'technique', targetLabel: '功法/技能', title: '功法学习/变化', tags: ['technique'] },
+      { pattern: /突破|晋升|境界|筑基|金丹|元婴|化神|等级提升|池境|灵境/, targetType: 'realm', targetLabel: '境界/等级', title: '境界/等级变化', tags: ['realm'] },
       { pattern: /组织|门派|公司|家族|阵营|联盟|敌对/, targetType: 'organization', targetLabel: '组织关系', title: '组织关系变化', tags: ['organization'] },
       { pattern: /第二天|当天|随后|此前|之后|时间|三年|一夜|清晨|黄昏/, targetType: 'timeline_state', targetLabel: '时间线', title: '时间线推进', tags: ['timeline'] },
       { pattern: /不像他|反常|突然变得|毫无理由|性格大变/, targetType: 'character', targetLabel: '角色一致性', title: '角色行为可能违背世界观', tags: ['character', 'out_of_character', 'needs_transition', 'needs_review'] },

@@ -103,6 +103,26 @@ it('requires action-result patches to touch the exact cited causal assertion bef
  expect(outlineFactPatchSynchronizationIssues(chapter,targeted,[],evidence)).toEqual([]);
  expect(chapter.characterActions[0].result).toBe('因为她没有站起或没有出声，家里补偿落空');
 });
+it('allows the final attempt to complete a true cited action when only the actual execution is missing',()=>{
+ const chapter={
+  content:'负责人交代值班员把原件封在柜里，等上级来调。值班员一条一条记在本子上。',
+  characterActions:[{action:'负责人交代值班员把原件封在柜里，等上级来调',result:'原件封在柜里等上级来调'}],
+  scenes:[{outcome:'原件封在柜里等上级来调'}],
+ };
+ const evidence={gaps:[{actionPath:'characterActions.0.action',resultPath:'characterActions.0.result',
+  actionEvidence:'负责人交代值班员把原件封在柜里，等上级来调',resultEvidence:'原件封在柜里等上级来调',
+  reason:'只有封存待调的交代，未写实际封存动作完成'}]};
+ const additive={'characterActions.0.action':'负责人交代值班员把原件封在柜里，等上级来调；值班员当场把原件装进物证袋封好，放回柜里'};
+ // The first bounded attempt still requires a directly cited repair.
+ expect(outlineFactPatchSynchronizationIssues(chapter,additive,[],evidence).join(' '))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+ // The final attempt accepts a net substantive completion that preserves the true sentence.
+ expect(outlineFactPatchSynchronizationIssues(chapter,additive,[],evidence,{allowAdditiveCompletion:true})).toEqual([]);
+ // Unrelated edits stay rejected even on the final attempt.
+ const unrelated={'content':chapter.content.replace('等上级来调','等上级通知')};
+ expect(outlineFactPatchSynchronizationIssues(chapter,unrelated,[],evidence,{allowAdditiveCompletion:true}).join(' '))
+  .toContain('没有直接修改行动结果审核点名的行动/结果原文');
+});
 it('rejects edits unrelated to an explicitly cited result when the evidence address is wrong',()=>{
  const chapter={content:'回村时卷帘门已关，没人见到关门动作。',
   characterActions:[{action:'柳长顺将四瓶摆上柜台',result:'四瓶摆上了柜台'}]};

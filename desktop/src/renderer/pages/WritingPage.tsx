@@ -430,6 +430,29 @@ const WritingPage: React.FC = () => {
       return;
     }
 
+    // Short story: after the last chapter is saved, run the whole-book review
+    // automatically. Long novels stay on the per-chapter check + ledger.
+    const isShortStory = String((currentProject as any)?.type || '').toLowerCase() === 'short_story';
+    const orderedChapters = [...chapters].sort((a: any, b: any) =>
+      Number(a.chapter_index ?? a.chapterIndex ?? 0) - Number(b.chapter_index ?? b.chapterIndex ?? 0));
+    const lastChapter = orderedChapters[orderedChapters.length - 1] as any;
+    if (isShortStory && lastChapter && lastChapter.id === targetChapterId) {
+      setGenerationTask({ tone: 'working', text: '正文已保存，正在启动全书总校验…' });
+      void api.post('/chain/validate-book', { projectId }, 600000)
+        .then((response: any) => {
+          const report = (response?.data ?? response)?.report;
+          setGenerationTask({
+            tone: report?.consistent === false ? 'error' : 'success',
+            text: report?.consistent === false
+              ? `全书总校验发现 ${report?.contradictions?.length || 0} 项冲突；锁定章只读，未自动改写。`
+              : '全书总校验通过。',
+          });
+        })
+        .catch((error: any) => {
+          setGenerationTask({ tone: 'error', text: `全书总校验未完成：${error?.message || String(error)}` });
+        });
+    }
+
     // The chapter save already runs the canonical derived-data pipeline. Calling
     // the legacy state-extract and post-write-archive endpoints again races that
     // pipeline and can turn a successful save into a misleading failure notice.

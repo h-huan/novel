@@ -191,10 +191,11 @@ describe('creation consistency architecture invariants', () => {
       `SELECT id,"order",title,content FROM outlines WHERE project_id=? AND level='chapter' ORDER BY "order"`
     );
   });
-  it('uses one mandatory final short-outline fact audit without legacy unreachable recheck', () => {
-    const finalAudit = indexOrFail(controllerSource, 'await this.assertOutlineCandidateFacts(projectId, canonicalCreativeBrief, executionStandardForReview,');
-    const persistedOutline = controllerSource.indexOf("db.exec('BEGIN IMMEDIATE')", finalAudit);
-    expect(persistedOutline).toBeGreaterThan(finalAudit);
+  it('keeps per-chapter fact review as the short-outline owner without a duplicate final aggregate', () => {
+    expect(controllerSource).toContain('Per-chapter fact reviews already cover every chapter');
+    expect(controllerSource).not.toContain('const pendingOutlineFacts = preparedChapters.map');
+    expect(controllerSource).toContain('await reviewSourceBoundaries(candidateBundle as typeof generatedBundle)');
+    expect(controllerSource).toContain("db.exec('BEGIN IMMEDIATE')");
     expect(controllerSource).not.toContain('completeOutlineFactsReviewed');
     // All accepted earlier chapters are still sent as source facts; the full
     // responsibilities remain. Do not resend a redundant prefix of that plan.
@@ -206,7 +207,12 @@ describe('creation consistency architecture invariants', () => {
     expect(controllerSource).toContain('executionStandardForReview+futureResponsibilityReviewContext');
     expect(controllerSource).toContain('后续章节未兑现任务（仅是规划，不是已发生的证据）');
     expect(indexOrFail(controllerSource, 'const futureResponsibilityReviewContext')).toBeLessThan(
-      indexOrFail(controllerSource, 'let dependencyCheck = await reviewChapterDependencies(chData'));
+      indexOrFail(controllerSource, 'const reviewChapterSeam=async()=>'));
+    // The boundary seam review is an independent small Gate and runs alongside
+    // the existing fact/action review, not after it as another serial stage.
+    expect(controllerSource).toContain('const [dependencySettled,seamSettled]=await Promise.allSettled');
+    expect(controllerSource).toContain('creation_chapter_seam_review');
+    expect(controllerSource).toContain('跨章衔接矛盾');
 
     expect(controllerSource).not.toContain('completedTaskBoundary');
     expect(controllerSource).not.toContain('nextTaskBoundary');
@@ -407,6 +413,13 @@ describe('creation consistency architecture invariants', () => {
     expect(worldBoundaryAt).toBeLessThan(worldReturnAt);
     expect(controllerSource).toContain('失败状态写入失败');
     expect(controllerSource).not.toContain("catch {}\n      this.emitProjectProgress(projectId, { type: 'error', cancelled:");
+  });
+
+  it('keeps accepted-outline progress outside Canon and clears it only after activation', () => {
+    expect(controllerSource).toContain('creation_outline_progress');
+    expect(controllerSource).toContain('persistCreationOutlineProgress(projectId, acceptedOutlineSnapshot)');
+    expect(controllerSource).toContain('DELETE FROM creation_outline_progress WHERE project_id=?');
+    expect(controllerSource).toContain('@Get(\'creation-progress/:projectId\')');
   });
 
 });

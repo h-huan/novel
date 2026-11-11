@@ -1,6 +1,6 @@
 import { buildChapterResponsibilityAuditPrompt, chapterResponsibilityPlanningDirective, CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE } from '../../shared/src/chapter-responsibility-review';
 import {describe,expect,it} from 'vitest';
-import {chapterConditionReviewIssues,chapterConditionPlanningGapIssues,materializeChapterConditionSources,chapterConditionTaskAnchors,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
+import {chapterConditionReviewIssues,chapterConditionPlanningGapIssues,materializeChapterConditionSources,chapterConditionTaskAnchors,chapterConditionBridgeAnchorsVerified,coerceUnprovenConditionChecks} from './chapter-condition-review';
 const plan=[{chapter:1,responsibility:'住户取出钥匙打开门',prerequisites:['住户持有旧钥匙'],timeline:'当夜',exitState:'主角已进入屋内'},{chapter:2,responsibility:'主角翻开抽屉取得文件',prerequisites:['主角已进入屋内'],timeline:'进入后',exitState:'主角持有文件'}];
 const audit=()=>({consistent:true,contradictions:[],conditionChecks:plan.map(row=>({chapter:row.chapter,taskEvidence:row.responsibility,status:'supported',bridgeSource:'body',bridgeEvidence:row.responsibility,reason:'本章写出实际取得条件和执行动作'}))});
 describe('source contract regression',()=>{
@@ -42,6 +42,38 @@ it('checks the actual promised exit state before short detail generation, not ju
  expect(chapterConditionReviewIssues(value,plan,'{}',false,true)).toEqual([]);
  (value.conditionChecks[0] as any).exitStateEvidence=plan[1].exitState;
  expect(chapterConditionReviewIssues(value,plan,'{}',false,true).length).toBeGreaterThan(0);
+});
+
+it('binds a supported prior-chapter acquisition when the reviewer names it in prose but omits the address',()=>{
+ const plan2=[
+  {chapter:1,responsibility:'法医复检写明他杀征象，中队长已到场看过结论',prerequisites:[],timeline:'当夜',exitState:'复检结论已出'},
+  {chapter:2,responsibility:'中队长依据复检结论作出立案，并让殡仪馆暂缓火化',prerequisites:['复检结论'],timeline:'次日下午',exitState:'已立案'},
+ ];
+ const value:any={consistent:true,contradictions:[],conditionChecks:[
+  {chapter:1,status:'supported',bridgeSource:'body',bridgeEvidence:plan2[0].responsibility,reason:'本章写出实际取得条件和执行动作'},
+  {chapter:2,status:'supported',bridgeSource:'body',reason:'第1章法医复检写明他杀征象，结论在前章实际完成并仍有效'},
+ ]};
+ const anchors=chapterConditionTaskAnchors(plan2);const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ const coerced=coerceUnprovenConditionChecks(value,plan2,'{}',check=>chapterConditionBridgeAnchorsVerified(check,plan2,byId,'{}'),true);
+ expect(coerced.conditionChecks[1].status).toBe('supported');
+ expect(coerced.conditionChecks[1].bridgeAnchorIds).toEqual(['chapter:c1:task']);
+ const bound=materializeChapterConditionSources(coerced,plan2);
+ expect(chapterConditionReviewIssues(bound,plan2,'{}',check=>chapterConditionBridgeAnchorsVerified(check,plan2,byId,'{}'),true).join('；')).not.toContain('第2章supported缺少');
+});
+
+it('binds a two-character prior term such as 复检 when the reviewer names the prior chapter',()=>{
+ const plan2=[
+  {chapter:1,responsibility:'复检结论已出',prerequisites:[],timeline:'当夜',exitState:'复检结论已出'},
+  {chapter:2,responsibility:'依据复检结论立案',prerequisites:['复检结论'],timeline:'次日下午',exitState:'已立案'},
+ ];
+ const value:any={consistent:true,contradictions:[],conditionChecks:[
+  {chapter:1,status:'supported',bridgeSource:'body',bridgeEvidence:plan2[0].responsibility,reason:'本章写出实际取得条件和执行动作'},
+  {chapter:2,status:'supported',bridgeSource:'body',reason:'第1章复检结论已出，本章依据该结论立案'},
+ ]};
+ const anchors=chapterConditionTaskAnchors(plan2);const byId=new Map(anchors.map(anchor=>[anchor.id,anchor]));
+ const coerced=coerceUnprovenConditionChecks(value,plan2,'{}',check=>chapterConditionBridgeAnchorsVerified(check,plan2,byId,'{}'),true);
+ expect(coerced.conditionChecks[1].status).toBe('supported');
+ expect(coerced.conditionChecks[1].bridgeAnchorIds).toEqual(['chapter:c1:task']);
 });
 
 describe('short and long preflight evidence share an exact chapter source contract',()=>{

@@ -188,8 +188,20 @@ export function alignOutlineFactCountProjections(
  * semantic re-review. No dates are computed and no text is changed here.
  * Require an identical full event clause on both sides of one changed duration;
  * unrelated uses of the same number, ambiguous rewrites and prior chapters are
- * intentionally left to the independent fact/action gates. */
-export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>,patch:unknown,defects:readonly string[],actionEvidence?:{gaps?:readonly {actionPath?:string|null;resultPath?:string|null;actionEvidence?:string;resultEvidence?:string;reason?:string}[]}):string[]{
+ * intentionally left to the independent fact/action gates.
+ *
+ * An action/result audit can reject a TRUE assertion because it does not yet
+ * show an actual execution or necessary condition. The valid repair is then
+ * additive: keep the cited sentence and add the missing executed action in the
+ * same authorized field. The final patch attempt may take that route; the
+ * independent semantic re-review still decides whether the gap is closed. The
+ * strict first attempt and the deterministic conflict/count checks stay strict. */
+export function outlineFactPatchSynchronizationIssues(
+ chapter:Record<string,any>,patch:unknown,defects:readonly string[],
+ actionEvidence?:{gaps?:readonly {actionPath?:string|null;resultPath?:string|null;actionEvidence?:string;resultEvidence?:string;reason?:string}[]},
+ options?:{allowAdditiveCompletion?:boolean},
+):string[]{
+ const allowAdditiveCompletion=options?.allowAdditiveCompletion===true;
  const next=applyOutlineFactPatch(chapter,patch);
  const leaves=(value:unknown,path='',rows=new Map<string,string>()):Map<string,string>=>{
   if(typeof value==='string')rows.set(path,value);
@@ -231,6 +243,24 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
   let end=at+quote.length;while(end<value.length&&!delimiter.test(value[end]))end++;
   return value.slice(start,end).trim()||quote;
  };
+ const substantiveLength=(value:string)=>value.replace(/[\s，。！？；：、,.!?;:]/g,'').length;
+ // The audit may name a true action/result and still reject it because the
+ // actual execution or necessary condition is missing. Adding that execution
+ // in the SAME cited field preserves the true assertion; it is not an
+ // unrelated edit. Require a net substantive insertion and keep the whole
+ // cited clause verbatim so a rewrite cannot masquerade as a completion.
+ const addsSubstantiveEvidence=(before:string,after:string,quote:string):boolean=>{
+  if(!quote||!before.includes(quote))return false;
+  const clause=evidenceClause(before,quote);
+  if(!clause||!after.includes(clause))return false;
+  let prefix=0;while(prefix<before.length&&prefix<after.length&&before[prefix]===after[prefix])prefix++;
+  let suffix=0;while(suffix<before.length-prefix&&suffix<after.length-prefix
+    &&before[before.length-1-suffix]===after[after.length-1-suffix])suffix++;
+  const inserted=after.slice(prefix,after.length-suffix);
+  const removed=before.slice(prefix,before.length-suffix);
+  return substantiveLength(inserted)>substantiveLength(removed)
+    &&substantiveLength(inserted)>=8;
+ };
  const directlyChangesEvidence=(path:string,quote:string|undefined):boolean=>{
   const target=normalizePath(path);
   for(const [oldPath,before] of old){
@@ -248,16 +278,19 @@ export function outlineFactPatchSynchronizationIssues(chapter:Record<string,any>
      &&normalizePath(oldPath)===target&&before.length-suffix===prefix
      &&after.slice(prefix,after.length-suffix).replace(/[\s，。！？；：、,.!?;:]/g,'').length>=8;
    const literal=String(quote||'').trim();
-   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal))||narrativeInsertion;
+   const additive=allowAdditiveCompletion&&addsSubstantiveEvidence(before,after,literal);
+   if(literal&&before.includes(literal))return changeTouchesFragment(before,after,evidenceClause(before,literal))||narrativeInsertion||additive;
    const escaped=literal?JSON.stringify(literal).slice(1,-1):'';
-   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped))||narrativeInsertion;
+   if(escaped&&before.includes(escaped))return changeTouchesFragment(before,after,evidenceClause(before,escaped))||narrativeInsertion
+     ||(allowAdditiveCompletion&&addsSubstantiveEvidence(before,after,escaped));
    // Audit anchors retain the JSON-escaped spelling of quoted/newline text,
    // while chapter leaves contain actual characters. Decode only valid JSON
    // escapes before declaring an explicit address mismatched.
    if(literal){try{
     const decoded=JSON.parse('"'+literal+'"');
     if(typeof decoded==='string'&&before.includes(decoded))
-     return changeTouchesFragment(before,after,evidenceClause(before,decoded))||narrativeInsertion;
+     return changeTouchesFragment(before,after,evidenceClause(before,decoded))||narrativeInsertion
+       ||(allowAdditiveCompletion&&addsSubstantiveEvidence(before,after,decoded));
    }catch{}}
    // If the auditor supplies an explicit quote which cannot be found at this
    // address, changing any other text in that field does not repair this gap.

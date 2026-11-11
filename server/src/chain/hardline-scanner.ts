@@ -70,7 +70,7 @@ export const LANGUAGE_HARDLINE_RULE_IDS: readonly string[] = [
   // 段长/句长/标点密度/词频/比喻/生理反应等启发式只能作为语义复核证据，不能直接阻断。
   '15c', '15d', '33', '35', '35b', '42', '44',
   '54-measure-word-mismatch', '56-punct-stacking',
-  'literal-character-count',
+  'meta-narration',
 ];
 
 /** 判断某条扫描命中是否属于跨平台语言硬伤（兼容规则号带后缀的情况） */
@@ -125,6 +125,18 @@ export function detectForbiddenTells(
       snippet:finding.evidence,position:`offset ${finding.start}-${finding.end}`,
       hitCharOffsets:[finding.start],occurrenceCount:1,
     });
+    // Half-width punctuation between two Han characters is a Chinese-prose
+    // typo, not a style choice. English, numbers, URLs and code never have Han
+    // on both sides, so they are untouched.
+    for(const match of content.matchAll(/([㐀-䶿一-鿿])([,;:?!])([㐀-䶿一-鿿])/g)) {
+      const offset=match.index!+1;
+      findings.push({
+        ruleId:'punctuation-width',
+        message:`中文叙述中夹用半角标点“${match[2]}”；改为对应全角标点，英文、数字和代码内部不处理`,
+        snippet:`${match[1]}${match[2]}${match[3]}`,position:`offset ${offset}`,
+        hitCharOffsets:[offset],occurrenceCount:1,
+      });
+    }
 
     // ===== 平台化排版/节奏策略（关键：各平台是各平台风格，扫描器不得一刀切） =====
     // 番茄/抖音/七猫/小红书/规则怪谈等"短段落、快节奏"平台，短段独立成段、人名/称谓短句起段
@@ -258,6 +270,35 @@ export function detectForbiddenTells(
           });
           break;
         }
+      }
+    }
+
+    // ===== meta-narration：章节编号/创作术语漏进正文（硬红线） =====
+    // 章纲、合同来源里本来就有“第1章/第2章/本章”，模型会把它当成故事内事实照抄。
+    // 只在叙述层检查，引号内对白可能是故事内人物在说书名/章节，不误报。
+    const metaTells: Array<{ pattern: RegExp; message: string }> = [
+      { pattern: /第\s*[0-9一二三四五六七八九十百零〇两]+\s*章/, message: '正文出现章节编号（如“第一章”）；这是创作元叙述，必须改成故事内时间/场景表述' },
+      { pattern: /(?:本|这一|上|下|前|后)章/, message: '正文出现“本章/上一章/下一章”等章节元叙述；必须改成故事内表述' },
+      { pattern: /读者(?:们)?/, message: '正文出现“读者”这一创作元叙述；必须改成故事内人物/旁人视角' },
+      { pattern: /(?:作者|笔者|编者)/, message: '正文出现“作者/笔者/编者”这一创作元叙述；必须改成故事内表述' },
+      { pattern: /(?:大纲|剧情)(?:里|中|上|外|要求|安排)?/, message: '正文出现“大纲/剧情”等创作术语；必须改成故事内表述' },
+    ];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const narrative = p.replace(/“[^”]*”|「[^」]*」|『[^』]*』|"[^"]*"/g, '');
+      for (const tell of metaTells) {
+        const match = narrative.match(tell.pattern);
+        if (!match) continue;
+        const offset = content.indexOf(match[0], paraSpans[i]?.start ?? 0);
+        findings.push({
+          ruleId: 'meta-narration',
+          message: tell.message,
+          snippet: slice(p),
+          position: `第 ${i + 1} 段`,
+          hitCharOffsets: offset >= 0 ? [offset] : [],
+          occurrenceCount: 1,
+        });
+        break;
       }
     }
 

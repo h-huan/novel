@@ -91,3 +91,27 @@ it('keeps physical generation runs but updates one artifact report across retrie
     expect((db.prepare("SELECT COUNT(*) n FROM writing_quality_reports WHERE source_type='artifact_quality'").get() as any).n).toBe(1);
   } finally { db.close(); }
 });
+
+it('does not re-mark an advisory-only partial score as not_evaluated', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    await new Migrator(db).runMigrations();
+    const database = { getDb: () => db } as any;
+    const project = seedAcceptanceProject(db, { title: '建议级不阻断' });
+    const metrics = new GenerationMetricsService(database);
+    const dimensions = Object.fromEntries(SCORE_DIMENSIONS.map(key => [key, {
+      score: 86, status: 'evaluated', reason: '有当前证据', evidence: ['证据'],
+    }])) as any;
+    const run = metrics.beginRun(project.id, 'chapter', '正文', undefined, 'body_first', 1);
+    const gate = metrics.saveRunScore(run.id, project.id, {
+      stage: 'chapter', overallScore: 86, coverage: 1, dimensions, status: 'partial',
+      issues: [{
+        ruleId: 'ai_trace.particle_overuse', severity: 'medium', status: 'open',
+        evaluation: 'evidenced', message: '“了”密度偏高，建议局部调整',
+        evidence: { quote: '证据', start: 0, end: 2 },
+      }],
+    } as any);
+    expect(gate.status).toBe('passed');
+    expect(gate.passed).toBe(true);
+  } finally { db.close(); }
+});

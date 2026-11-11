@@ -21,14 +21,19 @@ describe('whole chapter review contract',()=>{
     const result=parseChapterAlignmentReview(JSON.stringify(value));expect(result.errors).toEqual([]);expect(result.value.readerGoals).toEqual(goals);expect(result.value.evidence).toEqual(evidence);
     expect(result.value.pass).toBe(false);expect(result.value.contradictions).toEqual(value.contradictions);expect(result.value.prosePassed).toBe(false);
   });
-  it('does not guess between conflicting duplicates or default missing reader goals',()=>{
+  it('does not guess between conflicting duplicates and fills missing reader goals as unknown',()=>{
     const value=full();value.sourceQualityAudit.readerGoals={click:{status:'unknown'}};
     expect(parseChapterAlignmentReview(JSON.stringify(value)).errors.join('')).toContain('相互不同');
-    delete value.readerGoals;delete value.sourceQualityAudit.readerGoals;expect(parseChapterAlignmentReview(JSON.stringify(value)).invalidPaths).toContain('readerGoals');
+    delete value.readerGoals;delete value.sourceQualityAudit.readerGoals;
+    const parsed=parseChapterAlignmentReview(JSON.stringify(value));
+    expect(parsed.invalidPaths).not.toContain('readerGoals');
+    expect(parsed.value.readerGoals).toMatchObject({
+      click:{status:'unknown'},completion:{status:'unknown'},sharing:{status:'unknown'},immersion:{status:'unknown'},
+    });
   });
   it('patches only invalid fields and refuses duplicate, omitted or valid-field edits',()=>{
-    const value=full();value.pass=false;value.contradictions=[{summary:'原有事实冲突'}];delete value.readerGoals;
-    const original=parseChapterAlignmentReview(JSON.stringify(value));const patch={corrections:[{path:'readerGoals',value:full().readerGoals}]};
+    const value=full();value.pass=false;value.contradictions=[{summary:'原有事实冲突'}];delete value.causalAudit;
+    const original=parseChapterAlignmentReview(JSON.stringify(value));const patch={corrections:[{path:'causalAudit',value:full().causalAudit}]};
     const merged=mergeChapterReviewContractCorrection(original,patch);expect(merged.contradictions).toEqual(value.contradictions);expect(merged.pass).toBe(false);expect(parseChapterAlignmentReview(JSON.stringify(merged)).errors).toEqual([]);
     expect(chapterReviewContractCorrectionDirective(original)).toContain('不要重发完整报告');
     for(const corrections of [[],[{path:'pass',value:true}],[...patch.corrections,...patch.corrections]])expect(()=>mergeChapterReviewContractCorrection(original,{corrections})).toThrow('必须且仅');
@@ -61,6 +66,17 @@ describe('fixed source action coverage',()=>{
  it('retains exact stable source rows including escaped quotes and repeats',()=>{expect(chapterObligationCatalog(outline+'\n人物行动：'+first)).toEqual([{ref:'M1',source:first},{ref:'M2',source:second}]);});
  it('does not accept a shortened reviewer inventory or claim downstairs proves the floor',()=>{const catalog=chapterObligationCatalog(outline);const row={ref:'M1',status:'covered',evidence:['甲走进门厅。'],reason:'已经走到门厅，所以认为完整行动已经完成。'};expect(validateChapterObligationReview([row],catalog,'甲走进门厅。').errors.join('')).toContain('明确楼层');expect(validateChapterObligationReview([row],catalog,'甲走进门厅。').errors.join('')).toContain('漏项：M2');});
  it('normalizes Chinese floors without forcing source prose and preserves missing action findings',()=>{const catalog=chapterObligationCatalog(outline),body='甲到了14层，核对门牌后离开。';const result=validateChapterObligationReview([{ref:'M1',status:'covered',evidence:[body],reason:'本人已到指定楼层，核对门牌后离开。'},{ref:'M2',status:'missing',evidence:[],reason:'正文没有乙保存记录的行动及留存结果。'}],catalog,body);expect(result.errors).toEqual([]);expect(result.findings).toHaveLength(1);});
+ it('keeps confirmed highlights in the fixed obligation inventory',()=>{
+  const withHighlight=outline+'\n高光场景：\n- 主角当众拒绝签字（前文已铺垫）\n- 三处签字对上是同一只手（值班室桌角）';
+  const catalog=chapterObligationCatalog(withHighlight);
+  expect(catalog.map(row=>row.source)).toContain('主角当众拒绝签字（前文已铺垫）');
+  expect(catalog.map(row=>row.source)).toContain('三处签字对上是同一只手（值班室桌角）');
+  const inline=chapterObligationCatalog('爽点设置：主角当众拒绝签字（前文已铺垫）；三处签字对上是同一只手');
+  expect(inline.map(row=>row.source)).toContain('主角当众拒绝签字（前文已铺垫）');
+  expect(inline.map(row=>row.source)).toContain('三处签字对上是同一只手');
+  const duplicateViews=chapterObligationCatalog('爽点设置：净面摸到耳机（老周放手）；净面摸到耳机（另一个触发）\n高光场景：\n- 净面摸到耳机（第三个触发）');
+  expect(duplicateViews.filter(row=>row.source.includes('净面摸到耳机'))).toHaveLength(1);
+ });
 });
 
 it('shares the same fixed author inventory between writing input and complete review skeleton',()=>{

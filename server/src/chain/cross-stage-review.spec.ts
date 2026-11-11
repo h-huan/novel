@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeCrossStagePathDesign } from './cross-stage-review';
-import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, bindCrossStagePromiseEvidence, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, crossStageAdvisories, crossStageBlockingIssues, describeCrossStageReviewValidation } from './cross-stage-review';
+import { bindCrossStageRepairActionCoordinates, crossStageRepairObligations, crossStageRepairPlanDirective, describeCrossStageRepairPlanValidation, bindCrossStagePromiseEvidence, crossStagePromiseCatalog, crossStagePromiseReviewInputs, crossStagePromiseFindings, crossStageAdvisories, crossStageBlockingIssues, describeCrossStageReviewValidation, crossStageReviewDirective, crossStageFindingIsDirectChapterConflict } from './cross-stage-review';
 
 const verdict = { consistent: true, contradictions: [], unrelatedInventions: [] };
 describe('provisional upstream path design',()=>{
@@ -26,6 +26,13 @@ describe('cross-module review classification and protocol', () => {
     expect(crossStageRepairObligations(brief,['人物资料中的取得条件不足'],rows,['chapter-dependent']).map(row=>row.ref)).toEqual(['P2']);
     expect(crossStageRepairObligations(brief,['book-B-content.scenes.1.outcome-0：来源条件不足'],[...rows,{id:'book',chapterIndex:null}],['book','chapter-risk']).map(row=>row.ref)).toEqual(['P2']);
     expect(crossStageRepairObligations(brief,['【阶段兑现 P1 chapter-before】取得失败']).map(row=>row.ref)).toEqual(['P1']);
+    const direct=JSON.stringify({location1:'本批·第2章.content',quote1:'他已经回到住处',
+      location2:'本批·第3章.content',quote2:'他没有回住处',conflict:'已完成动作被写成未发生'});
+    expect(crossStageFindingIsDirectChapterConflict(direct)).toBe(true);
+    // A direct pair of chapter quotes is repaired locally; it must not become
+    // a stage-outcome path-design obligation merely because it names a chapter.
+    expect(crossStageRepairObligations(brief,[direct],rows,rows.map(row=>row.id))).toEqual([]);
+    expect(crossStageFindingIsDirectChapterConflict('【阶段兑现 P1 chapter-before】'+direct)).toBe(false);
   });
   it('binds only an unambiguous verbatim action in an actual edited position, then applies the unchanged strict plan gate',()=>{
     const obligations=[{ref:'P1',path:'scopeBreakdown[0].outcome',outcome:'有权限机构完成取得和核验'}];
@@ -110,6 +117,24 @@ describe('cross-module review classification and protocol', () => {
     expect(describeCrossStageReviewValidation(referenced,brief,candidate)).toEqual([]);
     expect(bindCrossStagePromiseEvidence(referenced,candidate).promiseChecks[0].candidateEvidence).toBe('甲只有猜测，仍不能采取行动。');
     expect(describeCrossStageReviewValidation({...referenced,promiseChecks:referenced.promiseChecks.map(item=>({...item,candidateEvidenceRef:'S9999'}))},brief,candidate).join('；')).toContain('编号不存在');
+  });
+  it('rejects a whole-chapter evidence dump in the cross-stage review', () => {
+    const finding={canonicalSource:'chapters[0].content',conflictingSource:'chapters[1].content',evidence:'长'.repeat(5000),impact:'物证位置互斥'};
+    expect(describeCrossStageReviewValidation({...verdict,consistent:false,contradictions:[finding]}).join('；'))
+      .toContain('必要连续短句');
+    const concise={...finding,evidence:'三份单子留在值班室。'};
+    expect(describeCrossStageReviewValidation({...verdict,consistent:false,contradictions:[concise]})).toEqual([]);
+  });
+  it('lets the whole-story review omit promiseChecks while the dedicated stage review owns fulfillment', () => {
+    const brief=JSON.stringify({confirmedStory:{scopeBreakdown:[{outcome:'甲查明真相并取得主动权。'}]}});
+    const core={consistent:true,contradictions:[],unrelatedInventions:[],warnings:[]};
+    expect(describeCrossStageReviewValidation(core,brief,'{}',{requirePromises:false})).toEqual([]);
+    expect(describeCrossStageReviewValidation(core,brief,'{}').join('；')).toContain('全部固定阶段');
+    expect(crossStageReviewDirective(true,false)).not.toContain('另含promiseChecks');
+    expect(crossStageReviewDirective(true,false)).toContain('固定阶段兑现由独立阶段审查负责');
+    expect(crossStageReviewDirective(true,true)).toContain('另含promiseChecks');
+    expect(crossStageReviewDirective(true,true)).toContain('标签兑现强度');
+    expect(crossStageReviewDirective(true,true)).toContain('不触发 path design');
   });
   it('retains complete structured diagnoses without dropping evidence or requiring a model rewrite', () => {
     const finding={canonicalSource:'总纲.ending 原方法',conflictingSource:'细纲.ending 新方法',evidence:'两处方法尚未同步',impact:'后续状态无法接上'};

@@ -139,7 +139,7 @@ export function chapterResponsibilityPlanningDirective(includeSharedPolicies = t
 }
 
 /** Shared output contract for short and long chapter planning. */
-export const CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE = { chapterResponsibilities: [{chapter:1,title:'原章节标题',function:'章节功能',responsibility:'人物实际执行的唯一推进任务；若结果依赖本章新取得条件，这里先写实际取得动作和可执行顺序',prerequisites:['进入本章时已有且仍有效的条件及来源；新取得动作写在responsibility；普通自主动作允许空数组'],timeline:'继承既定期限的相对时点，不补精确时长',exitState:'本章行动实际产生的状态，未完成目标明确保留'}] };
+export const CHAPTER_RESPONSIBILITY_PLAN_EXAMPLE = { chapterResponsibilities: [{chapter:1,title:'原章节标题',function:'章节功能',responsibility:'人物实际执行的唯一推进任务；若结果依赖本章新取得条件，这里先写实际取得动作和可执行顺序',prerequisites:['进入本章时已有且仍有效的条件及来源；新取得动作写在responsibility；普通自主动作允许空数组'],timeline:'继承既定期限的相对时点，不补精确时长',exitState:'本章行动实际产生的状态，未完成目标明确保留',threads:['本章推进/触碰的支线或人物弧，一句话','本章埋设或回收的伏笔，一句话并标注 short/cross/volume/book']}] };
 
 /** The same entry/exit contract must survive analysis -> volume -> detail. */
 export function describeChapterResponsibilityPlan(value: unknown, chapterLimit?: unknown): string[] {
@@ -155,6 +155,14 @@ export function describeChapterResponsibilityPlan(value: unknown, chapterLimit?:
     }
     if (!Array.isArray(chapter?.prerequisites) || chapter.prerequisites.some((item: unknown) => typeof item !== 'string' || !item.trim())) {
       issues.push(`第${index + 1}章进入条件无效`);
+    }
+    // Optional "which threads this chapter advances" (sub-plot / character arc /
+    // layered foreshadowing). If provided it must be a clean list of short lines;
+    // the creation prompt asks for it so the prose has more than one thin thread.
+    if (chapter?.threads !== undefined
+      && (!Array.isArray(chapter.threads) || chapter.threads.length === 0
+        || chapter.threads.some((item: unknown) => typeof item !== 'string' || !item.trim()))) {
+      issues.push(`第${index + 1}章支线/人物弧/伏笔取线无效`);
     }
   });
   return issues;
@@ -212,6 +220,7 @@ export function buildChapterResponsibilityRepairPrompt(input: ChapterResponsibil
     `【本轮修复策略】${input.strategyDirective}`,
     `【可执行修复合同】${JSON.stringify(input.issueContracts)}`,
     "合同中实际存在 forbiddenTask 的规则冲突必须从问题章删除违规机制，requiredReplacement 是受审查器约束的替代方向；仅有 raw 条件取得缺口时不得虚构 forbiddenTask，也不能任意删除原已成立行动，应在既定资源与人物动机内补齐实际取得/传递/生效动作或修正尚未生效的阶段结果。retain 只能保留已确定的目标，不能保留违规机制。requiredReplacement不是其机制已经成立的证明。修订后沿受影响行动到最终exitState核对整条必要条件链，不能只补被点名的一步就重复结论；普通自主行动不额外追加程序。必要条件落实为人物行动、可用资源与具体结果，不把自检过程写成正文解释段。",
+    "【物件保管链一次修完】若本次补写/修改某物件的取得动作，必须同时核对后续所有章节的 exitState、characterActions 和实际出场：该物件在哪一章交出、被收走、遗失或仍在身上；若后续某章 exit 写“口袋空了/没有第二件/物件不在身上”，必须在同一修复里补该章的移交/收走动作，并同步 content/exitState/characterActions。不能只补取得不补移交；示例：第1章抽出三页登记单 → 第2章随身比对 → 第3章出示 → 第4章随耳机交给驻馆民警。",
     `【当前章节分工】${JSON.stringify(input.currentPlan)}`,
     `【已确认题材】${input.creativeBrief}`,
     `【已确认故事闭环】${JSON.stringify(input.shortStoryCard || {})}${input.worldContinuityDirective}`,
@@ -222,8 +231,8 @@ export function buildChapterResponsibilityRepairPrompt(input: ChapterResponsibil
     input.entryExitContract ? STORY_CAUSAL_REVIEW_POLICY : '',
     "resolutions必须与本轮合同逐项对应，issueIndex不得遗漏或重复，并分别写明删除了什么、替换成什么、依据哪条判据与已确认规则。failureReason是原机制不能成立的已举证原因，替代路径必须消除这一原因，不能只换执行者或同义措辞。",
     input.entryExitContract
-      ? `只输出JSON对象：{"resolutions":[{"issueIndex":1,"chapters":[3],"removedMechanism":"已删除机制","replacementMechanism":"实际替代任务","ruleEvidence":"遵守的判据与来源"}],"chapterResponsibilities":[{"chapter":1,"title":"原章节标题","function":"原章节功能","responsibility":"任务","prerequisites":["必要条件的具体来源、取得途径及在本章仍有效的依据"],"timeline":"累计期限与相对时点","exitState":"实际出口状态"}]}。被取消或过期的条件不得只重复名称当作仍可用；优先由已有能力且有可见动机的人完成必要触发，不给人物新增无来源权限。`
-      : `只输出JSON对象：{"resolutions":[{"issueIndex":1,"chapters":[3],"removedMechanism":"已删除的违规机制","replacementMechanism":"实际替代任务","ruleEvidence":"遵守的判据编号与已确认规则逐字证据"}],"chapters":[{"order":1,"title":"标题","function":"功能","responsibility":"本章独有推进任务、揭示与章末结果"}]}。`,
+      ? `只输出JSON对象：{"resolutions":[{"issueIndex":1,"chapters":[3],"removedMechanism":"已删除机制","replacementMechanism":"实际替代任务","ruleEvidence":"遵守的判据与来源"}],"chapterResponsibilities":[{"chapter":1,"title":"原章节标题","function":"原章节功能","responsibility":"任务","prerequisites":["必要条件的具体来源、取得途径及在本章仍有效的依据"],"timeline":"累计期限与相对时点","exitState":"实际出口状态","threads":["本章推进/触碰的支线或人物弧，一句","本章埋设或回收的伏笔，一句并标 short/cross/volume/book"]}]}。修复不得丢弃原有 threads；每章须保留或补齐 threads（服务主线的支线/人物弧、章内与跨章伏笔）。被取消或过期的条件不得只重复名称当作仍可用；优先由已有能力且有可见动机的人完成必要触发，不给人物新增无来源权限。`
+      : `只输出JSON对象：{"resolutions":[{"issueIndex":1,"chapters":[3],"removedMechanism":"已删除的违规机制","replacementMechanism":"实际替代任务","ruleEvidence":"遵守的判据编号与已确认规则逐字证据"}],"chapters":[{"order":1,"title":"标题","function":"功能","responsibility":"本章独有推进任务、揭示与章末结果","threads":["本章推进/触碰的支线或人物弧，一句","本章埋设或回收的伏笔，一句"]}]}。`,
   ].join("\n");
 }
 

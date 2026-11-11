@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { VectorIndexService } from '../rag/vector-index.service';
 import { CHAPTER_WORD_RANGE } from '../../shared/src';
@@ -35,11 +35,63 @@ const RECOVERY_PROFILE_TABLES = ['world_system_profiles', 'character_extended_pr
 @Injectable()
 export class GenerationRecoveryService {
   private readonly runningProjects = new Set<string>();
+  private readonly logger = new Logger(GenerationRecoveryService.name);
 
   constructor(
     private readonly database: DatabaseService,
     private readonly vectorIndex: VectorIndexService,
   ) {}
+
+  /** Orphaned creations after a restart or a dead task otherwise show as
+   * "creating" forever with no way to close them. A `creating` project whose
+   * last generation run is no longer running and has been idle past a normal
+   * stage gap is marked failed, so it can be resumed or closed from diagnostics.
+   * Thresholds exceed the longest single model timeout (and the current
+   * process's own tasks are skipped), so an in-flight slow call is never
+   * mistaken for an orphan. */
+  async onApplicationBootstrap(): Promise<void> {
+    this.sweepOrphanedCreations();
+    const timer = setInterval(() => this.sweepOrphanedCreations(), 5 * 60 * 1000);
+    timer.unref?.();
+  }
+
+  private sweepOrphanedCreations(): void {
+    try {
+      const db = this.database.getDb();
+      const now = Date.now();
+      const idleMs = 10 * 60 * 1000;
+      const hungRunningMs = 30 * 60 * 1000;
+      const projects = db.prepare("SELECT id,created_at FROM projects WHERE status='creating'")
+        .all() as Array<{ id: string; created_at?: string }>;
+      let marked = 0;
+      for (const project of projects) {
+        if (this.runningProjects.has(project.id)) continue;
+        const last = db.prepare('SELECT status,started_at,finished_at FROM generation_runs WHERE project_id=? ORDER BY rowid DESC LIMIT 1')
+          .get(project.id) as { status?: string; started_at?: string; finished_at?: string } | undefined;
+        const lastAt = last
+          ? new Date(last.finished_at || last.started_at || 0).getTime()
+          : new Date(project.created_at || 0).getTime();
+        if (!Number.isFinite(lastAt) || lastAt <= 0) continue;
+        // A cancelled last run means the creation task itself was stopped (a
+        // user cancel, or a restart that marks every in-flight run cancelled).
+        // It will never advance again, so close it after a short grace. A
+        // failed or succeeded run may still be retried / be between stages, so
+        // those keep the longer idle window. Only a live `running` call keeps the
+        // project open up to the hung-call ceiling.
+        const cancelledMs = 60 * 1000;
+        const limit = last?.status === 'running' ? hungRunningMs
+          : last?.status === 'cancelled' ? cancelledMs
+          : idleMs;
+        if (now - lastAt < limit) continue;
+        db.prepare("UPDATE projects SET status='generation_failed', updated_at=? WHERE id=? AND status='creating'")
+          .run(new Date().toISOString(), project.id);
+        marked += 1;
+      }
+      if (marked > 0) this.logger.log('孤立创建清理：将 ' + marked + ' 个 creating 项目标记为 generation_failed（本次 creating 共 ' + projects.length + ' 个）');
+    } catch (error) { /* the sweep must never block startup */
+      this.logger.warn('孤立创建清理失败：' + String(error));
+    }
+  }
 
   isRunning(projectId: string): boolean {
     return this.runningProjects.has(projectId);
@@ -138,7 +190,8 @@ export class GenerationRecoveryService {
     const isLongNovel = String(project.type) === 'long_novel';
     const targetWords = Number(project.target_words);
 
-    // 长篇采用渐进式细纲：创建时只详细展开前 LONG_DETAIL_OUTLINE_WINDOW 章，
+    // 长篇采用渐进式细纲：创建时只详细展开配置窗口（默认 5 章，见
+    // generation-budgets.json 的 creationDetailWindow），
     // 全书规模的唯一权威在卷大纲 volumes.estimatedChapters。不能再拿当前已细化
     // 章节的 target_words 合计去等于全书 target_words，否则正常长篇必定无法激活。
     let plannedBookChapters = counts.outlineChapters;

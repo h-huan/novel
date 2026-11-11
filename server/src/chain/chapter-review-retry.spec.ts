@@ -76,8 +76,8 @@ it('stores and recovers a time plan only for the same draft and unchanged chapte
 });
 
 it('uses one persisted row for retry parameters and rejects invalid API provenance as a client error',async()=>{
- const {vi}=await import('vitest');const c=Object.create(ChainController.prototype) as any;const run={project_id:'p',chapter_index:1,stage:'chapter',scenario:'writing',output_text:'留存正文'};const get=vi.fn(()=>run);c.db={getDb:()=>({prepare:()=>({get})})};
- expect(c.chapterRetryParameters(undefined,'p',1,'章纲')).toEqual({});expect(get).not.toHaveBeenCalled();expect(c.chapterRetryParameters('r','p',1,'章纲').initialContent).toBe('留存正文');expect(get).toHaveBeenCalledTimes(1);
+ const {vi}=await import('vitest');const c=Object.create(ChainController.prototype) as any;const run={id:'r',project_id:'p',chapter_index:1,stage:'chapter',scenario:'writing',output_text:'留存正文'};const get=vi.fn((sql?:string)=>String(sql||'').includes('ORDER BY started_at DESC')?{id:'r'}:run);c.db={getDb:()=>({prepare:(sql:string)=>({get:()=>get(sql)})})};
+ expect(c.chapterRetryParameters(undefined,'p',1,'章纲')).toEqual({});expect(get).not.toHaveBeenCalled();expect(c.chapterRetryParameters('r','p',1,'章纲').initialContent).toBe('留存正文');expect(get).toHaveBeenCalledTimes(2);
  try{c.chapterRetryParameters('r','other',1,'章纲');throw Error('should fail');}catch(error:any){expect(error.getStatus()).toBe(400);}
 });
 
@@ -105,10 +105,10 @@ it('lists only same-chapter retained prose, marks length limits and protects sav
  const c=Object.create(ChainController.prototype) as any;
  let chapter:any={chapter_index:3,content:''};
  const base={project_id:'p',chapter_index:3,stage:'chapter',scenario:'writing',status:'failed',gate_status:'blocked'};
- const rows=[{...base,id:'long',output_text:'字'.repeat(5001)},{...base,id:'usable',output_text:'字'.repeat(4000)},{...base,id:'json',output_text:'{"pass":true}'},{...base,id:'foreign',project_id:'other',output_text:'字'.repeat(4000)}];
+ const rows=[{...base,id:'long',output_text:'字'.repeat(6601)},{...base,id:'usable',output_text:'字'.repeat(4000)},{...base,id:'json',output_text:'{"pass":true}'},{...base,id:'foreign',project_id:'other',output_text:'字'.repeat(4000)}];
  c.db={getDb:()=>({prepare:(sql:string)=>({get:()=>sql.includes('FROM chapters')?chapter:{settings:'{}'},all:(projectId:string,index:number)=>{expect(projectId).toBe('p');expect(index).toBe(3);return rows;}})})};
  const listed=c.retainedChapterReviewCandidates('p','chapter');
- expect(listed.items.map((x:any)=>[x.runId,x.words,x.canReview])).toEqual([['long',5001,false],['usable',4000,true]]);
+ expect(listed.items.map((x:any)=>[x.runId,x.words,x.canReview])).toEqual([['long',6601,false],['usable',4000,true]]);
  expect(listed.items.every((x:any)=>!('output_text' in x))).toBe(true);
  chapter={chapter_index:3,content:'已保存的正文'};expect(c.retainedChapterReviewCandidates('p','chapter')).toEqual({items:[]});
  chapter=undefined;expect(()=>c.retainedChapterReviewCandidates('p','missing')).toThrow('章节不存在');

@@ -48,7 +48,15 @@ export function deterministicPlatformReview(input: {
     if (row && row.status !== 'ok') issues.push(issue(`platform.${key}`, `${row.label} ${row.value}，目标 ${row.target}`, quoteAt(), row.status === 'bad' ? 'high' : 'medium'));
   }
   const dialogue = byKey.get('dialogueRatio');
-  if (dialogue && dialogue.status !== 'ok') issues.push(issue('platform.dialogue_ratio', `${dialogue.label} ${dialogue.value}，目标 ${dialogue.target}`, quoteAt(), dialogue.status === 'bad' ? 'high' : 'medium'));
+  // 对话占比是平台可读性风险，不是事实/语言硬缺陷：单人夜戏、程序核验、等待场景
+  // 本来就不支持 35% 对白。由语义评审判断“场景明显支持对白却被压成转述”时才升级，
+  // 确定性层不得单独把整章判死（否则每章都要为凑比例加无关对白）。
+  if (dialogue && dialogue.status !== 'ok') issues.push(issue(
+    'platform.dialogue_ratio',
+    `${dialogue.label} ${dialogue.value}，目标 ${dialogue.target}；这是可读性风险，需结合本章场景结构复核，不单独阻断`,
+    quoteAt(),
+    'medium',
+  ));
   const opening = byKey.get('openingHook');
   if (opening?.status === 'bad') issues.push(issue('platform.opening_hook_position', `${opening.advice}；这是表面信号风险，必须由语义评审确认真实阅读承诺是否缺失`, quoteAt(0, target.openingHookChars), 'medium'));
   const ending = byKey.get('endingHook');

@@ -1,5 +1,6 @@
 import { resolveQualityEvidence } from './quality-issue';
 import { STORY_CAUSAL_REVIEW_POLICY } from '../../../shared/src/system-workflow-rules.registry';
+import { LLM_TUNABLES } from '../../config/llm-tunables';
 
 /** Keep every real source clause, its original address and all original text,
  * but don't retransmit the SAME text at the JSON field, sentence and clause
@@ -32,7 +33,67 @@ export function compactCausalProofSourceCatalog<
  });
 }
 
-export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false, compactPlanningProof = false, requiredResultSubset?:readonly string[]) {
+/** Lossless transport aliases for large source catalogs.
+ *
+ * The reviewer only needs an address and its exact text to cite evidence. The
+ * full server-owned catalog keeps source paths and real IDs for validation and
+ * repair, but sending `{id,source,path,text}` for every source string inflates a
+ * 22K-char planning context into hundreds of thousands of characters, and every
+ * shard pays that cost again. Aliases are presentation-only: they are restored
+ * to the real IDs before any binding, coverage or validation step.
+ * Body anchors keep their real IDs because they also identify result rows.
+ */
+export interface CausalPromptTransport {
+  catalog: Array<{id:string;source:string;path?:string;text?:string}>;
+  aliasToReal: Map<string,string>;
+  realToAlias: Map<string,string>;
+}
+
+const CAUSAL_PROMPT_ANCHOR_FIELDS = new Set([
+  'actionAnchorId','actionAnchorIds','bridgeAnchorId','resultAnchorId','resultAnchorIds','beforeStateAnchorId',
+]);
+
+function mapCausalAnchorIds(value: any, mapping: Map<string, string>): any {
+  if (Array.isArray(value)) return value.map(item => mapCausalAnchorIds(item, mapping));
+  if (typeof value === 'string') return mapping.get(value.trim()) ?? value;
+  return value;
+}
+
+/** Rewrite anchor IDs anywhere in a review payload through a mapping.
+ *  Only the known identity fields are touched; free-text reasons are kept. */
+export function mapCausalPromptAnchorIds<T>(value: T, mapping: Map<string, string>): T {
+  const walk = (node: any): any => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === 'object') {
+      const out: Record<string, any> = {};
+      for (const [key, child] of Object.entries(node)) {
+        out[key] = CAUSAL_PROMPT_ANCHOR_FIELDS.has(key) ? mapCausalAnchorIds(child, mapping) : walk(child);
+      }
+      return out;
+    }
+    return node;
+  };
+  return walk(value);
+}
+
+export function buildCausalPromptTransport(
+  anchors: ReadonlyArray<{id:string;source:string;path?:string;text?:string}>,
+): CausalPromptTransport {
+  const compacted = compactCausalProofSourceCatalog(anchors as any);
+  const aliasToReal = new Map<string, string>();
+  const realToAlias = new Map<string, string>();
+  let sequence = 0;
+  const catalog = compacted.map(entry => {
+    if (entry.source === 'body') return entry;
+    const alias = `src${++sequence}`;
+    aliasToReal.set(alias, entry.id);
+    realToAlias.set(entry.id, alias);
+    return { id: alias, source: entry.source, ...(entry.text !== undefined ? { text: entry.text } : {}) };
+  });
+  return { catalog, aliasToReal, realToAlias };
+}
+
+export function causalAuditRepairPrompt(audit: unknown, errors: string[], content: string, sources: Record<string, string>, includePolicy = true, stateContract = false, compactPlanningProof = false, requiredResultSubset?:readonly string[], transport?:CausalPromptTransport, compactSources = false) {
   const targets=causalAuditRepairTargets(audit,errors);
   // This is the SAME selectable catalog used by the citation resolver. For
   // structured outline JSON its addresses are body:v... and clause IDs,
@@ -101,13 +162,28 @@ export function causalAuditRepairPrompt(audit: unknown, errors: string[], conten
         ?{id:anchor.id,source:anchor.source,...(anchor.path?{path:anchor.path}:{})}
         :anchor)
     :focusedAnchors;
-  return {
-    systemPrompt: (lockedMissingResults.length ? '对服务器已锁定编号但尚未审查的结果，首次独立核对其真实行动、前置状态及必要条件；严格保留缺口，不得仅修正编号或假设该结果已通过。' : targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。散会收起资料、实际离场、当面提醒等直接发生的普通动作，只要content已写出相同执行者与动作，supported即可用其真正发生的行动地址作bridgeAnchorId；不得要求另一个人批准这些普通动作，更不能把指令、安排、计划升级成工资已发、人员已更换等独立生效结果。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。',
-    prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(targets.length&&Array.isArray((audit as any)?.transitions)
+  // Presentation-only ids for non-body anchors. The server keeps the full
+  // catalog; every alias is restored before binding and validation.
+  const activeTransport=transport??(compactSources?buildCausalPromptTransport(promptAnchors):undefined);
+  const transportAnchors=activeTransport?activeTransport.catalog:promptAnchors;
+  const promptAudit=activeTransport
+    ?mapCausalPromptAnchorIds(targets.length&&Array.isArray((audit as any)?.transitions)
       ?{status:(audit as any).status,reason:(audit as any).reason,
         retainedValidatedRows:(audit as any).transitions.length-targets.length,
         fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
-      :audit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(lockedMissingResults)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(promptAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好5项，按顺序为[resultOrdinal,actionAnchorId,bridgeAnchorId,status,reason]。resultOrdinal按服务器结果目录的章节顺序及每章resultAnchorIds顺序从1连续编号，恰好每号一条；结果和章号由服务器按唯一编号绑定，禁止重复、漏项、换号。这是完整因果审核的短传输格式，不是抽样或统一判定。每个actionAnchorId以及非空bridgeAnchorId须来自实际目录；supported必须填有效bridgeAnchorId，gap/planned可填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；成立的直接结果通常用8—30字明确行动和必要条件，不复述整段章纲；真实gap须完整解释缺失条件，不限制必要长度。行数必须与本次服务器结果目录完全一致；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。`,
+      :audit,activeTransport.realToAlias)
+    :(targets.length&&Array.isArray((audit as any)?.transitions)
+      ?{status:(audit as any).status,reason:(audit as any).reason,
+        retainedValidatedRows:(audit as any).transitions.length-targets.length,
+        fixOnly:targets.map(index=>({index,...(audit as any).transitions[index]}))}
+      :audit);
+  const promptLockedMissing=activeTransport
+    ?mapCausalPromptAnchorIds(lockedMissingResults,activeTransport.realToAlias)
+    :lockedMissingResults;
+  return {
+    systemPrompt: (lockedMissingResults.length ? '对服务器已锁定编号但尚未审查的结果，首次独立核对其真实行动、前置状态及必要条件；严格保留缺口，不得仅修正编号或假设该结果已通过。' : targets.length ? '只修复因果审查的引用合同，' : stateContract ? '你是独立因果反证核查员。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。' : '独立审查行动与已声称结果是否成立，核对同一引文内的完整先后顺序、必要前提与对手原有能力；前提字段重复结果或结局目标不能充当实际机制证据。') + '保留真实缺口，不改正文、不改分数。只选择下方可选目录中真实存在的原文地址，系统提取原文，禁止重写引文；结构化章纲可能使用body:v及其分句编号，普通正文可能使用body:p编号，不能凭示例猜编号。supported必须填写有效的bridgeAnchorId，gap及planned允许为空。planned仅适用于原文明示的未来安排或线索埋设，不得用来豁免已声称兑现的实际结果。自己取出并保管物件的直接结果，可以选择实际交代其支配和保管状态的同一段作为桥接编号；不必虚构额外条件。散会收起资料、实际离场、当面提醒等直接发生的普通动作，只要content已写出相同执行者与动作，supported即可用其真正发生的行动地址作bridgeAnchorId；不得要求另一个人批准这些普通动作，更不能把指令、安排、计划升级成工资已发、人员已更换等独立生效结果。涉及他人决定、权限、传播或时间的结果，仍须证明对应条件，不能用结果本身证明。内在尝试/回忆/犹豫/决定/情绪（试着/忍住/叫不出/说不出口/心里/觉得/感到）不是外部已兑现结果，不需要独立行动锚点或独立成立条件；可用其自身叙述作为bridge，不得判“动作已发生”或gap。reason与status必须一致：reason若写明条件已直接成立、问答链/交付链已完成或已有条件支撑，status必须为supported（已给出有效bridge即视为条件成立）；gap只能用于reason明确指出缺少哪一项必要条件的行，不得把已成立的结果标成gap。内在态度、记忆或判断已有自身叙述和条件支撑时同样按supported，不因没有独立外部动作判gap。普通正文的地址只有 body:pN 或 body:pN:sM（s=句子）；:c/:v 分句编号只属于结构化章纲 JSON。不得猜测、补齐或改写编号后缀；目录中没有的编号即为无效，必须原样从目录复制。',
+    prompt: `${includePolicy ? STORY_CAUSAL_REVIEW_POLICY : "按已注入QLT-003必要因果判据执行。"}\n原因果账目：${JSON.stringify(promptAudit)}\n校验错误：${errors.join('；')}\n${lockedMissingResults.length?'【服务器锁定的漏审结果；不能改写或改编号，只补真实行动、条件和审核结论】'+JSON.stringify(promptLockedMissing)+'\\n':''}可选原文证据编号（唯一允许的地址全集）：${JSON.stringify(transportAnchors)}\n${targets.length ? `本次仅纠正编号${JSON.stringify(targets)}（从0开始），其它已验证行不能重审、增删或改结论。只返回JSON对象，顶层仅含repairs数组；每个元素包含index（点名的数字索引）、actionAnchorId与resultAnchorId（从上方实际目录复制地址）、bridgeAnchorId（supported必选实际地址，gap/planned可为空）、status（supported、gap或planned）及至少8字的reason。对上方服务器锁定的漏审结果，resultAnchorId可省略、由服务器回填；如提供必须逐字等于其锁定编号，不能换成已审结果或自行改章号。遗漏结果尚未经语义审核，必须真实反证必要条件，不能只修形式或默认supported。禁止输出模板占位编号。` : compactPlanningProof ? '只返回JSON对象，顶层仅含causalAudit对象；对象包含status="evaluated"、至少8字的reason和proofRows数组（不返回transitions）。proofRows每行恰好5项，按顺序为[resultOrdinal,actionAnchorId,bridgeAnchorId,status,reason]。resultOrdinal按服务器结果目录的章节顺序及每章resultAnchorIds顺序从1连续编号，恰好每号一条；结果和章号由服务器按唯一编号绑定，禁止重复、漏项、换号。这是完整因果审核的短传输格式，不是抽样或统一判定。每个actionAnchorId以及非空bridgeAnchorId须来自实际目录；supported必须填有效bridgeAnchorId，gap/planned可填空串。每行status=supported|gap|planned且reason至少8字说明本结果的实际成立条件或缺口；成立的直接结果通常用8—30字明确行动和必要条件，不复述整段章纲；真实gap须完整解释缺失条件，不限制必要长度。行数必须与本次服务器结果目录完全一致；不能借其它行的证明、不能省略真实反对证据。服务器把每行无损转换成完整transitions并逐项执行同一个验证器；漏一项仍会阻断。禁止模板编号、自造依据或整体通过代替逐项判断。' : '只返回JSON对象，顶层仅含causalAudit对象；对象包含status（evaluated或not_applicable）、至少8字的reason与transitions数组。每项transitions包含actionAnchorId、resultAnchorId、bridgeAnchorId、status、reason；每个编号必须从上方实际目录复制，supported的成立条件必须有真实bridgeAnchorId，gap/planned可为空。禁止输出模板占位编号。'}核对输入中全部实际决定处境的关键行动结果；不因项数截掉必要结果，也不为凑项数补普通动作。编号必须从上表逐字选择；不适用须有实际理由；无成立条件时保留gap，不能用计划、主角希望或旁白结论证明已发生的结果。允许用上下文暗示、留白、未到期悬念、信息差或读者可合理推断来支撑结果：若结果没有独立的显式行动，actionAnchorId/actionEvidence 留空，用可逐字定位的暗示或成立条件作为 bridge；不要为满足格式编造行动编号，也不得为过审把暗示改写成直白解释；只有逻辑矛盾、读者无法推断的必要前提缺失、或埋下的伏笔/因果被撇下（违约）时，才判 gap 或阻断。若给出了 actionAnchorId，则它必须是本章真实行动地址（禁止跨章伪造）。`,
+    transport: activeTransport,
   };
 }
 
@@ -152,16 +228,19 @@ export function decodePlanningProofRows(
    // like the documented empty string; it NEVER certifies a supported link.
    // All actual action/result/bridge IDs remain subject to the full source
    // and per-chapter coverage validators after decoding.
-   const actionAnchorId=typeof rawAction==='string'?rawAction.trim():rawAction;
+   const actionAnchorId=typeof rawAction==='string'?rawAction.trim():'';
    const bridgeAnchorId=rawBridge===null&&['gap','planned'].includes(status)
-     ?'':typeof rawBridge==='string'?rawBridge.trim():rawBridge;
-   if(typeof actionAnchorId!=='string'||!actionAnchorId
-      ||typeof bridgeAnchorId!=='string'
-      ||!['supported','gap','planned'].includes(status)
-      ||(status==='supported'&&!bridgeAnchorId)
-      ||typeof reason!=='string'||reason.trim().length<8)
-     throw new Error('精简因果审核第'+(index+1)+'项行动、成立条件、状态或实际解释缺失');
-   return {...expectedRows[ordinal-1],actionAnchorId,bridgeAnchorId,status,reason};
+     ?'':typeof rawBridge==='string'?rawBridge.trim():'';
+   // An invalid status is a structural protocol error → retry the review.
+   if(!['supported','gap','planned'].includes(status))
+     throw new Error('精简因果审核第'+(index+1)+'项状态无效');
+   // A "supported" row without a real action/bridge, or an empty explanation, is
+   // not proof. Treat it as a gap so the existing repair path fixes it, instead
+   // of failing the whole chapter on a single reviewer omission.
+   const effectiveStatus=status==='supported'&&(!actionAnchorId||!bridgeAnchorId)?'gap':status;
+   const effectiveReason=typeof reason==='string'&&reason.trim().length>=8
+     ? reason : '评审未给出可定位的行动或成立条件，按未证明缺口处理';
+   return {...expectedRows[ordinal-1],actionAnchorId,bridgeAnchorId,status:effectiveStatus,reason:effectiveReason};
  })};
 }
 
@@ -271,9 +350,18 @@ export function causalExitResultAnchors(
 
 /** The server owns the complete result inventory, including scene outcomes and
  * payoff/state fields that can disagree with characterActions.result. */
+/** Only externally verifiable results enter the action/result audit.
+ * `highlights.point` is a narrative beat and `foreshadowingRecover.*` is a
+ * projection of an event whose real result already appears in scenes,
+ * characterActions, conflicts or characterStates. Auditing those projections
+ * again as independent causal obligations doubles the result set (110 vs 61
+ * result addresses in a four-chapter climax) and rejects legitimate serial
+ * foreshadowing for not re-proving the same event. Their factual consistency
+ * remains owned by the per-chapter fact/projection review and the dedicated
+ * stage-promise review. */
 export function causalChapterResultAnchors(anchors: ReturnType<typeof causalEvidenceAnchors>, chapterIndex: number) {
   const prefix = chapterIndex + '.';
-  const resultPath = /^(?:scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|highlights\.\d+\.point|characterStates\.\d+\.stateAfter|foreshadowingRecover\.\d+\.(?:method|payoff))$/;
+  const resultPath = /^(?:scenes\.\d+\.outcome|characterActions\.\d+\.result|conflicts\.\d+\.resolution|characterStates\.\d+\.stateAfter)$/;
   const parents = anchors.filter(anchor => anchor.source === 'body' && /:v\d+$/.test(anchor.id)
     && anchor.path?.startsWith(prefix) && resultPath.test(anchor.path.slice(prefix.length)));
   return parents.flatMap(parent => completeResultAnchors(anchors,parent));
@@ -313,6 +401,7 @@ export function causalChapterEvidenceCatalog(
  chapters: readonly Record<string,unknown>[],
  anchors:ReturnType<typeof causalEvidenceAnchors>,
  resultField?:'exitState',
+ options?:{allowInternalStates?:boolean},
 ):{entries:CausalChapterEvidenceEntry[];aliasesByReview:Record<string,string[]>}{
  const aliasesByReview:Record<string,string[]>={};
  const entries=chapters.map((chapter,index)=>{
@@ -322,8 +411,11 @@ export function causalChapterEvidenceCatalog(
       aliasesByReview:{} as Record<string,string[]>}
     :causalChapterResultReviewGroups(anchors,index);
   Object.assign(aliasesByReview,review.aliasesByReview);
+  const resultAnchors=options?.allowInternalStates
+    ?review.review.filter(anchor=>!isInternalStateResult(anchor.text))
+    :review.review;
   return {chapterNumber:Number(chapter.chapterNumber),anchorIds:own.map(a=>a.id),
-    resultAnchorIds:review.review.map(a=>a.id)};
+    resultAnchorIds:resultAnchors.map(a=>a.id)};
  });
  return {entries,aliasesByReview};
 }
@@ -392,19 +484,41 @@ export function causalPlanningProofPromptCatalog(
  * review model's 32768-token output cap. Result sharding does NOT spend the
  * correction allowance: each shard re-enters with allowSharding=false and
  * keeps its own bounded initial+correction calls. */
+/** Partition the EXACT server-owned result IDs already used by the audit.
+ * Never re-derive IDs from a second anchor pass: planning sources can change
+ * duplicate-text anchor assignment, and an ID from the wrong pass is rejected
+ * as "non-chapter result ID". */
+export function causalResultIdPartitions(
+ ids:readonly string[],maxResultsPerShard=LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS,
+ maxShards=LLM_TUNABLES.CAUSAL_PROOF_MAX_SHARDS,
+):string[][] {
+ if(!ids.length)return [[]];
+ if(ids.length<=maxResultsPerShard)return [[...ids]];
+ // Keep each first-pass response small enough to review every result instead
+ // of skimming a half-chapter inventory. Shards run under the existing
+ // bounded concurrency and share the same immutable chapter context; every
+ // server-owned result still appears in exactly one shard.
+ const shardCount=maxShards>0
+   ?Math.min(maxShards,Math.ceil(ids.length/maxResultsPerShard))
+   :Math.ceil(ids.length/maxResultsPerShard);
+ const perShard=Math.ceil(ids.length/shardCount);
+ const parts:string[][]=[];
+ for(let index=0;index<ids.length;index+=perShard)parts.push(ids.slice(index,index+perShard));
+ return parts;
+}
 export function causalPlanningProofResultPartitions(
- chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
+ chapters:readonly Record<string,unknown>[],maxResultsPerShard=LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS,maxShards=LLM_TUNABLES.CAUSAL_PROOF_MAX_SHARDS,
 ):string[][] {
  if(!chapters.length)return [[]];
  const body=JSON.stringify(chapters);
  const anchors=causalEvidenceAnchorOptions(body,{});
  const ids=causalChapterEvidenceCatalog(chapters,anchors).entries.flatMap(entry=>entry.resultAnchorIds);
- if(ids.length<=maxSinglePassResults)return [ids];
- const midpoint=Math.ceil(ids.length/2);
- return [ids.slice(0,midpoint),ids.slice(midpoint)];
+ return causalResultIdPartitions(ids,maxResultsPerShard,maxShards);
 }
 export function causalPlanningProofGroups(
- chapters:readonly Record<string,unknown>[],maxSinglePassResults=72,
+ chapters:readonly Record<string,unknown>[],
+ maxSinglePassResults=LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS
+   *Math.max(1,LLM_TUNABLES.CAUSAL_PROOF_CHAPTER_GROUP_RESULT_FACTOR),
 ):Record<string,unknown>[][]{
  if(chapters.length<2)return [[...chapters]];
  const burden=chapters.map(chapter=>{
@@ -499,7 +613,11 @@ export function causalChapterEvidenceAddressIssues(
   const chapter=catalog.find(entry=>entry.chapterNumber===row.chapterNumber);
   if(!chapter)return [msg('的章号不存在于当前审查分组')];
   const errors:string[]=[];
-  if(!chapter.anchorIds.includes(row.actionAnchorId))
+  // A supplied action address must belong to this chapter (anti-cross-chapter
+  // identity). An EMPTY action address is allowed: the result may be carried by
+  // implied context / suspense / an information gap, with the verbatim bridge
+  // being the proof. The server-owned result identity must always bind.
+  if(typeof row.actionAnchorId==='string'&&row.actionAnchorId.trim()&&!chapter.anchorIds.includes(row.actionAnchorId))
     errors.push(msg('的行动编号未绑定本章原文'));
   if(!chapter.anchorIds.includes(row.resultAnchorId)
     ||(resultField&&!chapter.resultAnchorIds.includes(row.resultAnchorId)))
@@ -633,6 +751,17 @@ export function preserveCausalCountercheckAnchors(original: any, value: any, con
 
 /** Validate the reviewer's action/result ledger, not the truth of its literary judgement. */
 export const CAUSAL_PROTOCOL_WARNING_PREFIX = '独立审查未提供成立的成立条件原文';
+
+/** 内在尝试/回忆/决定/情绪属于人物状态，不是需要独立外部行动锚点的已兑现结果。 */
+const INTERNAL_STATE_RESULT_PATTERN = /(试着|试图|忍住|犹豫|回忆|记起|想起|意识到|觉得|感到|心里|叫不出|说不出口|没敢|不敢|咽回去|沉默|发呆|发冷|发闷|拿不定|放不下|想不起|记不清|没多解释|不解释|没解释|内在克制|找不回来|不可恢复|没有第二件|属当前状态|内心尝试|内部记忆|位置状态|普通离场)/;
+const INTERNAL_STATE_REASON_PATTERN = /(内在状态|内部状态|内心尝试|内心|内部记忆|位置状态|普通离场|事实判断|空间状态|正文落点|直写为|同段直写|过不出来|只剩.*事实|属当前状态|无独立外部动作|当时反应|延续.*(?:状态|既定)|既定状态|找不回来|不可恢复|没有第二件|没多解释|不解释|没解释|内在克制)/;
+export function isInternalStateResult(text: unknown): boolean {
+  return typeof text === 'string' && INTERNAL_STATE_RESULT_PATTERN.test(text);
+}
+/** 审查者用理由说明“这是内在反应/承前状态”时，同样不要求外部行动锚点。 */
+export function isInternalStateReason(text: unknown): boolean {
+  return typeof text === 'string' && INTERNAL_STATE_REASON_PATTERN.test(text);
+}
 export function causalIssueIsProtocolOnly(issue:any):boolean {
   return String(issue?.summary||'').startsWith(CAUSAL_PROTOCOL_WARNING_PREFIX);
 }
@@ -651,11 +780,23 @@ export function coerceUnprovenSupportedCausalRows(value:any, content:string, sou
   if(!value||!Array.isArray(value.transitions))return value;
   let changed=false;
   const transitions=value.transitions.map((row:any)=>{
-    if(row?.status!=='supported')return row;
     const source=row?.basisSource==='body'?content:sources[row?.basisSource];
     const bridge=resolveQualityEvidence(source||'',row?.bridgeEvidence);
     const action=resolveQualityEvidence(content,row?.actionEvidence);
     const result=resolveQualityEvidence(content,row?.resultEvidence);
+    const internalResult=isInternalStateResult(row?.resultEvidence)||isInternalStateResult(result.quote)||isInternalStateReason(row?.reason);
+    // 内在状态由人物自身叙述直接成立，不要求独立外部行动或成立条件。
+    if(internalResult&&result.verified){
+      if(row?.status==='supported')return row;
+      if(row?.status==='gap'){
+        changed=true;
+        return {...row,status:'supported',
+          bridgeAnchorId:row?.bridgeAnchorId||row?.resultAnchorId||'',
+          bridgeEvidence:row?.bridgeEvidence||row?.resultEvidence||result.quote,
+          reason:'内在状态由自身叙述成立，不需要独立外部行动条件。'};
+      }
+    }
+    if(row?.status!=='supported')return row;
     const selfProof=allowSelfProof&&typeof row.resultAnchorId==='string'&&typeof row.bridgeAnchorId==='string'
       &&(row.resultAnchorId===row.bridgeAnchorId||row.resultAnchorId.startsWith(row.bridgeAnchorId+':')
         ||(bridge.verified&&result.verified&&bridge.quote.includes(result.quote)))
@@ -668,34 +809,59 @@ export function coerceUnprovenSupportedCausalRows(value:any, content:string, sou
   return changed?{...value,transitions}:value;
 }
 
-export function validateCausalAudit(value: any, content: string, sources: Record<string, string>) {
+export function validateCausalAudit(value: any, content: string, sources: Record<string, string>, options?: { allowInternalStates?: boolean }) {
   const errors: string[] = [];
   const issues: any[] = [];
   if (!value || !['evaluated', 'not_applicable'].includes(value.status)
     || typeof value.reason !== 'string' || value.reason.trim().length < 8 || !Array.isArray(value.transitions)) {
     return { verified: false, errors: ['必要因果审查未返回完整结论与行动结果账目'], issues };
   }
+  // Internal attempts/recall/carried-over states are not external action
+  // results. Without an external action anchor they must not enter the
+  // action/result proof at all. Provider rejection of such a row is not a
+  // story defect.
+  const transitions = options?.allowInternalStates
+    ? value.transitions.filter((row: any) => {
+        const internal = isInternalStateResult(row?.resultEvidence);
+        const externalAction = typeof row?.actionAnchorId === 'string' && row.actionAnchorId.trim().length > 0;
+        return !(internal && !externalAction);
+      })
+    : value.transitions;
   if (value.status === 'not_applicable') {
-    if (value.transitions.length) errors.push('不适用结论不能同时包含已评行动结果');
+    if (transitions.length) errors.push('不适用结论不能同时包含已评行动结果');
     return { verified: errors.length === 0, errors, issues };
   }
-  if (!value.transitions.length) errors.push('已评因果结论缺少关键行动与结果证据');
-  value.transitions.forEach((row: any, index: number) => {
+  if (!value.transitions.length) {
+    errors.push('已评因果结论缺少关键行动与结果证据');
+    return { verified: false, errors, issues };
+  }
+  if (!transitions.length) return { verified: true, errors: [], issues: [] };
+  transitions.forEach((row: any, index: number) => {
     const action = resolveQualityEvidence(content, row?.actionEvidence);
     const result = resolveQualityEvidence(content, row?.resultEvidence);
     const source = row?.basisSource === 'body' ? content : sources[row?.basisSource];
     const bridge = resolveQualityEvidence(source || '', row?.bridgeEvidence);
-    if (!action.verified || !result.verified || !['supported', 'gap', 'planned'].includes(row?.status)
+    const internalResult = isInternalStateResult(row?.resultEvidence) || isInternalStateResult(result.quote) || isInternalStateReason(row?.reason);
+    // A result may be carried by implied context, foreshadowing, a suspense beat
+    // or an information gap: the action may be OMITTED (empty). But if an action
+    // is SPECIFIED (anchor id or evidence), it must still be verbatim — that is
+    // the anti-forgery / cross-chapter identity guard, not an "everything must be
+    // explicit" rule. Internal attempts/recall/decisions/emotions are states, not
+    // externally completed results; they do not need an independent action anchor
+    // or bridge and must not be judged as "the action already happened".
+    const actionSpecified = (typeof row?.actionAnchorId === 'string' && row.actionAnchorId.trim().length > 0)
+      || (typeof row?.actionEvidence === 'string' && row.actionEvidence.trim().length > 0);
+    if ((actionSpecified && !action.verified) || !result.verified || !['supported', 'gap', 'planned'].includes(row?.status)
       || typeof row?.reason !== 'string' || row.reason.trim().length < 8
-      || (row.status === 'supported' && !bridge.verified)) {
+      || (row.status === 'supported' && !bridge.verified && !internalResult)) {
       const wrong=[
-        !action.verified&&'actionEvidence不是正文连续原文',
+        actionSpecified&&!action.verified&&'actionEvidence不是正文连续原文',
         !result.verified&&'resultEvidence不是正文连续原文',
         !['supported','gap','planned'].includes(row?.status)&&'status不合法',
         (typeof row?.reason!=='string'||row.reason.trim().length<8)&&'reason缺少实际说明',
-        row?.status==='supported'&&!bridge.verified&&'supported缺少有效成立条件原文',
+        row?.status==='supported'&&!bridge.verified&&!internalResult&&'supported缺少有效成立条件原文',
       ].filter(Boolean);
-      errors.push(`第${index + 1}项因果审查缺少可验证行动、结果或成立条件（${wrong.join('、')}）`);
+      errors.push(`第${index + 1}项因果审查缺少可验证结果或成立条件（${wrong.join('、')}）`);
       return;
     }
     // A result and its enclosing paragraph are the same assertion. If that
@@ -711,6 +877,7 @@ export function validateCausalAudit(value: any, content: string, sources: Record
     // standard explicitly allows a direct result to cite the same paragraph
     // that contains its actual action.
     const bridgeIsResultSelfProof = row.status === 'supported'
+      && !internalResult
       && row.basisSource === 'body'
       && typeof row.bridgeAnchorId === 'string' && typeof row.resultAnchorId === 'string'
       && (row.resultAnchorId === row.bridgeAnchorId
@@ -722,7 +889,7 @@ export function validateCausalAudit(value: any, content: string, sources: Record
       errors.push(`第${index + 1}项因果审查以结果自身或其上层段落自证，须定位独立成立条件；直接结果可引用含实际行动的同段`);
       return;
     }
-    if (row.status === 'gap') issues.push({
+    if (row.status === 'gap' && !internalResult) issues.push({
       issueType: 'causality_gap', severity: 'high', title: '关键行动与结果缺少成立条件',
       summary: row.reason, evidence: result.quote, evidenceKind: 'causal_gap',
       basisSource: 'body', basisEvidence: action.quote, basisReason: row.reason,

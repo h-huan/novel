@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {chapterConditionReviewIssues,chapterConditionBridgeAnchorsVerified} from './chapter-condition-review';
 import { bindModelRequestClock, remainingModelRequestTime } from './model-request-clock';
 import {generationOutputBounds} from '../config/generation-budgets';
@@ -6,13 +7,14 @@ import { reviewCharacterContracts } from '../modules/writing-quality/character-c
 import { narrativeTrace } from '../modules/writing-quality/narrative-trace';
 import { repairPrompt, executeRepair } from '../modules/writing-quality/repair-strategy-registry';
 import { applyLocalPatches, compareRepair, repairRejectionDetails } from '../modules/writing-quality/local-repair';
-import { isAutomaticQualityRepairIssue, isMissingStandardIssue, semanticEvidenceSources, verifySemanticEvidence, resolveExactCausalBasisSource, resolveQualityEvidence, qualityIssue, qualityGate } from '../modules/writing-quality/quality-issue';
+import { isAutomaticQualityRepairIssue, isMissingStandardIssue, isAdvisoryRule, semanticEvidenceSources, verifySemanticEvidence, resolveExactCausalBasisSource, resolveQualityEvidence, qualityIssue, qualityGate } from '../modules/writing-quality/quality-issue';
 import { buildChapterResponsibilityAuditPrompt, buildChapterResponsibilityRepairPrompt, describeChapterResponsibilityPlan, isEvidencedChapterResponsibilityConflict } from '../../shared/src/chapter-responsibility-review';
 import { quotedText } from './quoted-text';
 import { boundedDiscoveryMap } from './bounded-discovery-map';
 import { adaptiveDiscoveryConcurrency } from './discovery-concurrency';
 import { STORY_CAUSAL_REVIEW_POLICY, STORY_CAUSAL_STATE_POLICY } from '../../shared/src/system-workflow-rules.registry';
-import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalPlanningProofResultPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, coerceUnprovenSupportedCausalRows, causalIssueIsProtocolOnly, applyCausalAuditRepair, preserveCausalCountercheckAnchors } from '../modules/writing-quality/causal-review';
+import { causalEvidenceAnchorOptions, causalChapterEvidenceCatalog, causalPlanningProofGroups, causalPlanningProofPromptCatalog, causalResultIdPartitions, decodePlanningProofRows, expandCausalReviewedResultAliases, normalizeReviewedCausalResultAliases, bindCausalReviewEvidenceAddresses, causalChapterEvidenceAddressIssues, causalAuditRepairPrompt, materializeCausalAuditAnchors, validateCausalAudit, coerceUnprovenSupportedCausalRows, causalIssueIsProtocolOnly, applyCausalAuditRepair, preserveCausalCountercheckAnchors, isInternalStateReason, isInternalStateResult, mapCausalPromptAnchorIds, type CausalPromptTransport } from '../modules/writing-quality/causal-review';
+import { averageResultChars, planProofShards } from '../modules/writing-quality/proof-shard-policy';
 import { applySemanticEvidenceRepairs, semanticEvidenceRepairPrompt } from '../modules/writing-quality/semantic-evidence-repair';
 import { buildExecutionStandard } from '../modules/project/creative-constitution';
 import { classifyGateFailure, type GateFailureReport } from '../modules/writing-quality/gate-failure';
@@ -80,6 +82,9 @@ class GeneratedQualityGateError extends Error {
 @Injectable()
 export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   private readonly logger = new Logger(RealLLMService.name);
+  /** Verified planning action proofs keyed by immutable chapter content. A changed
+   * chapter naturally misses; only successful verdicts are reused. */
+  private readonly planningActionProofCache = new Map<string, {verified: boolean; errors: string[]; issues: any[]; audit: any}>();
 
   constructor(
     private readonly modelRouter: ModelRouterService,
@@ -297,6 +302,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       }
       assertGenerationActive();
       if (run) this.metrics.finishRun(run.id, 'success', start, response.content, undefined, response.model);
+      // Bind provenance at the physical call that actually produced the
+      // output. The idempotent wrapper's post-hoc fingerprint lookup is only
+      // a fallback for cached results; relying on it for a fresh repair call
+      // can lose the credential when prompt/context fingerprints differ.
+      if (run) response.runId = run.id;
       return response;
     } catch (error) {
       const failedContent = (error as {generatedContent?:unknown})?.generatedContent;
@@ -434,7 +444,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
   }
 
   async validateGeneratedContent(projectId: string, chapterIndex: number, content: string, context: string,
-    validateRepairedContent?: (candidate: string) => Promise<unknown>): Promise<string> {
+    validateRepairedContent?: (candidate: string) => Promise<unknown>, deadlineAt?: number): Promise<string> {
     const start = Date.now();
     const run = this.metrics.beginRun(projectId, 'writing', context, undefined, 'body_final_gate', chapterIndex);
     let finalContent = content;
@@ -446,7 +456,10 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       }
     } : undefined;
     try {
-      const checked = await this.evaluateGeneratedRun(run, { prompt: context, scenario: 'writing', metrics: { projectId, chapterIndex } }, content, validateOnce);
+      const checked = await this.evaluateGeneratedRun(run, {
+        prompt: context, scenario: 'writing', metrics: { projectId, chapterIndex },
+        ...(deadlineAt ? { deadlineAt } : {}),
+      }, content, validateOnce);
       finalContent = checked;
       if (checked !== content && validateOnce) {
         try {
@@ -554,7 +567,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     }
     if (!gate.passed) {
       const openIssues = before.issues.filter(i => i.status === 'open');
-      const blocking = openIssues.filter(i => i.severity === 'blocking' || i.requiredPlanningCondition);
+      const blocking = openIssues.filter(i => (i.severity === 'blocking' || i.requiredPlanningCondition) && !isAdvisoryRule(i));
       this.logger.warn(`质量 Gate 阻断 run=${run.id} project=${run.projectId} stage=${run.stage} gate=${gate.status} `
         + `blocking=${blocking.map(i => `${i.ruleId}(${i.evaluation})`).join(',') || '无'} `
         + `详情=${blocking.map(i => i.message).join('；') || '评审证据不足'}`);
@@ -666,7 +679,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         if (score.status !== 'evaluated') assessmentDiagnostics.push({ attempt: reviewAttempt + 1,
           status: score.status, missingDimensions: SCORE_DIMENSIONS.filter(key => score.dimensions[key].status === 'not_evaluated'),
           rawResponse: rawResponse.slice(0, 12000), responseChars: rawResponse.length });
-        if (score.status === 'evaluated') break;
+        // 评分已完整但仍有引文无法定位时，继续用现有的一次补证评审；
+        // 否则建议级问题的无效引文会被静默跳过，质检面板留下无法核对的条目。
+        const unresolvedCitations = (Array.isArray(combinedRaw?.issues) ? combinedRaw.issues : [])
+          .filter((issue: any) => !verifySemanticEvidence(issue, content, evidenceSources).verified).length;
+        if (score.status === 'evaluated' && unresolvedCitations === 0) break;
       } catch (error) {
         remainingModelRequestTime(request);
         assessmentDiagnostics.push({ attempt: reviewAttempt + 1, status: 'failed',
@@ -702,23 +719,50 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     }
     (score as any).characterContractReview = contractReview;
     (score as any).narrativeTrace = trace;
-    score.gateStatus = qualityGate(score.issues, score.status === 'evaluated').status;
+    // 维度覆盖完整时，建议级问题不应因为 aggregate status=partial 再次把 Gate 打成
+    // not_evaluated；qualityGate 自己只对阻断类结论要求证据。只有维度真的没评完
+    // 或存在未验证的阻断结论时才保留 not_evaluated。
+    const dimensionsComplete = Object.values(score.dimensions).every(dimension =>
+      dimension.status === 'evaluated' || dimension.status === 'not_applicable');
+    score.gateStatus = qualityGate(score.issues, score.status === 'evaluated' || dimensionsComplete).status;
     return score;
   }
 
   /** Reuse QLT-003's action/result validator for decisive framework scenes; scores cannot substitute for proof. */
-  async validatePlanningActions(projectId: string, chapters: any[], planningSources: Record<string, unknown>) {
+  async validatePlanningActions(projectId: string, chapters: any[], planningSources: Record<string, unknown>,
+    options: { requiredResultIds?: readonly string[] } = {}) {
     if (!chapters.some(chapter => ['climax', 'explosion', 'resolution'].includes(chapter.chapterFunction))) return;
     const content = JSON.stringify({ volumes: [{ chapters }] });
+    const requiredResultIds=options.requiredResultIds?.length?options.requiredResultIds:undefined;
     const started = Date.now();
     const run = this.metrics.beginRun(projectId, 'outline', content, undefined, 'framework_action_proof');
+    const cacheKey=createHash('sha256').update(`${projectId}\n${content}\n${JSON.stringify(requiredResultIds||[])}`).digest('hex');
+    if(this.planningActionProofCache.has(cacheKey)){
+      this.metrics.finishRun(run.id, 'success', started, content);
+      return;
+    }
     try {
-      const checked = await this.auditPlanningActions(run, { prompt: content, planningSources, metrics: { projectId } }, content);
-      if (!checked.verified || checked.issues.length) {
+      const checked = await this.auditPlanningActions(run, {
+        prompt: content,
+        planningSources,
+        metrics: { projectId, ...(chapters.length===1&&Number.isFinite(Number(chapters[0]?.chapterNumber))
+          ? { chapterIndex: Number(chapters[0].chapterNumber) } : {}) },
+        // A single decisive-chapter audit must fit inside the creation target;
+        // the shared clock still covers every internal shard and correction.
+        timeout: LLM_TUNABLES.timeoutReview(),
+      }, content, undefined, false, requiredResultIds);
+      const externalIssues = checked.issues.filter(issue =>
+        !isInternalStateReason(issue?.summary) && !isInternalStateResult(issue?.evidence));
+      if (!checked.verified || externalIssues.length) {
         const report = classifyGateFailure({ topic: 'outline_alignment', evaluationStatus: checked.verified ? 'evaluated' : 'not_evaluated',
-          buckets: checked.verified ? { outline_alignment: checked.issues.map(issue => issue.summary) } : { review_incomplete: checked.errors } });
+          buckets: checked.verified ? { outline_alignment: externalIssues.map(issue => issue.summary) } : { review_incomplete: checked.errors } });
         const prefix = checked.verified ? '章纲行动结果未通过，当前章纲未保存' : '章纲行动结果评审未完成，当前章纲未保存';
         throw new GeneratedQualityGateError({ ...report, prefix, message: prefix + '：' + report.sections.join('；') }, content, checked.audit);
+      }
+      this.planningActionProofCache.set(cacheKey,{verified:true,errors:checked.errors,issues:checked.issues,audit:checked.audit});
+      if(this.planningActionProofCache.size>200){
+        const oldest=this.planningActionProofCache.keys().next().value;
+        if(oldest)this.planningActionProofCache.delete(oldest);
       }
       this.metrics.finishRun(run.id, 'success', started, content);
     } catch (error) {
@@ -737,13 +781,23 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       return { verified: false, errors: ['关键场景结构无法解析'], issues: [], audit: null };
     }
     if (!chapters.length) return { verified: true, errors: [], issues: [], audit: null };
+    // Every action-proof shard carries the complete chapter and source
+    // catalog, so concurrency multiplies an already large prompt. Host
+    // headroom alone can schedule eight near-simultaneous reviews; provider
+    // rate limits then serialize them and the "parallel" audit becomes slower.
+    // Four keeps the normal two-to-three shard case in one batch without
+    // bursting the review provider. All shards, result coverage and deadlines
+    // stay unchanged.
+    const actionProofShardConcurrency=(count:number)=>Math.min(4,adaptiveDiscoveryConcurrency(count));
     // Bound the input window, not the number of actual decisive outcomes that must be checked.
-    if (chapters.length > 3) {
+    const chapterGroupSize=Math.max(1,LLM_TUNABLES.CAUSAL_PROOF_CHAPTER_GROUP_SIZE);
+    if (chapters.length > chapterGroupSize) {
       // Disjoint chapter groups share one immutable context and do not write
       // Canon. Schedule existing groups under host headroom, not serially;
       // keep every original call, proof requirement and deadline unchanged.
-      const groups=Array.from({length:Math.ceil(chapters.length/3)},(_,index)=>chapters.slice(index*3,index*3+3));
-      const results=await boundedDiscoveryMap(groups,adaptiveDiscoveryConcurrency(groups.length),
+      const groups=Array.from({length:Math.ceil(chapters.length/chapterGroupSize)},
+        (_,index)=>chapters.slice(index*chapterGroupSize,index*chapterGroupSize+chapterGroupSize));
+      const results=await boundedDiscoveryMap(groups,actionProofShardConcurrency(groups.length),
         group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),resultField));
       const failure=results.find(result=>result.status==='rejected') as PromiseRejectedResult|undefined;
       if(failure)throw failure.reason;
@@ -765,7 +819,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       const balanced=causalPlanningProofGroups(chapters);
       if (balanced.length>1) {
         const split=await boundedDiscoveryMap(balanced,
-          adaptiveDiscoveryConcurrency(balanced.length),
+          actionProofShardConcurrency(balanced.length),
           group=>this.auditPlanningActions(run,request,JSON.stringify({volumes:[{chapters:group}]}),undefined,false,undefined,false));
         const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
         if(failure)throw failure.reason;
@@ -773,16 +827,9 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
           issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
       }
-      const partitions=causalPlanningProofResultPartitions(chapters);
-      if(partitions.length>1){
-        const split=await boundedDiscoveryMap(partitions,adaptiveDiscoveryConcurrency(partitions.length),
-          resultIds=>this.auditPlanningActions(run,request,content,undefined,false,resultIds,false));
-        const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
-        if(failure)throw failure.reason;
-        const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
-        return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
-          issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
-      }
+      // Result sharding is decided below from the SAME catalog used by the
+      // audit. Re-deriving IDs here (without planningSources) can assign a
+      // different duplicate-text address and produce "非本章服务器结果编号".
     }
     const body = JSON.stringify(chapters);
     const sources = { project_context: run.context || '{}', chapter_plan: JSON.stringify(request.planningSources || {}) };
@@ -792,10 +839,41 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
     const worldMechanisms = evidenceAnchors.filter(isWorldMechanism);
     const bodyAnchors = evidenceAnchors.filter(anchor => anchor.source === 'body');
     const {entries:allChapterEvidence,aliasesByReview:resultAliasesByReview}=
-      causalChapterEvidenceCatalog(chapters,bodyAnchors,resultField);
+      causalChapterEvidenceCatalog(chapters,bodyAnchors,resultField,{allowInternalStates:true});
     const allResultIds=new Set(allChapterEvidence.flatMap(entry=>entry.resultAnchorIds));
     if(requiredResultIds?.some(id=>!allResultIds.has(id)))
       return {verified:false,errors:['审查分片包含非本章服务器结果编号'],issues:[],audit:null};
+    // Shard the EXACT catalog IDs computed above. The child re-enters with
+    // the same content/sources and requiredResultIds, so its own catalog
+    // contains every assigned ID by construction.
+    if (!resultField && !singlePass && allowSharding && !requiredResultIds) {
+      // Derive the first-pass split from this chapter's actual obligations and
+      // the configured structured-output budget, never from a fixed row count.
+      const textById=new Map(evidenceAnchors.map(anchor=>[anchor.id,anchor.text]));
+      const shardPlan=planProofShards({
+        resultCount:allResultIds.size,
+        averageResultChars:averageResultChars([...allResultIds].map(id=>textById.get(id)||'')),
+        outputTokenBudget:typeof (this as any).getConfiguredMaxTokens==='function'
+          &&typeof (this as any).modelRouter?.getConfig==='function'
+          ?(this as any).getConfiguredMaxTokens('review'):LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
+        reliableRowsPerCall:LLM_TUNABLES.CAUSAL_PROOF_RELIABLE_ROWS,
+        rowTokenBudget:LLM_TUNABLES.CAUSAL_PROOF_ROW_TOKEN_BUDGET,
+        baseRowTokens:LLM_TUNABLES.CAUSAL_PROOF_BASE_ROW_TOKENS,
+        minimumRowsPerShard:LLM_TUNABLES.CAUSAL_PROOF_MIN_ROWS,
+        maximumShards:LLM_TUNABLES.CAUSAL_PROOF_MAX_SHARDS,
+      });
+      const partitions=causalResultIdPartitions([...allResultIds],shardPlan.maxResultsPerShard,
+        LLM_TUNABLES.CAUSAL_PROOF_MAX_SHARDS);
+      if(partitions.length>1){
+        const split=await boundedDiscoveryMap(partitions,actionProofShardConcurrency(partitions.length),
+          resultIds=>this.auditPlanningActions(run,request,content,undefined,false,resultIds,false));
+        const failure=split.find(item=>item.status==='rejected') as PromiseRejectedResult|undefined;
+        if(failure)throw failure.reason;
+        const batches=split.map(item=>(item as PromiseFulfilledResult<Awaited<ReturnType<RealLLMService['auditPlanningActions']>>>).value);
+        return {verified:batches.every(batch=>batch.verified),errors:batches.flatMap(batch=>batch.errors),
+          issues:batches.flatMap(batch=>batch.issues),audit:batches.map(batch=>batch.audit)};
+      }
+    }
     const requiredSet=requiredResultIds?new Set(requiredResultIds):null;
     const chapterEvidenceCatalog=requiredSet
       ?allChapterEvidence.map(entry=>({...entry,resultAnchorIds:entry.resultAnchorIds.filter(id=>requiredSet.has(id))}))
@@ -804,6 +882,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       :causalPlanningProofPromptCatalog(chapters,chapterEvidenceCatalog,bodyAnchors);
     let audit: any = null;
     let checked = { verified: false, errors: ['缺少关键场景行动结果审查'], issues: [] as any[] };
+    let transport: CausalPromptTransport | undefined;
     for (let attempt = 0; attempt < (singlePass ? 1 : 2); attempt++) {
       try {
         const countercheck = attempt > 0 && !!resultField;
@@ -815,14 +894,18 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         const compactPlanningProof = !resultField && (attempt===0||restartAfterUnusableVerdict);
         const prompt = countercheck ? {
           systemPrompt: '你是独立因果反证核查员，前一份审查没有权威。先从完整章纲提取行动前状态，再核对行动如何改变该状态，禁止从结果倒推条件已经具备。只报告有原文证据的矛盾或缺少必要条件，不评分，不改写，不要求解释未到期谜底。',
-          prompt: STORY_CAUSAL_STATE_POLICY + '\n对完整章纲及原审查逐项反证。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？目的、未来安排、心理和线索埋设不是已兑现的外部结果。先明确每个结果成立的必要条件，再寻找实际满足它的证据；不能重复新声称的能力改变作为机制。心理选择和日常直接结果可以引用本身实际叙述作为bridgeAnchorId，不要求外部手续，但supported不能漏掉引用地址。JSON:{"causalAudit":{"status":"evaluated","reason":"实际核算依据","transitions":[{"chapterNumber":1,"beforeStateAnchorId":"body完整行动顺序地址","requiredCondition":"成立必要条件","actionAnchorId":"body行动地址","resultAnchorId":"指定出口结果地址","bridgeAnchorId":"实际满足条件地址；gap或planned为空","status":"supported|gap|planned","reason":"实际依据"}]}}。\n原审查仅供核对，允许据原文推翻：' + JSON.stringify(audit)
+          prompt: STORY_CAUSAL_STATE_POLICY + '\n对完整章纲及原审查逐项反证。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？目的、未来安排、心理和线索埋设不是已兑现的外部结果。先明确每个结果成立的必要条件，再寻找实际满足它的证据；不能重复新声称的能力改变作为机制。心理选择和日常直接结果可以引用本身实际叙述作为bridgeAnchorId，不要求外部手续，但supported不能漏掉引用地址。内在尝试/回忆/犹豫/决定/情绪（试着/忍住/叫不出/说不出口/心里/觉得/感到）不是外部已兑现结果，不需要独立行动锚点，可用其自身叙述作bridge，不得判“动作已发生”或gap。JSON:{"causalAudit":{"status":"evaluated","reason":"实际核算依据","transitions":[{"chapterNumber":1,"beforeStateAnchorId":"body完整行动顺序地址","requiredCondition":"成立必要条件","actionAnchorId":"body行动地址","resultAnchorId":"指定出口结果地址","bridgeAnchorId":"实际满足条件地址；gap或planned为空","status":"supported|gap|planned","reason":"实际依据"}]}}。\n原审查仅供核对，允许据原文推翻：' + JSON.stringify(audit)
             + '\n校验错误：' + checked.errors.join('；')
             + '\n【已确认的世界机制，可与本章实际操作合并证明条件；允许用于bridgeAnchorId，不要求正文重述】' + JSON.stringify(worldMechanisms)
             + '\n【本章行动与其它原文证据地址】' + JSON.stringify(evidenceAnchors.filter(anchor => !isWorldMechanism(anchor) && (anchor.source === 'body'
               || (anchor.source === 'project_context' && !/^(foreshadowing|outline|meta)(\.|$)/.test(anchor.path || ''))
               || audit?.transitions?.some((row: any) => row.bridgeAnchorId === anchor.id))))
             + '\n未证明的条件不能以未提供的来源或临时假设补齐。',
-        } : causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField, compactPlanningProof, requiredResultIds);
+        } : (() => {
+          const repair=causalAuditRepairPrompt(audit, checked.errors, body, sources, true, !!resultField, compactPlanningProof, requiredResultIds, transport, !resultField);
+          transport=repair.transport;
+          return repair;
+        })();
         const response = await this.generateInternal({ ...prompt, deadlineAt:request.deadlineAt,timeout:request.timeout, scenario: 'review', injectStandard: false,
           systemPrompt: prompt.systemPrompt + '\n独立核对关键场景的必要因果，不评分、不改写场景。',
           prompt: (attempt===0||countercheck||restartAfterUnusableVerdict
@@ -830,15 +913,27 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
               :'\n【引用合同纠错】原章纲全部原文及路径已在下方证据目录；本次只修点名行，不重复传输整份章纲。\n')
             + prompt.prompt + (compactPlanningProof ? '\nproofRows逐行返回服务器结果唯一序号、行动编号、桥接编号、状态和理由；序号按下方结果目录从1连续编号，每项只能出现一次，' : '\n每项transitions另带chapterNumber，') + '须覆盖这些关键章：' + JSON.stringify(chapterEvidenceCatalog.filter(entry=>entry.resultAnchorIds.length).map(entry=>entry.chapterNumber))
             + '。行动、结果证据必须实际属于声明的本章，不能以其它章节的结果代替。' + (resultField ? '行动仅从本章anchorIds选地址，结果仅从本章resultAnchorIds选地址。' : '行动只选上方原文目录source=body、path以本章bodyIndex和点号开头的真实地址；结果只选本章resultAnchorIds。actionAnchorIds只列本章已写出的characterActions.action原文地址，先检查这些实际行动及content中的事件是否确实推动当前结果，不能拿outcome、result本身或其不含行动的上层段落当成立条件；actionLookup仅是同一人物行动对应结果的地址提示，绝不证明因果成立，真实缺口必须判gap，场景结果仍须找到实际执行和必要条件。') + '原文由服务器按编号回填，不得自编、拼接或转述引文。\n【章号与本章证据地址对应】' + JSON.stringify(promptChapterEvidence)
-            + '\n服务器resultAnchorIds目录中的每一项均须单独核查并返回对应独立结果行，不能自行抽样；同一行动在场景结果、人物结果、冲突解决、状态、亮点、伏笔回收中的不同断言也分别核对。先一次收齐全部已有缺口，再交给同一次局部修复。普通动作直接结果可引用其实际行动，真实未来安排按planned核实，不为凑缺口强加额外手续。'
+            + '\n服务器resultAnchorIds目录中的每一项均须单独核查并返回对应独立结果行，不能自行抽样；同一行动在场景结果、人物结果、冲突解决、状态、亮点、伏笔回收中的不同断言也分别核对。先一次收齐全部已有缺口，再交给同一次局部修复。普通动作直接结果可引用其实际行动，真实未来安排按planned核实，不为凑缺口强加额外手续。内在尝试/回忆/犹豫/决定/情绪（试着/忍住/叫不出/说不出口/心里/觉得/感到）不是外部已兑现结果，不需要独立行动锚点，可用其自身叙述作bridge，不得判“动作已发生”或gap。'
             + (resultField ? '\n本次核对出口状态目录：对应章resultAnchorIds逐项各有一条transitions，不抽样、不合并多个结果为一项。resultAnchorId必须来自该目录。先阅读完整responsibility中的事件先后，再核对该结果全部必要环节，而非仅证明最容易成立的一环；reason须交代行动前状态、必要条件是否实际满足。尤其不能从结果倒推尚有未完成任务，或把进入权限当成剥夺对手原有能力。prerequisites是待满足条件，字段名及同义复述不证明已满足。普通直接结果不追加程序；未来安排、线索埋设使用planned及实际理由，无需bridge，不得配成已兑现结果或报gap；心理选择按原文直接核对。' : '')
             + (resultField ? '\n每条transitions（及纠错repairs）还必须填写beforeStateAnchorId（本章行动前完整状态的body地址，允许与actionAnchorId相同以保留同句先后）、requiredCondition（该结果成立所需的最小实际条件）。bridgeAnchorId只选实际满足此条件的原文，无则gap且留空。先输出这两项，再判断status。任务先已完成，后续行动还能改变该任务是否按时完成吗？进入权限与阻止屋内者离开的能力是否同一权限？不要用已完成目标或结果断言回答必要条件已满足。planned的beforeStateAnchorId可选择叙事安排原文，requiredCondition说明未到期，不追加程序。' : '')
             + '\n规划审查区分事件发生与读者获知：后章揭晓的先前事实可证明前章机制，未来才执行的动作不能证明前章结果；不能要求在悬念章提前揭晓幕后身份。',
-          temperature: 0, responseFormat: 'json_object', maxTokens: LLM_TUNABLES.QUALITY_REVIEW_MAXTOKENS,
+          temperature: 0, responseFormat: 'json_object',
+          // The decisive-chapter audit is another large structured reasoning
+          // review. Do not cap it at 32K: a shard can spend the cap on
+          // reasoning and truncate its JSON. Omitting maxTokens lets
+          // generateInternal use the configured structured budget, the same
+          // source as the whole-story review and candidate re-review.
           metrics: { ...request.metrics, runId: run.id, stepKey: countercheck ? 'framework_action_state_countercheck' : 'framework_action_proof' } });
         const value = JSON.parse(response.content);
-        const rawVerdict=countercheck ? preserveCausalCountercheckAnchors(audit,value.causalAudit,body,sources)
+        const decodedVerdict=countercheck ? preserveCausalCountercheckAnchors(audit,value.causalAudit,body,sources)
           : attempt&&!restartAfterUnusableVerdict ? applyCausalAuditRepair(audit,checked.errors,value) : decodePlanningProofRows(value.causalAudit,chapterEvidenceCatalog.flatMap(entry=>entry.resultAnchorIds.map(resultAnchorId=>({chapterNumber:entry.chapterNumber,resultAnchorId}))));
+        // Transport aliases are presentation-only. Restore after tuple decoding:
+        // proofRows carry addresses positionally, while decoded transitions use
+        // the same named identity fields as the full schema. Restoring before
+        // decoding would leave the positional aliases untouched.
+        const rawVerdict=transport
+          ?mapCausalPromptAnchorIds(decodedVerdict,transport.aliasToReal)
+          :decodedVerdict;
         // Literal model quotes can be assigned a server-owned result ID only
         // when unique in the same chapter. Unknown, paraphrased or conflicting
         // IDs remain invalid; no causal proof or outcome is supplied by code.
@@ -850,15 +945,18 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
         audit=materializeCausalAuditAnchors(
           !resultField?normalizeReviewedCausalResultAliases(boundVerdict,resultAliasesByReview,evidenceAnchors):boundVerdict,
           body,sources);
-        checked = validateCausalAudit(audit, body, sources);
+        checked = validateCausalAudit(audit, body, sources, {allowInternalStates:true});
         if(!checked.verified){
+          if (attempt < (singlePass?1:2)-1) {
+            this.logger.warn('[framework_action_proof] 协议纠正: ' + checked.errors.join('；').slice(0, 1200));
+          }
           // Give the normal citation correction its one chance first; only
           // downgrade a still-unfixable result self-proof on the LAST attempt,
           // so a correctable citation keeps the correction instead of being
           // turned into a gap and skipping the fix.
           const coerced=coerceUnprovenSupportedCausalRows(audit,body,sources,attempt===(singlePass?1:2)-1);
           if(coerced!==audit){
-            const coercedCheck=validateCausalAudit(coerced,body,sources);
+            const coercedCheck=validateCausalAudit(coerced,body,sources,{allowInternalStates:true});
             if(coercedCheck.verified){audit=coerced;checked=coercedCheck;}
           }
         }
@@ -901,7 +999,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           // Distinct text, negations and independently differing outcomes
           // remain separate semantic obligations and independent fact checks.
           const expanded=expandCausalReviewedResultAliases(audit,resultAliasesByReview,body,sources);
-          const aliasProof=validateCausalAudit(expanded,body,sources);
+          const aliasProof=validateCausalAudit(expanded,body,sources,{allowInternalStates:true});
           if(!aliasProof.verified){
             checked={verified:false,errors:aliasProof.errors,issues:checked.issues};
           }else audit=expanded;
@@ -952,7 +1050,11 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
       `[RealLLM] calling model: ${modelName} (version: ${routedModel.modelVersion}), scenario: ${request.scenario || 'daily'}, step: ${request.metrics?.stepKey || 'unspecified'}, initialMaxTokens=${outputBounds.initial}, recoveryMaxTokens=${outputBounds.ceiling}`,
     );
 
-    const callTimeout = request.timeout ?? 600_000; // 默认10分钟
+    // 评审调用没有显式 timeout 时，不能落到 10 分钟默认值：实测单次 alignment/causal
+    // 评审偶发挂起，10 分钟会把整章生成拖死。评审正常 1–3 分钟，6 分钟足够；
+    // 超时按“评审未完成”保留草稿并重试，不把慢调用当正文缺陷。
+    const reviewTimeout = LLM_TUNABLES.timeoutReview() ?? 360_000;
+    const callTimeout = request.timeout ?? (request.scenario === 'review' ? reviewTimeout : 600_000);
     const reasoningEffort = this.resolveReasoningEffort(request.scenario, request.metrics?.stepKey ?? undefined);
     const preserveThinking = request.metrics?.stepKey === 'idea_premise_pool_reselection';
 
@@ -1598,10 +1700,23 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           : {}),
       }, { signal });
 
+      // Hard-stop the provider stream when the request clock aborts. Some
+      // gateways keep the HTTP connection open without sending any chunk; the
+      // OpenAI SDK's own timeout is not reliable in that case, which let a
+      // single hung review outlive its 6-minute timeout and stall the whole
+      // 30-minute creation. Abort the stream and fail fast instead.
+      let aborted = false;
+      const abortStream = () => { aborted = true; try { (stream as any).controller?.abort(); } catch { /* best effort */ } };
+      if (signal) {
+        if (signal.aborted) abortStream();
+        else signal.addEventListener('abort', abortStream, { once: true });
+      }
       let content = '';
       let finishReason: string | undefined;
       let usage: ModelUsage | undefined;
+      try {
       for await (const chunk of stream) {
+        if (aborted || signal?.aborted) throw new Error('LLM 调用已中止（超时或取消）');
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) content += delta;
         const fr = chunk.choices?.[0]?.finish_reason;
@@ -1621,6 +1736,7 @@ export class RealLLMService implements ILLMService, OnApplicationBootstrap {
           };
         }
       }
+      } finally { signal?.removeEventListener('abort', abortStream); }
 
       return {
         content: content || '',
